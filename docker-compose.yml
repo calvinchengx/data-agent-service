@@ -1,0 +1,216 @@
+# data-agent-service — local stack on the emulator family.
+#
+# Every dependency is a PUBLISHED image, pinned (discipline rule 1: emulators
+# and OpenMetadata are used as-is — no build:, no forks). Only this repo's own
+# services are built from source.
+#
+# Issuer invariant (the family's one rule): entra advertises PUBLIC_ORIGIN and
+# every peer repeats the same issuer string verbatim.
+#
+#   make up       # full stack: identity + fabric warehouse + OpenMetadata + APIM
+#   make status   # is it usable?
+#   make down     # stop; `make clean` also drops volumes
+#
+# Memory: ~14 GB (SQL Server 2 GB cap, OpenSearch 1 GB, OM ~2 GB, fabric, apim).
+
+x-issuer: &issuer "https://entra-emulator:8443/6f89cf12-978b-4d23-ac18-9ef0c127cf87/v2.0"
+x-jwks:   &jwks   "https://entra-emulator:8443/6f89cf12-978b-4d23-ac18-9ef0c127cf87/discovery/v2.0/keys"
+
+services:
+  # ---------------------------------------------------------------- identity
+  entra-emulator:
+    image: ghcr.io/calvinchengx/entra-emulator:${ENTRA_EMULATOR_VERSION:-0.9.0}
+    environment:
+      ORIGIN_MODE: compat
+      PUBLIC_ORIGIN: "https://entra-emulator:8443"
+    ports:
+      - "${ENTRA_PORT:-8443}:8443"
+    volumes:
+      - entra-data:/app/data
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/entra-emulator", "healthcheck"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
+  keyvault-emulator:
+    image: ghcr.io/calvinchengx/azure-keyvault-emulator:${KEYVAULT_EMULATOR_VERSION:-0.7.0}
+    depends_on:
+      entra-emulator:
+        condition: service_healthy
+    ports:
+      - "${KEYVAULT_PORT:-8444}:8444"
+    environment:
+      KV_ENTRA_ISSUER: *issuer
+      KV_ENTRA_TLS_INSECURE: "true"
+      KV_DATA_DIR: ""
+      # Authorization handed to the emulator's own surface; ARM role
+      # assignments are not part of this stack's story.
+      KV_ARM_URL: ""
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/azure-keyvault-emulator", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  arm-emulator:
+    image: ghcr.io/calvinchengx/arm-emulator:${ARM_EMULATOR_VERSION:-0.4.1}
+    depends_on:
+      entra-emulator:
+        condition: service_healthy
+    ports:
+      - "${ARM_PORT:-8445}:8445"
+    environment:
+      ARM_ENTRA_ISSUER: *issuer
+      ARM_ENTRA_JWKS_URL: *jwks
+      ARM_ENTRA_TLS_INSECURE: "true"
+      ARM_TENANT_ID: "6f89cf12-978b-4d23-ac18-9ef0c127cf87"
+      ARM_SUBSCRIPTION_ID: "6082bfda-63d0-46f4-8272-ae9195139feb"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/arm-emulator", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ------------------------------------------------------------------ fabric
+  # The warehouse engine behind fabric-emulator's TDS front. Digest-pinned as
+  # fabric-emulator pins it; amd64-only upstream.
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest@sha256:ba4c8329f48fb8f02e1416be6a930ebfd71268caee78aa985f3af4315e457c89
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Str0ng!Passw0rd"
+      MSSQL_MEMORY_LIMIT_MB: "2048"
+    healthcheck:
+      test: ["CMD", "/opt/mssql-tools18/bin/sqlcmd", "-S", "localhost", "-U", "sa", "-P", "Str0ng!Passw0rd", "-C", "-Q", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+
+  fabric-emulator:
+    image: ghcr.io/calvinchengx/fabric-emulator:${FABRIC_EMULATOR_VERSION:-0.32.0}
+    depends_on:
+      entra-emulator:
+        condition: service_healthy
+      arm-emulator:
+        condition: service_healthy
+      sqlserver:
+        condition: service_healthy
+    ports:
+      - "${FABRIC_PORT:-9443}:9443"   # api.fabric + onelake + portal
+      - "${FABRIC_TDS_PORT:-1433}:1433" # warehouse T-SQL (FedAuth)
+    environment:
+      FABRIC_ENTRA_ISSUER: *issuer
+      FABRIC_ENTRA_JWKS_URL: *jwks
+      FABRIC_ENTRA_TLS_INSECURE: "true"
+      FABRIC_AKV_VAULT_HOST: "keyvault-emulator:8444"
+      FABRIC_ARM_URL: "https://arm-emulator:8445"
+      FABRIC_DATA_DIR: "${FABRIC_DATA_DIR-/data}"
+      FABRIC_TENANT_ADMINS: "${FABRIC_TENANT_ADMINS:-00d88624-f0d7-46f6-a641-6232c2608928}"
+      FABRIC_SQL_TDS_ADDR: ":1433"
+      FABRIC_WAREHOUSE_SQL_URL: "server=sqlserver;user id=sa;password=Str0ng!Passw0rd;encrypt=disable;dial timeout=90;connection timeout=90"
+    volumes:
+      - fabric-data:/data
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/fabric-emulator", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # ------------------------------------------------------------ openmetadata
+  # OpenMetadata 1.13.2 exactly as fabric-emulator's governance profile runs
+  # it (Postgres + OpenSearch; OpenSearch because semantic search needs it).
+  om-postgresql:
+    image: docker.getcollate.io/openmetadata/postgresql:1.13.2
+    command: "--work_mem=10MB"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - om-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: psql -U postgres -tAc 'select 1' -d openmetadata_db
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  om-opensearch:
+    image: opensearchproject/opensearch:3.4.0
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_JAVA_OPTS=-Xms1024m -Xmx1024m
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    volumes:
+      - om-search-data:/usr/share/opensearch/data
+    healthcheck:
+      test: "curl -s http://localhost:9200/_cluster/health?pretty | grep status | grep -qE 'green|yellow' || exit 1"
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  om-migrate:
+    image: docker.getcollate.io/openmetadata/server:1.13.2
+    command: "./bootstrap/openmetadata-ops.sh migrate"
+    environment: &om-env
+      DB_HOST: om-postgresql
+      DB_PORT: "5432"
+      DB_SCHEME: postgresql
+      DB_DRIVER_CLASS: org.postgresql.Driver
+      DB_PARAMS: "allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC"
+      SEARCH_TYPE: opensearch
+      ELASTICSEARCH_HOST: om-opensearch
+    depends_on:
+      om-postgresql:
+        condition: service_healthy
+      om-opensearch:
+        condition: service_healthy
+
+  openmetadata:
+    image: docker.getcollate.io/openmetadata/server:1.13.2
+    ports:
+      - "${OM_PORT:-8585}:8585"
+    environment: *om-env
+    depends_on:
+      om-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8586/healthcheck"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  # -------------------------------------------------------------------- apim
+  # Container listens on 8445 (arm's port); host side moves to 8446 as the
+  # family BOM does.
+  apim-emulator:
+    image: ghcr.io/calvinchengx/azure-apim-emulator:${APIM_EMULATOR_VERSION:-0.3.0}
+    depends_on:
+      entra-emulator:
+        condition: service_healthy
+    ports:
+      - "${APIM_PORT:-8446}:8445"
+    environment:
+      APIM_ENTRA_ISSUER: *issuer
+      APIM_ENTRA_JWKS_URL: *jwks
+      APIM_ENTRA_TLS_INSECURE: "true"
+      APIM_DATA_DIR: "${APIM_DATA_DIR-/data}"
+    volumes:
+      - apim-data:/data
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/azure-apim-emulator", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ------------------------------------------------- data-agent-service (ours)
+  # Added in Phase 4. Placeholder kept out until there is something to run.
+
+volumes:
+  entra-data:
+  fabric-data:
+  om-db-data:
+  om-search-data:
+  apim-data:
