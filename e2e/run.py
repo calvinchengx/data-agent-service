@@ -550,9 +550,59 @@ def phase11() -> None:
           f"{len(rows)} rows, none claiming Azure" if not claims_azure else claims_azure[0][:80])
 
 
+# --------------------------------------------------------------- phase 12 --
+def phase12() -> None:
+    """The model call, governed like every other call.
+
+    Witnessed against a stub that reports real token usage, so the gateway's
+    cost controls can be proved without a model credential — a check that only
+    runs where someone is paying is a check that does not run.
+    """
+    from agent import identity
+
+    gw = GW
+    tok = identity.token_for("carol@entraemulator.dev")
+
+    def call(path: str, token: str):
+        return c.http("POST", gw + path,
+                      headers={"Content-Type": "application/json", "Authorization": "Bearer " + token},
+                      json_body={"model": "stub", "messages": [{"role": "user", "content": "hi"}]})
+
+    st, hd, _ = call("/llm/openai/v1/chat/completions", tok)
+    headers = {k.lower(): v for k, v in hd.items()}
+    consumed = int(headers.get("x-tokens-consumed") or 0)
+    check("phase12", "the model route is published and its spend is counted",
+          st == 200 and consumed > 0,
+          f"consumed {consumed}, remaining {headers.get('x-tokens-remaining')}")
+
+    st, hd, _ = call("/llm/anthropic/v1/messages", tok)
+    headers = {k.lower(): v for k, v in hd.items()}
+    check("phase12", "a provider the gateway cannot account for is counted as zero, not guessed",
+          st == 200 and int(headers.get("x-tokens-consumed") or -1) == 0,
+          "Anthropic's usage field names are not the ones this gateway reads "
+          "(docs/upstream-issues.md #11)")
+
+    # A ceiling nobody has watched refuse a request is a comment in a policy.
+    fresh = identity.token_for("bob@entraemulator.dev")
+    served = throttled = 0
+    retry_after = ""
+    for _ in range(16):
+        st, hd, _ = call("/llm/openai/v1/chat/completions", fresh)
+        if st == 429:
+            throttled += 1
+            retry_after = retry_after or {k.lower(): v for k, v in hd.items()}.get("retry-after", "")
+        else:
+            served += 1
+    budget = int(c.CFG.get("DAS_LLM_TOKENS_PER_MINUTE", "2000"))
+    per_call = 200
+    check("phase12", "the token ceiling refuses the caller who exceeds it",
+          throttled > 0 and served == budget // per_call,
+          f"{served} served then {throttled} refused, Retry-After {retry_after}")
+
+
 PHASES = {"phase1": phase1, "phase2": phase2, "phase3": phase3, "phase4": phase4,
           "phase5": phase5, "phase6": phase6, "phase7": phase7, "phase8": phase8,
-          "phase9": phase9, "phase10": phase10, "phase11": phase11}
+          "phase9": phase9, "phase10": phase10, "phase11": phase11, "phase12": phase12}
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()

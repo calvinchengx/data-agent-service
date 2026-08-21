@@ -45,6 +45,9 @@ AUDIENCE = c.CFG["DAS_AGENT_AUDIENCE"]
 SCOPE = c.CFG.get("DAS_REQUIRED_SCOPE", "access_as_user")
 RATE_CALLS = c.CFG.get("DAS_RATE_CALLS", "60")
 RATE_WINDOW = c.CFG.get("DAS_RATE_WINDOW_S", "60")
+LLM_BACKEND = c.CFG.get("DAS_LLM_BACKEND", "http://llm-stub:8095")
+LLM_TPM = c.CFG.get("DAS_LLM_TOKENS_PER_MINUTE", "2000")
+LLM_CALLS = c.CFG.get("DAS_LLM_CALLS_PER_MINUTE", "60")
 OPENID_CONFIG = c.CFG.get("DAS_OPENID_CONFIG") or f"{c.AUTHORITY}/v2.0/.well-known/openid-configuration"
 # Gateway-side token validation. TRUE is the production shape and the default.
 # The local stack sets it false because the pinned emulator's validate-jwt can
@@ -185,6 +188,46 @@ def set_rate_limit(calls: int) -> None:
     c.log(f"rate limit now {calls} calls / {RATE_WINDOW}s")
 
 
+def publish_llm() -> None:
+    """The model call, through the gateway.
+
+    Putting the model behind the same gateway as the data is what turns "the
+    agent is expensive" into a number somebody owns: the spend is attributed to
+    the caller, capped per caller, and recorded next to the queries that caused
+    it. Two controls, because they answer different questions and have
+    different reach:
+
+      * `rate-limit-by-key` caps REQUESTS per caller. It works whatever the
+        provider is, because it counts calls rather than reading the answer.
+      * `llm-token-limit` caps TOKENS per caller, and `llm-emit-token-metric`
+        records what was spent. Both read the provider's own `usage` object —
+        which means they work where that object has the field names the gateway
+        looks for. See docs/09-llm-governance.md: this is not the same for every
+        provider, and the difference decides which control you actually get.
+    """
+    caller = ("@(context.Request.Headers.GetValueOrDefault(&quot;Authorization&quot;,"
+              "&quot;anonymous&quot;))")
+    put_api("llm", "Model", "llm", LLM_BACKEND, mcp_mode=None)
+    put_operation("llm", "messages", "Messages", "POST", "/*",
+                  "The model API, proxied so spend is capped and attributed per caller.")
+    put_policy("apis/llm", f"""<policies>
+  <inbound>
+    <base />
+    <rate-limit-by-key calls="{LLM_CALLS}" renewal-period="60" counter-key="{caller}" />
+    <llm-token-limit counter-key="{caller}" tokens-per-minute="{LLM_TPM}"
+        tokens-consumed-header-name="x-tokens-consumed"
+        remaining-tokens-header-name="x-tokens-remaining" />
+    <llm-emit-token-metric namespace="data-agent-service">
+      <dimension name="API" value="@(context.Api.Name)" />
+    </llm-emit-token-metric>
+  </inbound>
+  <backend><base /></backend>
+  <outbound><base /></outbound>
+  <on-error><base /></on-error>
+</policies>""")
+    c.log(f"llm: {LLM_BACKEND} — {LLM_CALLS} calls/min and {LLM_TPM} tokens/min per caller")
+
+
 def publish_discovery() -> None:
     """Serve the OAuth metadata at the STANDARD location on the gateway.
 
@@ -282,11 +325,12 @@ def main() -> dict:
     c.log("om: passthrough with read-only bot swap")
 
     publish_discovery()
+    publish_llm()
 
     out = {"gateway": c.CFG["DAS_APIM_BASE"], "warehouse_mcp": "/warehouse/mcp",
            "discovery": "/.well-known/oauth-protected-resource",
            "warehouse_rest": "/warehouse-rest",
-           "om_mcp": "/om/mcp", "gateway_validates_jwt": VALIDATE_JWT,
+           "om_mcp": "/om/mcp", "llm": "/llm", "gateway_validates_jwt": VALIDATE_JWT,
            "om_subscription_required": not VALIDATE_JWT}
     if not VALIDATE_JWT:
         out["om_subscription_key"] = om_subscription_key()

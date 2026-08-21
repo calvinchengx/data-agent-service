@@ -31,6 +31,8 @@ same check has been watched passing against a real tenant.
 | Two executors, one contract | 🟢 | `services.conformance.run`, phase9 | not yet |
 | Any MCP client can discover how to authenticate | 🟢 | `e2e.clients.run`, phase10 | not yet |
 | Reference SDK clients (Python, TypeScript) drive it | 🟢 | `e2e.clients.run` | not yet |
+| Model spend capped and attributed per caller | 🟢 request rate + token ceiling | `e2e.run` phase12, against a stub | not yet |
+| Token governance for an Anthropic-shaped API | 🔴 counted as zero (upstream #11) | phase12 holds the constraint | not yet — unverified against real APIM |
 | No development-only code path | 🟢 | `scripts/check_prod_paths.py --strict` | n/a — the check is the claim |
 
 Legend: 🟢 witnessed · 🟡 partially · 🟠 deliberately off here · 🔴 blocked upstream
@@ -45,6 +47,11 @@ are recorded with a repro in [upstream-issues.md](upstream-issues.md):
   it issued itself (TLS trust of its own certificate). The federated credential
   is still created, so production runs the secretless path with no code change;
   locally the executor falls back to a Key Vault secret.
+* **#11 — token accounting for non-OpenAI providers.** The gateway reads
+  `prompt_tokens`/`completion_tokens`; Anthropic reports
+  `input_tokens`/`output_tokens`, and is therefore counted as zero. Request-rate
+  governance still applies, and the agent meters the model's own reported usage;
+  see [09-llm-governance.md](09-llm-governance.md).
 * **#7 — gateway-side token validation.** The pinned apim-emulator's
   `validate-jwt` accepts only ARM-audience tokens regardless of the policy's
   declared audience. Real APIM does not have this limitation, so

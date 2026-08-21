@@ -100,12 +100,25 @@ def build_toolbox(token: str, *, om: bool = True) -> Toolbox:
     return Toolbox(servers)
 
 
+def model_client() -> Any:
+    """The model, reached directly or through the gateway.
+
+    `DAS_LLM_BASE_URL` puts the model call behind the same gateway as the data,
+    which is what makes spend attributable and capped per caller rather than
+    per deployment. The SDK takes a base URL, so this is configuration rather
+    than a code path — see docs/09-llm-governance.md for what each provider's
+    usage reporting lets the gateway actually enforce.
+    """
+    base = os.environ.get("DAS_LLM_BASE_URL", "").strip()
+    return anthropic.Anthropic(base_url=base) if base else anthropic.Anthropic()
+
+
 def ask(question: str, token: str, *, om: bool = True, model: str = DEFAULT_MODEL,
         effort: str = DEFAULT_EFFORT, on_step: Callable[[str], None] | None = None,
         client: Any = None) -> Answer:
     toolbox = build_toolbox(token, om=om)
     tools = toolbox.connect()
-    client = client or anthropic.Anthropic()
+    client = client or model_client()
     messages: list[dict] = [{"role": "user", "content": question}]
     calls: list[ToolCall] = []
     started = time.time()

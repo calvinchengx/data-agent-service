@@ -216,6 +216,23 @@ services:
       timeout: 3s
       retries: 5
 
+  # A stand-in for a model API, so the gateway's cost controls can be
+  # witnessed without a model credential. Never in the service's request path:
+  # the `llm` API points here only when DAS_LLM_BACKEND says so.
+  llm-stub:
+    image: python:3.12-slim
+    command: ["python", "/app/main.py"]
+    volumes:
+      - ./services/llm-stub:/app:ro
+    environment:
+      PORT: "8095"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8095/health',timeout=5).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
   # ------------------------------------------------------------- tools (ours)
   # Seeds, e2e, evals, load — run INSIDE the network so they reach every
   # dependency the way the service does:  docker compose run --rm tools <cmd>
