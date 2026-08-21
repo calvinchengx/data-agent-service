@@ -119,12 +119,25 @@ func matchOne(value, pattern string) bool {
 
 // ---------------------------------------------------------------- roles --
 
-// RoleResolver answers "what role does this caller hold": the token's claim
-// when it carries one, the directory when it does not — the same fallback a
-// real deployment needs when role or group claims overflow.
+// RoleResolver answers "what role does this caller hold". WHICH PART of the
+// directory is asked is configuration (`DAS_ROLE_SOURCE`):
+//
+//	appRole  application role assignments on this API;
+//	group    security-group membership mapped by `DAS_GROUP_ROLE_MAP` — what an
+//	         identity-governance tool can actually provision;
+//	both     the union, for a migration between the two.
+//
+// A token carrying the claim is authoritative and costs nothing to read; where
+// it is absent (overage in real Entra, and this tenant's delegated tokens —
+// docs/upstream-issues.md #9) Graph is asked and the answer cached. Ported from
+// services/warehouse-query-py/access.py; tests/role_source_test.go mirrors that
+// module's tests, because a divergence here is invisible to the conformance
+// suite until a persona's outcome changes.
 type RoleResolver struct {
 	graphURL  string
 	appID     string
+	source    string
+	groupMap  map[string]string
 	tokenFor  func(string) (string, error)
 	ttl       time.Duration
 	mu        sync.Mutex
@@ -138,13 +151,60 @@ type cachedRoles struct {
 }
 
 func NewRoleResolver(tokenFor func(string) (string, error)) *RoleResolver {
+	source := strings.TrimSpace(os.Getenv("DAS_ROLE_SOURCE"))
+	if source == "" {
+		source = "appRole"
+	}
+	groupMap := map[string]string{}
+	if raw := os.Getenv("DAS_GROUP_ROLE_MAP"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &groupMap); err != nil {
+			slog.Warn("DAS_GROUP_ROLE_MAP is not valid JSON; no group maps to a role", "err", err)
+		}
+	}
 	return &RoleResolver{
 		graphURL: graphURL(),
 		appID:    os.Getenv("DAS_MIDDLE_TIER_CLIENT_ID"),
+		source:   source,
+		groupMap: groupMap,
 		tokenFor: tokenFor,
 		ttl:      5 * time.Minute,
 		cache:    map[string]cachedRoles{},
 	}
+}
+
+func (r *RoleResolver) uses(source string) bool {
+	return r.source == source || r.source == "both"
+}
+
+// mapGroups turns group identities into role names. Both the id and the
+// display name are accepted as keys: a token carries ids, an operator writes
+// names, and making them choose would be a footgun for no benefit.
+func (r *RoleResolver) mapGroups(groups []any) []string {
+	set := map[string]bool{}
+	for _, group := range groups {
+		var keys []string
+		switch v := group.(type) {
+		case string:
+			keys = []string{v}
+		case map[string]any:
+			for _, field := range []string{"id", "displayName"} {
+				if s, ok := v[field].(string); ok && s != "" {
+					keys = append(keys, s)
+				}
+			}
+		}
+		for _, key := range keys {
+			if role, ok := r.groupMap[key]; ok {
+				set[role] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for role := range set {
+		out = append(out, role)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func graphURL() string {
@@ -165,23 +225,32 @@ func graphURL() string {
 }
 
 func (r *RoleResolver) RolesFor(claims map[string]any) []string {
-	if raw, ok := claims["roles"].([]any); ok && len(raw) > 0 {
-		out := make([]string, 0, len(raw))
+	var claimed []string
+	if raw, ok := claims["roles"].([]any); ok {
 		for _, v := range raw {
 			if s, ok := v.(string); ok {
-				out = append(out, s)
+				claimed = append(claimed, s)
 			}
 		}
-		if len(out) > 0 {
-			return out
+	}
+	if len(claimed) > 0 && r.uses("appRole") {
+		return claimed
+	}
+	if r.uses("group") {
+		// A `groups` claim carries object ids, and is omitted entirely once a
+		// user is in too many groups — exactly when the lookup is needed most.
+		if raw, ok := claims["groups"].([]any); ok {
+			if mapped := r.mapGroups(raw); len(mapped) > 0 {
+				return mapped
+			}
 		}
 	}
 	oid, _ := claims["oid"].(string)
 	if oid == "" {
 		oid, _ = claims["sub"].(string)
 	}
-	if oid == "" || r.appID == "" {
-		return nil
+	if oid == "" || r.graphURL == "" {
+		return claimed
 	}
 	r.mu.Lock()
 	hit, ok := r.cache[oid]
@@ -200,6 +269,9 @@ func (r *RoleResolver) RolesFor(claims map[string]any) []string {
 	r.mu.Lock()
 	r.cache[oid] = cachedRoles{at: time.Now(), roles: roles}
 	r.mu.Unlock()
+	if len(roles) == 0 {
+		return claimed
+	}
 	return roles
 }
 
@@ -207,6 +279,29 @@ func (r *RoleResolver) lookup(oid string) ([]string, error) {
 	token, err := r.tokenFor("https://graph.microsoft.com")
 	if err != nil {
 		return nil, err
+	}
+	set := map[string]bool{}
+	if r.uses("group") {
+		var membership struct {
+			Value []map[string]any `json:"value"`
+		}
+		if err := getJSON(r.graphURL+"/users/"+oid+"/memberOf", token, &membership); err != nil {
+			return nil, err
+		}
+		groups := make([]any, 0, len(membership.Value))
+		for _, entry := range membership.Value {
+			kind, _ := entry["@odata.type"].(string)
+			_, named := entry["displayName"]
+			if strings.HasSuffix(kind, "group") || named {
+				groups = append(groups, any(entry))
+			}
+		}
+		for _, role := range r.mapGroups(groups) {
+			set[role] = true
+		}
+	}
+	if !r.uses("appRole") || r.appID == "" {
+		return sortedKeys(set), nil
 	}
 	if len(r.roleNames) == 0 {
 		var app struct {
@@ -234,7 +329,6 @@ func (r *RoleResolver) lookup(oid string) ([]string, error) {
 		token, &assigned); err != nil {
 		return nil, err
 	}
-	set := map[string]bool{}
 	for _, a := range assigned.Value {
 		if a.PrincipalID == oid {
 			if name, ok := r.roleNames[a.AppRoleID]; ok {
@@ -242,12 +336,16 @@ func (r *RoleResolver) lookup(oid string) ([]string, error) {
 			}
 		}
 	}
+	return sortedKeys(set), nil
+}
+
+func sortedKeys(set map[string]bool) []string {
 	out := make([]string, 0, len(set))
 	for name := range set {
 		out = append(out, name)
 	}
 	sort.Strings(out)
-	return out, nil
+	return out
 }
 
 func deniedAccess(format string, args ...any) error { return fmt.Errorf(format, args...) }

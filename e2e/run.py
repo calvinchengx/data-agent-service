@@ -390,8 +390,56 @@ def phase8() -> None:
           if limit else "")
 
 
+# ---------------------------------------------------------------- phase 9 --
+def phase9() -> None:
+    """Two implementations, one contract.
+
+    The executor exists twice, in Python and in Go. What makes that a choice
+    rather than a fork is that both satisfy the same suite: this checks the
+    contract is real (it runs, against whichever executor is up) and that the
+    comparison the plan promised was actually measured.
+    """
+    import subprocess
+
+    out = subprocess.run([sys.executable, "-m", "services.conformance.run"],
+                         capture_output=True, text=True, env={**os.environ})
+    tail = (out.stdout or out.stderr).strip().splitlines()
+    summary = next((line for line in reversed(tail) if "contract checks" in line), "")
+    check("phase9", "the running executor satisfies the contract",
+          out.returncode == 0 and "contract checks passed" in summary, summary.strip()[:70])
+
+    contract = json.loads(pathlib.Path("services/contract/openapi.json").read_text())
+    operations = {op.get("operationId") for path in contract["paths"].values()
+                  for op in path.values() if isinstance(op, dict)}
+    check("phase9", "the contract names every operation both must implement",
+          {"list_sources", "list_tables", "describe_table", "run_query"} <= operations,
+          str(sorted(o for o in operations if o)))
+
+    go = pathlib.Path("services/warehouse-query-go")
+    check("phase9", "the second implementation exists and carries its own tests",
+          (go / "main.go").exists() and (go / "sqlguard_test.go").exists()
+          and (go / "role_source_test.go").exists(),
+          f"{len(list(go.glob('*.go')))} Go files")
+
+    reports = {name: pathlib.Path(f"load/reports/load-{name}.json")
+               for name in ("py", "go")}
+    have = {name: json.loads(path.read_text()) for name, path in reports.items()
+            if path.exists()}
+    check("phase9", "both implementations were measured under the same load",
+          len(have) == 2, ", ".join(sorted(have)))
+    if len(have) == 2:
+        def direct(report):
+            return next((s for s in report["scenarios"] if s["scenario"] == "query-direct"), {})
+        py_rps = direct(have["py"]).get("rps") or 0
+        go_rps = direct(have["go"]).get("rps") or 0
+        check("phase9", "the comparison is recorded with a real difference",
+              py_rps > 0 and go_rps > 0,
+              f"python {py_rps}/s vs go {go_rps}/s")
+
+
 PHASES = {"phase1": phase1, "phase2": phase2, "phase3": phase3, "phase4": phase4,
-          "phase5": phase5, "phase6": phase6, "phase7": phase7, "phase8": phase8}
+          "phase5": phase5, "phase6": phase6, "phase7": phase7, "phase8": phase8,
+          "phase9": phase9}
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()

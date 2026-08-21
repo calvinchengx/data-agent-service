@@ -50,3 +50,16 @@ model reads.
 
 The executor holds no secret in its environment: its managed identity reads
 what it needs from Key Vault.
+
+
+## Two executors
+
+`DAS_EXECUTOR=py|go` chooses the implementation compose builds. Both satisfy
+`services/contract/openapi.json`, proved by `services/conformance/run.py` (21
+checks), so the gateway, the agent and the evals cannot tell them apart.
+
+Go is ~8× the throughput at a thirtieth of the image size; Python is where new
+behaviour is easiest to write. The measurements and the reasoning are in
+[adr/0001-two-executors.md](adr/0001-two-executors.md) — including the finding
+that the gateway looks free in front of the slow executor and costs 28% of
+throughput in front of the fast one.
