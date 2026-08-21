@@ -357,37 +357,54 @@ def phase7() -> None:
 def phase8() -> None:
     """The load report, read rather than re-run.
 
-    `make test` must stay quick, so this asserts against the most recent
-    report `make load` wrote instead of driving k6 itself: the thresholds are
-    already gates inside that run, and what belongs here is that the run
-    happened, met them, and measured the things the plan claims it measures.
+    `make test` must stay quick, so this asserts against what `make load`
+    wrote instead of driving k6 itself: the thresholds are already gates inside
+    that run, and what belongs here is that the run happened, met them, and
+    measured the things the plan claims it measures.
+
+    Reports are searched per SCENARIO, newest first, because a partial run
+    (`--only query`, as the py-vs-go comparison does) writes a newer report
+    that says nothing about the scenarios it skipped. Treating that as a
+    failure would punish a narrower measurement for existing.
     """
-    reports = sorted(pathlib.Path("load/reports").glob("load-*.json"))
+    reports = sorted(pathlib.Path("load/reports").glob("load-*.json"),
+                     key=lambda f: f.stat().st_mtime, reverse=True)
     if not reports:
         check("phase8", "a load report exists", False, "run `make load` first")
         return
-    report = json.loads(reports[-1].read_text())
-    scenarios = {s["scenario"]: s for s in report.get("scenarios", [])}
 
+    def newest_with(scenario: str):
+        for path in reports:
+            data = json.loads(path.read_text())
+            for entry in data.get("scenarios", []):
+                if entry["scenario"] == scenario:
+                    return entry, data, path.name
+        return None, None, ""
+
+    query, report, source = newest_with("query")
+    check("phase8", "the gateway path sustains load without errors",
+          bool(query) and (query.get("http_failed_rate") or 0) < 0.01
+          and (query.get("refusal_rate") or 0) < 0.01,
+          f"{query['requests']} requests at {query['rps']}/s, p95 {query['p95_ms']}ms ({source})"
+          if query else "no query scenario in any report")
+
+    every = [entry for path in reports
+             for entry in json.loads(path.read_text()).get("scenarios", [])]
     check("phase8", "every load scenario met its thresholds",
-          bool(scenarios) and all(s["passed"] for s in scenarios.values()),
-          ", ".join(sorted(scenarios)))
+          bool(every) and all(entry["passed"] for entry in every),
+          f"{len(every)} scenario runs across {len(reports)} reports")
 
-    query = scenarios.get("query")
-    if query:
-        check("phase8", "the gateway path sustains load without errors",
-              (query.get("http_failed_rate") or 0) < 0.01 and (query.get("refusal_rate") or 0) < 0.01,
-              f"{query['requests']} requests at {query['rps']}/s, p95 {query['p95_ms']}ms")
-
-    cost = report.get("gateway_cost")
+    cost = (report or {}).get("gateway_cost")
     check("phase8", "the gateway's cost is measured, not assumed", bool(cost),
-          f"p95 +{cost['p95_ms']}ms, throughput {cost['rps_change_pct']}%" if cost else "")
+          f"p95 {cost['p95_ms']:+}ms, throughput {cost['rps_change_pct']}% ({source})"
+          if cost else "")
 
-    limit = scenarios.get("ratelimit")
+    limit, _, limit_source = newest_with("ratelimit")
     check("phase8", "the rate limit refuses the excess",
           bool(limit) and (limit.get("throttled") or 0) > 0,
-          f"{limit.get('throttled')} of {(limit.get('served') or 0) + (limit.get('throttled') or 0)} throttled"
-          if limit else "")
+          f"{limit.get('throttled')} of "
+          f"{(limit.get('served') or 0) + (limit.get('throttled') or 0)} throttled ({limit_source})"
+          if limit else "no ratelimit scenario in any report")
 
 
 # ---------------------------------------------------------------- phase 9 --
