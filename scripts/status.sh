@@ -15,9 +15,9 @@ probe() { # name url expect-substring
 T=6f89cf12-978b-4d23-ac18-9ef0c127cf87
 probe entra     "https://localhost:${ENTRA_PORT:-8443}/$T/v2.0/.well-known/openid-configuration" '"issuer"'
 probe keyvault  "https://localhost:${KEYVAULT_PORT:-8444}/secrets?api-version=7.5" 'Bearer'
-probe arm       "https://localhost:${ARM_PORT:-8445}/subscriptions?api-version=2022-12-01" '.'
+probe arm       "http://localhost:${ARM_PORT:-8445}/health" '"ok"'
 probe fabric    "https://localhost:${FABRIC_PORT:-9443}/v1/workspaces" '.'
-probe apim      "http://localhost:${APIM_PORT:-8446}/health" '.'
+probe apim      "https://localhost:${APIM_PORT:-8446}/health" '"ok"'
 probe openmetadata "http://localhost:${OM_PORT:-8585}/api/v1/system/version" '"version"'
 
 if command -v nc >/dev/null 2>&1; then

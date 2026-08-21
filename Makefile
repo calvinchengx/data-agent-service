@@ -16,7 +16,7 @@ ifeq ($(OS),Windows_NT)
   .SHELLFLAGS := -c
 endif
 
-PY ?= $(shell for c in python3 python py; do if "$$c" -c '' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
+PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
 .PHONY: help doctor up down restart clean status logs ps pull seed test eval load ask
 

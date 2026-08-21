@@ -14,7 +14,7 @@ done
 
 printf '\npython (harnesses, seeds, agent)\n'
 PY=""
-for c in python3 python py; do
+for c in python3.13 python3.12 python3 python py; do
   if "$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then PY="$c"; break; fi
 done
 if [ -n "$PY" ]; then ok "$PY" "$("$PY" -c 'import sys; print(sys.version.split()[0])')"; else bad "python" "need 3.12+"; fi

@@ -21,7 +21,7 @@ make status
 | arm-emulator | https://localhost:8445 | capacities |
 | fabric-emulator | https://localhost:9443 · TDS localhost:1433 | warehouse SQL via Entra FedAuth |
 | OpenMetadata | http://localhost:8585 | admin / admin (1.13.2) |
-| apim-emulator | http(s)://localhost:8446 | management + gateway |
+| apim-emulator | https://localhost:8446 | management + gateway |
 
 `make clean` resets volumes (OpenMetadata DB, fabric state, apim state).
 
