@@ -60,7 +60,7 @@ LOYALTY = ["bronze", "silver", "gold"]
 DEPARTMENTS = {"Electronics": ["Audio", "Computing", "Phones"],
                "Home": ["Kitchen", "Furniture"], "Sport": ["Outdoor", "Fitness"]}
 PRODUCT_SEGMENT = ["Core", "Peripheral", "Unallocated"]
-CHANNEL_SYSTEM = ["pos", "web"]
+CHANNEL_SYSTEM = ["POS", "WEB"]
 STATUS = ["settled", "settled", "settled", "cancelled", "pending"]
 
 START, END = dt.date(2024, 4, 1), dt.date(2026, 3, 31)  # two full fiscal years
@@ -136,7 +136,7 @@ def generate(n_customers=400, n_products=40, n_orders=6000, seed=20260822) -> di
         amount_usd = (amount * rate).quantize(decimal.Decimal("0.0001"))
         status = rnd.choice(STATUS)
         party = party_by_customer[c[0]]
-        channel = "pos" if (party[3] and (not party[4] or rnd.random() < 0.6)) else "web"
+        channel = "POS" if (party[3] and (not party[4] or rnd.random() < 0.6)) else "WEB"
         orders.append((f"O{i+1:07d}", c[0], p[0], od.isoformat(), channel, status, cur, qty,
                        price, amount, rate, carried, amount_usd))
         sales.append((party[0], f"S{i+1:07d}", p[0], od.isoformat(), channel,
@@ -157,10 +157,10 @@ def generate(n_customers=400, n_products=40, n_orders=6000, seed=20260822) -> di
         pt = party_by_key[party]
         key = (fy, f"FY{fy}", fq, f"FY{fy}-Q{fq}", channel, p[3], p[4], pt[6], pt[5])
         row = summary.setdefault(key, [0, 0, decimal.Decimal(0), decimal.Decimal(0), decimal.Decimal(0)])
+        row[0] += 1  # sale_lines counts every line, cancelled included (as the product does)
         if cancelled:
             row[3] += amount_usd
         else:
-            row[0] += 1
             row[1] += qty
             row[2] += amount_usd
             if carried:
