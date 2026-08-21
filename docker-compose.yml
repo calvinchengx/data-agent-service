@@ -238,6 +238,10 @@ services:
   warehouse-query:
     build:
       context: .
+      # DAS_EXECUTOR=py|go picks the implementation. Both satisfy the same
+      # contract (services/contract/openapi.json), proved by the same suite
+      # (services/conformance/run.py), so everything above this service is
+      # unchanged by the choice.
       dockerfile: services/warehouse-query-${DAS_EXECUTOR:-py}/Dockerfile
     depends_on:
       entra-emulator:
