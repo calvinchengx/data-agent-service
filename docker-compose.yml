@@ -258,7 +258,11 @@ services:
       # platform sets in Azure.
       IDENTITY_ENDPOINT: "https://entra-emulator:8443/msi/token"
       IDENTITY_HEADER: "${DAS_MI_HEADER:-managed-identity-secret}"
-      DAS_PUBLIC_BASE_URL: "${DAS_APIM_BASE:-https://apim-emulator:8445}/warehouse"
+      # The RESOURCE, as a client sees it, is the MCP endpoint on the gateway.
+      # RFC 9728 §3.1 puts the well-known segment between the host and that
+      # path, so this is what makes the 401 challenge name a URL the gateway
+      # actually serves (seed/apim.py publishes the scoped operation).
+      DAS_PUBLIC_BASE_URL: "${DAS_APIM_BASE:-https://apim-emulator:8445}/warehouse/mcp"
     healthcheck:
       test: ["CMD", "python", "-c",
              "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8090/health',timeout=5).status==200 else 1)"]

@@ -216,6 +216,19 @@ def conform(base: str) -> None:
     check("protected-resource metadata is served (RFC 9728)",
           meta.get("resource") == c.CFG["DAS_AGENT_AUDIENCE"] and bool(meta.get("authorization_servers")),
           meta.get("resource", ""))
+    # Every field a client reads is part of the contract, not decoration: this
+    # one tells a client not to attempt dynamic registration, and an executor
+    # that omits it sends that client down a path with no ending. Pinned here
+    # because it was found missing from one implementation and present in the
+    # other, which is exactly the drift this file exists to catch.
+    check("the metadata states the scope and that registration is not available",
+          meta.get("scopes_supported") == [f"{c.CFG['DAS_AGENT_AUDIENCE']}/"
+                                           f"{c.CFG.get('DAS_REQUIRED_SCOPE', 'access_as_user')}"]
+          and meta.get("client_registration_required") is False,
+          f"{meta.get('scopes_supported')} registration={meta.get('client_registration_required')}")
+    st, _, raw = c.http("GET", ex.base + "/.well-known/oauth-authorization-server")
+    check("the resource server does not restate the authorization server's metadata",
+          st in (404, 405), f"status {st}")
 
 
 def main() -> int:

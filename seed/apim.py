@@ -185,6 +185,60 @@ def set_rate_limit(calls: int) -> None:
     c.log(f"rate limit now {calls} calls / {RATE_WINDOW}s")
 
 
+def publish_discovery() -> None:
+    """Serve the OAuth metadata at the STANDARD location on the gateway.
+
+    An MCP client that meets a 401 reads `WWW-Authenticate`, follows
+    `resource_metadata`, and expects to find the document at the resource's own
+    origin (RFC 9728). The resource, as far as any client is concerned, is the
+    gateway — so the documents have to be reachable there, not only on the
+    service behind it. They are PROXIED rather than restated in a policy, so
+    there is one definition of what this API's authorization looks like.
+
+    Both spellings are published: the plain `/.well-known/oauth-protected-
+    resource`, and the path-aware form that carries the resource's own path,
+    which newer clients construct by inserting the well-known segment after the
+    host.
+    """
+    put_api("discovery", "OAuth discovery", ".well-known",
+            EXECUTOR.rstrip("/") + "/.well-known", mcp_mode=None)
+    put_operation("discovery", "protected-resource", "Protected resource", "GET",
+                  "/oauth-protected-resource",
+                  "OAuth metadata for the governed data API; no credential required.")
+    # The AUTHORIZATION SERVER's metadata is deliberately not republished here.
+    # A client follows `authorization_servers` from the document above and asks
+    # the issuer directly, which is both the RFC 9728 flow and the only version
+    # that cannot go stale. (The gateway also answers this path itself — see
+    # docs/upstream-issues.md #10 — so publishing ours would be shadowed.)
+    for op, template, target in (
+            ("protected-resource-scoped", "/oauth-protected-resource/warehouse/mcp",
+             "/oauth-protected-resource"),
+            ("protected-resource-scoped-om", "/oauth-protected-resource/om/mcp",
+             "/oauth-protected-resource")):
+        put_operation("discovery", op, "Protected resource (scoped)", "GET", template,
+                      "The same document, at the path-aware location a client may construct.")
+        put_policy(f"apis/discovery/operations/{op}",
+                   f"""<policies>
+  <inbound><base />
+    <!-- The path carries the resource being asked about; the document is the
+         same one, so the suffix is stripped rather than proxied through. -->
+    <rewrite-uri template="{target}" />
+  </inbound>
+  <backend><base /></backend>
+  <outbound><base /></outbound>
+  <on-error><base /></on-error>
+</policies>""")
+    # Discovery must be readable WITHOUT a credential: a client that has to
+    # authenticate to learn how to authenticate cannot start.
+    put_policy("apis/discovery", """<policies>
+  <inbound><base /></inbound>
+  <backend><base /></backend>
+  <outbound><base /></outbound>
+  <on-error><base /></on-error>
+</policies>""")
+    c.log("discovery: OAuth metadata published at the gateway's well-known location")
+
+
 def main() -> dict:
     # 1. the executor's own MCP server, proxied
     put_api("warehouse", "Governed data query", "warehouse", EXECUTOR_MCP, mcp_mode="passthrough")
@@ -227,7 +281,10 @@ def main() -> dict:
     put_policy("apis/om", jwt_policy(OM_SWAP))
     c.log("om: passthrough with read-only bot swap")
 
+    publish_discovery()
+
     out = {"gateway": c.CFG["DAS_APIM_BASE"], "warehouse_mcp": "/warehouse/mcp",
+           "discovery": "/.well-known/oauth-protected-resource",
            "warehouse_rest": "/warehouse-rest",
            "om_mcp": "/om/mcp", "gateway_validates_jwt": VALIDATE_JWT,
            "om_subscription_required": not VALIDATE_JWT}

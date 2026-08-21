@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -61,7 +62,6 @@ func main() {
 	mux.HandleFunc("POST /mcp", handleMCP)
 	mux.HandleFunc("GET /mcp", handleMCPStream)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", handleProtectedResource)
-	mux.HandleFunc("GET /.well-known/oauth-authorization-server", handleAuthServer)
 
 	addr := ":" + envOr("DAS_PORT", "8090")
 	slog.Info("warehouse-query (go) listening", "addr", addr, "sources", len(sources))
@@ -154,11 +154,32 @@ func principal(w http.ResponseWriter, r *http.Request) (*Principal, bool) {
 	return p, true
 }
 
-func challenge(w http.ResponseWriter) {
+// metadataURL builds the RFC 9728 §3.1 location: the well-known segment goes
+// between the HOST and the resource's own path, not after it. For a resource
+// at https://gateway/warehouse/mcp the document lives at
+// https://gateway/.well-known/oauth-protected-resource/warehouse/mcp. Getting
+// this backwards produces a challenge that names a URL nothing serves, which a
+// client discovers as a dead end rather than as an error.
+func metadataURL() string {
 	base := os.Getenv("DAS_PUBLIC_BASE_URL")
-	w.Header().Set("WWW-Authenticate",
-		fmt.Sprintf(`Bearer realm=%q, resource_metadata="%s/.well-known/oauth-protected-resource"`,
-			audience, base))
+	if base == "" {
+		return ""
+	}
+	parsed, err := url.Parse(base)
+	if err != nil {
+		return ""
+	}
+	parsed.Path = "/.well-known/oauth-protected-resource" + strings.TrimSuffix(parsed.Path, "/")
+	parsed.RawQuery, parsed.Fragment = "", ""
+	return parsed.String()
+}
+
+func challenge(w http.ResponseWriter) {
+	value := fmt.Sprintf("Bearer realm=%q", audience)
+	if metadata := metadataURL(); metadata != "" {
+		value += fmt.Sprintf(", resource_metadata=%q", metadata)
+	}
+	w.Header().Set("WWW-Authenticate", value)
 }
 
 func sourceFor(name string) (Source, error) {
@@ -444,6 +465,10 @@ func writeError(w http.ResponseWriter, status int, detail string) {
 
 // --------------------------------------------------------------- .well-known --
 
+// Only the PROTECTED RESOURCE document is served. A resource server does not
+// publish the authorization server's metadata: the client follows
+// `authorization_servers` and reads it from the issuer, and a copy here would
+// be a third place for endpoints and grant types to disagree.
 func handleProtectedResource(w http.ResponseWriter, r *http.Request) {
 	base := os.Getenv("DAS_PUBLIC_BASE_URL")
 	if base == "" {
@@ -455,20 +480,11 @@ func handleProtectedResource(w http.ResponseWriter, r *http.Request) {
 		"scopes_supported":         []string{audience + "/" + scopeReq},
 		"bearer_methods_supported": []string{"header"},
 		"resource_documentation":   base + "/docs",
+		// Entra implements no RFC 7591 registration endpoint, so a client
+		// cannot invent its own identity here: it uses one registered in the
+		// tenant. Saying so is kinder than letting a client find out by
+		// failing to register.
+		"client_registration_required": false,
 	})
 }
 
-func handleAuthServer(w http.ResponseWriter, r *http.Request) {
-	issuer := strings.TrimSuffix(os.Getenv("DAS_ENTRA_ISSUER"), "/")
-	authority := strings.TrimSuffix(issuer, "/v2.0")
-	writeJSON(w, http.StatusOK, map[string]any{
-		"issuer":                                issuer,
-		"authorization_endpoint":                authority + "/oauth2/v2.0/authorize",
-		"token_endpoint":                        authority + "/oauth2/v2.0/token",
-		"jwks_uri":                              verifier.JWKSURL,
-		"scopes_supported":                      []string{audience + "/" + scopeReq},
-		"response_types_supported":              []string{"code"},
-		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
-		"code_challenge_methods_supported":      []string{"S256"},
-	})
-}
