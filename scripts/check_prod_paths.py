@@ -65,6 +65,17 @@ ALLOWED = {
     "load/k6/lib.js::password grant":
         "the generator cannot sign a person in; load/run.py hands it a token "
         "instead when DAS_HARNESS_AUTH is not `password`",
+    "scripts/check-discipline.sh::emulator admin surface":
+        "the sibling checker's own pattern for that surface, not a call to it",
+    "scripts/check-discipline.sh::emulator hostname":
+        "the sibling checker's exclusion list, which must name the hostnames it "
+        "is excluding",
+    "scripts/check-discipline.sh::auth disabled":
+        "the sibling checker NAMES the switches it forbids; a checker that may "
+        "not mention what it looks for cannot look for it",
+    "scripts/check-discipline.sh::token forge":
+        "same: the pattern list of the emulator-only surfaces that check "
+        "forbids, not a call to one",
     "e2e/clients/configs.py::emulator hostname":
         "example client configuration for the local stack, shown to a reader",
     "scripts/check_prod_paths.py::emulator admin surface": "this file's own patterns",

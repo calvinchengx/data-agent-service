@@ -130,6 +130,8 @@ def ensure_app_roles(app_id: str) -> dict[str, str]:
         after = {r["value"]: r["id"]
                  for r in graph("GET", f"/applications/{app_id}?$select=appRoles").get("appRoles", [])}
         if role["value"] not in after:
+            # emulator-setup-only: Graph persists appRoles on a real tenant
+            # (upstream #5); this runs only when the read-back shows it did not.
             c.http("POST", f"{c.LOGIN_ORIGIN}/admin/api/apps/{app_id}/roles",
                    json_body={"value": role["value"], "displayName": role["displayName"],
                               "allowedMemberTypes": ["User"], "isEnabled": True})

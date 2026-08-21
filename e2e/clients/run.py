@@ -53,14 +53,15 @@ def check(name: str, ok: bool, detail: str = "") -> bool:
 
 
 def token() -> str:
-    st, _, b = c.http("POST", f"{c.AUTHORITY}/oauth2/v2.0/token", form={
-        "grant_type": "password", "client_id": c.CFG["DAS_AGENT_CLIENT_ID"],
-        "username": c.CFG.get("DAS_USER", "carol@entraemulator.dev"),
-        "password": c.CFG.get("DAS_TEST_PASSWORD", "Password1!"),
-        "scope": f"{AUD}/access_as_user"})
-    if st != 200:
-        raise SystemExit(f"could not sign in: {st} {b[:200]}")
-    return json.loads(b)["access_token"]
+    """However this environment lets an unattended caller sign in.
+
+    Not the password grant directly: a production tenant refuses it, and a
+    witness that can only run one way witnesses nothing about the other.
+    `DAS_HARNESS_AUTH` chooses (agent/identity.py).
+    """
+    from agent import identity
+
+    return identity.token_for(c.CFG.get("DAS_USER", "carol@entraemulator.dev"))
 
 
 def post(body, tok: str, *, raw: str | None = None):

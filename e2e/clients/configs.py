@@ -97,12 +97,15 @@ def main() -> int:
 
     token = ""
     if a.auth == "token":
-        st, _, b = c.http("POST", f"{c.AUTHORITY}/oauth2/v2.0/token", form={
-            "grant_type": "password", "client_id": CLIENT_ID, "username": a.user,
-            "password": c.CFG.get("DAS_TEST_PASSWORD", "Password1!"), "scope": SCOPE})
-        token = json.loads(b)["access_token"] if st == 200 else ""
-        if not token:
-            print(f"could not mint a token for {a.user}: {st}", file=sys.stderr)
+        # A real token, obtained however this environment permits — the same
+        # helper the witnesses use, so generating a configuration against a
+        # tenant works where the password grant would be refused.
+        from agent import identity
+
+        try:
+            token = identity.token_for(a.user)
+        except Exception as e:  # noqa: BLE001 — printing a config is still useful
+            print(f"could not mint a token for {a.user}: {e}", file=sys.stderr)
 
     if a.auth == "oauth":
         print(f"""Sign-in details a client needs (Entra has no dynamic client

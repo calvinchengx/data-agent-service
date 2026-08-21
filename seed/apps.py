@@ -59,6 +59,8 @@ def _admin_add_scope(app_id: str, value: str, display: str) -> bool:
     Graph already registered the scope this never runs, so a real tenant never
     reaches it. Nothing in services/, agent/ or the harnesses may do this.
     """
+    # emulator-setup-only: a real tenant already exposes the scope, so this
+    # runs only where the postcondition is not already true (upstream #5).
     st, _, b = c.http("POST", f"{c.LOGIN_ORIGIN}/admin/api/apps/{app_id}/scopes",
                       json_body={"value": value, "adminConsentDisplayName": display,
                                  "isEnabled": True})
@@ -102,6 +104,7 @@ def ensure_api_app() -> dict:
     # exchanging the user's token). Graph's application shape here carries no
     # such field, so this is one more setup-only action; a real tenant makes an
     # app confidential the moment it holds a credential.
+    # emulator-setup-only: Graph honours this write on a real tenant.
     c.http("PATCH", f"{c.LOGIN_ORIGIN}/admin/api/apps/{(app or {}).get('appId')}",
            json_body={"isConfidential": True})
 
@@ -154,6 +157,8 @@ def ensure_secret(app_id: str, kv_name: str) -> str | None:
                       json_body={"passwordCredential": {"displayName": "data-agent-service executor"}})
     secret = json.loads(b).get("secretText") if st in (200, 201) else None
     if not secret:
+        # emulator-setup-only: `az ad app credential reset` does this in a
+        # real tenant, and the runbook says so.
         st2, _, b2 = c.http("POST", f"{c.LOGIN_ORIGIN}/admin/api/apps/{app_id}/secrets",
                             json_body={"displayName": "data-agent-service executor"})
         if st2 not in (200, 201):
