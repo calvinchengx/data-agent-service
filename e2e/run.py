@@ -285,6 +285,44 @@ def phase6() -> None:
     check("phase6", "the catalog has a read-only bot per role", all(have),
           "das-analyst, das-finance")
 
+    # Roles can be held as application role assignments or as security-group
+    # membership; an identity-governance tool can only provision the latter.
+    # Both must reach the same decision, and the group's description must say
+    # what the group grants — a certifier approving an entitlement should not
+    # have to read our configuration to find out what they approved.
+    from seed import authz
+
+    graph = c.LOGIN_ORIGIN + "/graph/v1.0"
+    _, _, gb = c.http("GET", f"{graph}/groups", headers=c.bearer(c.GRAPH_AUD))
+    groups = {g["displayName"]: g for g in json.loads(gb).get("value", [])}
+    check("phase6", "each role has a security group an IGA tool can provision",
+          set(authz.ROLE_GROUPS.values()) <= set(groups), ", ".join(sorted(authz.ROLE_GROUPS.values())))
+
+    described = all(groups.get(name, {}).get("description") == authz.entitlement_description(role)
+                    for role, name in authz.ROLE_GROUPS.items() if name in groups)
+    analyst = groups.get("DAS-Analysts", {}).get("description", "")
+    check("phase6", "the group description is generated from the rules it enforces",
+          described and "dim_customer.email" in analyst, analyst[:80])
+
+    members = {}
+    for role, name in authz.ROLE_GROUPS.items():
+        if name not in groups:
+            continue
+        _, _, mb = c.http("GET", f"{graph}/groups/{groups[name]['id']}/members",
+                          headers=c.bearer(c.GRAPH_AUD))
+        members[name] = {m.get("userPrincipalName") for m in json.loads(mb).get("value", [])}
+    check("phase6", "personas are members of the group for their role",
+          "alice@entraemulator.dev" in members.get("DAS-Analysts", set())
+          and "carol@entraemulator.dev" in members.get("DAS-Finance", set()),
+          f"DAS-Analysts={len(members.get('DAS-Analysts', ()))}, "
+          f"DAS-Finance={len(members.get('DAS-Finance', ()))}")
+
+    source = c.CFG.get("DAS_ROLE_SOURCE", "appRole")
+    err, text = call("list_sources", {}, alice)
+    resolved = json.loads(text).get("yourRoles") if err is False else []
+    check("phase6", f"the executor resolves roles from the configured source ({source})",
+          resolved == ["Data.Analyst"], f"{source} -> {resolved}")
+
 
 # ---------------------------------------------------------------- phase 7 --
 def phase7() -> None:

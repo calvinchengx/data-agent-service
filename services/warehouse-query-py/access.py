@@ -2,11 +2,22 @@
 
 Two questions, kept apart:
 
-  * **What role does this caller hold?** The directory decides. A token that
-    carries a `roles` claim is authoritative and costs nothing to read; where
-    the claim is absent (group/role overage in real Entra, and this tenant's
-    delegated tokens — docs/upstream-issues.md #9) the executor asks Microsoft
-    Graph for the caller's app-role assignments and caches the answer.
+  * **What role does this caller hold?** The directory decides, and which part
+    of the directory is configuration (`DAS_ROLE_SOURCE`):
+
+      `appRole`  application role assignments on this API — the tightest
+                 coupling between a role and the app it governs;
+      `group`    security-group membership mapped to role names by
+                 `DAS_GROUP_ROLE_MAP` — what an identity-governance tool
+                 (SailPoint, Saviynt, Omada) can actually provision, since
+                 those connectors manage groups and directory roles rather
+                 than per-application role assignments;
+      `both`     the union, for a migration between the two.
+
+    A token that carries the claim (`roles`, or `groups`) is authoritative and
+    costs nothing to read; where the claim is absent — overage in real Entra,
+    and this tenant's delegated tokens (docs/upstream-issues.md #9) — the
+    executor asks Microsoft Graph and caches the answer.
 
   * **What may that role read?** `DAS_ACCESS_RULES`, config rather than code, so
     a new business case is a settings change. Rules narrow access; they never
@@ -98,7 +109,7 @@ class Rules:
 
 class RoleResolver:
     """Caller roles, from the token when it says, from the directory when it
-    does not."""
+    does not — and from whichever part of the directory holds them."""
 
     def __init__(self, graph_token: callable, ttl: int = 300):
         self._graph_token = graph_token
@@ -108,35 +119,67 @@ class RoleResolver:
         self._role_names: dict[str, str] = {}
         self._app_id = os.environ.get("DAS_MIDDLE_TIER_CLIENT_ID", "")
         self._graph = os.environ.get("DAS_GRAPH_URL") or _derive_graph_url()
+        self.source = os.environ.get("DAS_ROLE_SOURCE", "appRole").strip()
+        self._group_map = json.loads(os.environ.get("DAS_GROUP_ROLE_MAP", "{}"))
 
     def roles_for(self, claims: dict) -> tuple[str, ...]:
         claimed = tuple(claims.get("roles") or ())
-        if claimed:
+        if claimed and self.source in ("appRole", "both"):
             return claimed
+        if self.source in ("group", "both"):
+            # A `groups` claim carries object ids (and is omitted entirely once
+            # a user is in too many groups, which is exactly when a lookup is
+            # needed most), so it is used only when it maps to something known.
+            mapped = self._map_groups(claims.get("groups") or ())
+            if mapped:
+                return mapped
         oid = claims.get("oid") or claims.get("sub") or ""
-        if not oid or not self._graph or not self._app_id:
-            return ()
+        if not oid or not self._graph:
+            return claimed
         hit = self._cache.get(oid)
         if hit and hit[0] > time.time():
             return hit[1]
         roles = self._lookup(oid)
         with self._lock:
             self._cache[oid] = (time.time() + self._ttl, roles)
-        return roles
+        return roles or claimed
+
+    def _map_groups(self, groups) -> tuple[str, ...]:
+        """Group identity → role name. Both the id and the display name are
+        accepted as keys: a token carries ids, an operator writes names, and
+        making them choose would be a footgun for no benefit."""
+        out = set()
+        for group in groups:
+            if isinstance(group, dict):
+                keys = (group.get("id"), group.get("displayName"))
+            else:
+                keys = (group,)
+            for key in keys:
+                if key and key in self._group_map:
+                    out.add(self._group_map[key])
+        return tuple(sorted(out))
 
     def _lookup(self, oid: str) -> tuple[str, ...]:
+        roles: set[str] = set()
         try:
-            names = self._app_role_names()
-            assignments = self._get(
-                f"/servicePrincipals/{self._app_id}/appRoleAssignedTo").get("value", [])
+            if self.source in ("appRole", "both") and self._app_id:
+                names = self._app_role_names()
+                assignments = self._get(
+                    f"/servicePrincipals/{self._app_id}/appRoleAssignedTo").get("value", [])
+                roles.update(names[a["appRoleId"]] for a in assignments
+                             if a.get("principalId") == oid and a.get("appRoleId") in names)
+            if self.source in ("group", "both"):
+                member_of = self._get(f"/users/{oid}/memberOf").get("value", [])
+                roles.update(self._map_groups(
+                    [g for g in member_of if g.get("@odata.type", "").endswith("group")
+                     or "displayName" in g]))
         except Exception as e:  # noqa: BLE001 — a directory that will not answer
             # means no role, never every role: authorization fails closed. It
             # says so, because "no roles" and "could not ask" look identical
             # from the outside and only one of them is an outage.
             LOG.warning("role lookup failed for %s: %s: %s", oid, type(e).__name__, e)
             return ()
-        return tuple(sorted({names[a["appRoleId"]] for a in assignments
-                             if a.get("principalId") == oid and a.get("appRoleId") in names}))
+        return tuple(sorted(roles))
 
     def _app_role_names(self) -> dict[str, str]:
         if self._role_names:

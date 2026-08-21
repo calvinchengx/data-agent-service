@@ -17,6 +17,20 @@ consume it:
 OpenMetadata gets one read-only bot per role, each with its own policy, so the
 gateway can present the catalog with the caller's own reach.
 
+Roles can live in either of two places in the directory, and the choice is
+`DAS_ROLE_SOURCE`. Application role assignments bind a role to the API it
+governs; **security groups** are what an identity-governance tool can actually
+provision — SailPoint's Entra connector (and Saviynt's, and Omada's) manages
+groups, directory roles and PIM roles rather than per-application assignments.
+This seed creates both, so either mode works and a migration between them is a
+config change.
+
+Each group also carries an **entitlement description generated from the access
+rules**. Without it a certifier approving "DAS-Analysts" in a campaign has no
+way to see what that grants; with it, the reviewer reads the same sentence the
+executor enforces. The rules are the source, so the description cannot drift
+from the behaviour.
+
 Personas seeded here:
 
   alice  Data.Analyst  workspace Viewer   — reads the warehouse, no customer PII
@@ -49,6 +63,14 @@ PERSONAS = [
     {"upn": "bob@entraemulator.dev", "displayName": "Bob Unassigned",
      "role": None, "workspace_role": None},
 ]
+
+# role -> the security group that grants it. These are what an IGA tool
+# provisions into; the names are the entitlements a certifier sees.
+ROLE_GROUPS = {
+    "Data.Analyst": "DAS-Analysts",
+    "Data.Finance": "DAS-Finance",
+    "Data.Admin": "DAS-Admins",
+}
 
 # What each role may read. Column rules express what the source cannot: Fabric
 # grants reach a table, not a column, and the catalog knows which columns carry
@@ -179,25 +201,88 @@ def om_role_bots() -> dict[str, str]:
     return out
 
 
+def entitlement_description(role: str) -> str:
+    """What this role actually grants, in a sentence, derived from the rules.
+
+    Generated rather than written, so an access review cannot be approving a
+    description that stopped matching the enforcement months ago.
+    """
+    allow: list[str] = []
+    deny: list[str] = []
+    for rule in ACCESS_RULES:
+        if rule.get("role") in (role, "*"):
+            allow += rule.get("allow_tables", [])
+            deny += rule.get("deny_columns", [])
+    granted = ", ".join(sorted(set(allow))) or "nothing"
+    text = (f"Query access to governed data as {role}. "
+            f"Readable tables: {granted}.")
+    if deny:
+        text += f" Withheld columns: {', '.join(sorted(set(deny)))}."
+    else:
+        text += " No columns withheld."
+    text += (" Reaching a source additionally requires that source's own"
+             " permission (for Fabric, a workspace role).")
+    return text
+
+
+def ensure_groups() -> dict[str, str]:
+    """One security group per role, each described by what it grants."""
+    existing = {g["displayName"]: g for g in graph("GET", "/groups").get("value", [])}
+    out: dict[str, str] = {}
+    for role, name in ROLE_GROUPS.items():
+        description = entitlement_description(role)
+        group = existing.get(name)
+        if group:
+            if group.get("description") != description:
+                c.http("PATCH", f"{G}/groups/{group['id']}", headers=c.bearer(c.GRAPH_AUD),
+                       json_body={"description": description})
+        else:
+            group = graph("POST", "/groups", {
+                "displayName": name, "description": description,
+                "mailEnabled": False, "mailNickname": name.lower(), "securityEnabled": True})
+        out[role] = group["id"]
+        c.log(f"group {name}: {description[:88]}…")
+    return out
+
+
+def add_to_group(group_id: str, principal_id: str) -> None:
+    members = graph("GET", f"/groups/{group_id}/members").get("value", [])
+    if any(m.get("id") == principal_id for m in members):
+        return
+    st, _, b = c.http("POST", f"{G}/groups/{group_id}/members/$ref",
+                      headers=c.bearer(c.GRAPH_AUD),
+                      json_body={"@odata.id": f"{G}/directoryObjects/{principal_id}"})
+    if st not in (200, 201, 204):
+        raise SystemExit(f"group membership failed: {st} {b[:200]}")
+
+
 def main() -> dict:
     st = c.load_state()
     app_id = st["apps"]["middle_tier"]
     roles = ensure_app_roles(app_id)
+
+    groups = ensure_groups()
 
     assigned = {}
     for p in PERSONAS:
         oid = ensure_user(p["upn"], p["displayName"])
         if p["role"] and p["role"] in roles:
             assign_role(app_id, oid, roles[p["role"]])
+        if p["role"] and p["role"] in groups:
+            add_to_group(groups[p["role"]], oid)
         if p["workspace_role"]:
             grant_workspace(st["workspace"], oid, p["workspace_role"])
         assigned[p["upn"]] = {"oid": oid, "role": p["role"],
+                              "group": ROLE_GROUPS.get(p["role"] or ""),
                               "workspaceRole": p["workspace_role"]}
-        c.log(f"{p['upn']}: role={p['role'] or 'none'} workspace={p['workspace_role'] or 'none'}")
+        c.log(f"{p['upn']}: role={p['role'] or 'none'} "
+              f"group={ROLE_GROUPS.get(p['role'] or '') or 'none'} "
+              f"workspace={p['workspace_role'] or 'none'}")
 
     bots = om_role_bots()
-    out = {"app_roles": sorted(roles), "personas": assigned, "catalog_bots": bots,
-           "access_rules": ACCESS_RULES}
+    out = {"app_roles": sorted(roles), "groups": ROLE_GROUPS, "personas": assigned,
+           "catalog_bots": bots, "access_rules": ACCESS_RULES,
+           "group_role_map": {name: role for role, name in ROLE_GROUPS.items()}}
     c.save_state(authz=out)
     c.log("access rules (executor): " + json.dumps(ACCESS_RULES))
     return out
