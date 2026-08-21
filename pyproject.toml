@@ -5,6 +5,7 @@ description = "Governed Data Agent: NL questions over Fabric Warehouses, grounde
 requires-python = ">=3.12"
 license = "Apache-2.0"
 dependencies = [
+  "anthropic>=1.0.0",
   "fastapi>=0.141.1",
   "mssql-python>=0.9",
   "python-jose[cryptography]>=3.5.0",
@@ -24,3 +25,6 @@ target-version = "py312"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The repo root is the import root: `agent`, `seed`, `evals` and `e2e` are
+# packages, and the executor's modules are added by the test that needs them.
+pythonpath = ["."]

@@ -10,7 +10,7 @@
 ENV     ?= local
 ENVFILE := $(if $(filter prod,$(ENV)),.env.prod,.env)
 COMPOSE  = ENVFILE=$(ENVFILE) docker compose --env-file $(ENVFILE) $(PROFILE)
-TOOLS    = $(COMPOSE) --profile tools run --rm tools
+TOOLS    = $(COMPOSE) --profile tools run --rm -e ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN tools
 
 ifeq ($(OS),Windows_NT)
   SHELL := sh.exe
@@ -68,4 +68,4 @@ load: ## Load tests (Phase 8)
 	$(TOOLS) python -m load.run $(ARGS)
 
 ask: ## Ask the agent a question: make ask Q="..."
-	$(TOOLS) python -m agent.cli "$(Q)"
+	$(TOOLS) python -m agent.cli $(ARGS) "$(Q)"

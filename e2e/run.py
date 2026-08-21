@@ -12,6 +12,7 @@ import argparse
 import base64
 import json
 import os
+import pathlib
 import sys
 
 from seed import common as c
@@ -285,8 +286,37 @@ def phase6() -> None:
           "das-analyst, das-finance")
 
 
+# ---------------------------------------------------------------- phase 7 --
+def phase7() -> None:
+    """The eval harness, proved by the baseline that must score 100%.
+
+    The gold agent runs each question's reference SQL through the same gateway,
+    executor and scorer the model uses. If it does not score 100%, a later
+    failure belongs to the harness rather than to the agent — which is the
+    whole reason this baseline exists.
+    """
+    import subprocess
+
+    out = subprocess.run([sys.executable, "-m", "evals.runner", "--agent", "gold"],
+                         capture_output=True, text=True, env={**os.environ, "DAS_ENV": "local"})
+    tail = (out.stdout or out.stderr).strip().splitlines()
+    summary = next((line for line in reversed(tail) if "passed (" in line), "")
+    check("phase7", "the eval harness scores the reference answers 100%",
+          out.returncode == 0 and "(100.0%)" in summary, summary.strip()[:90])
+
+    questions = [json.loads(line) for line in
+                 (pathlib.Path("evals/usecases/contoso/questions.jsonl")).read_text().splitlines()
+                 if line.strip()]
+    tiers = {q["tier"] for q in questions}
+    check("phase7", "the question set covers every tier",
+          {"L1", "L2", "L3", "L4", "L5"} <= tiers, f"{len(questions)} questions, tiers {sorted(tiers)}")
+    l3 = [q for q in questions if q["tier"] == "L3"]
+    check("phase7", "every catalog-dependent question states the definition it needs",
+          all(q.get("required_semantics") for q in l3), f"{len(l3)} L3 questions")
+
+
 PHASES = {"phase1": phase1, "phase2": phase2, "phase3": phase3, "phase4": phase4,
-          "phase5": phase5, "phase6": phase6}
+          "phase5": phase5, "phase6": phase6, "phase7": phase7}
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
