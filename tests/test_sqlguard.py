@@ -65,3 +65,23 @@ def test_bigger_caller_limit_capped():
 def test_tables_reported():
     v = guard("SELECT * FROM dbo.fct_sales s JOIN dbo.dim_product p ON p.product_id=s.product_id", P)
     assert v.tables == ("dbo.dim_product", "dbo.fct_sales")
+
+
+def test_columns_qualified():
+    v = guard("SELECT c.email FROM dbo.dim_customer c", P)
+    assert v.columns == ("dbo.dim_customer.email",)
+
+
+def test_columns_star_is_reported_per_table():
+    v = guard("SELECT * FROM dbo.dim_customer", P)
+    assert v.columns == ("dbo.dim_customer.*",)
+
+
+def test_columns_from_where_are_read_too():
+    v = guard("SELECT customer_id FROM dbo.dim_customer WHERE email = 'x'", P)
+    assert set(v.columns) == {"dbo.dim_customer.customer_id", "dbo.dim_customer.email"}
+
+
+def test_ambiguous_column_fails_closed_to_every_table():
+    v = guard("SELECT email FROM dbo.dim_customer c JOIN dbo.dim_party p ON p.email = c.email", P)
+    assert "dbo.dim_customer.email" in v.columns and "dbo.dim_party.email" in v.columns

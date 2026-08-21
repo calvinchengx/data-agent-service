@@ -230,7 +230,63 @@ def phase5() -> None:
               st == 401, f"status {st}")
 
 
-PHASES = {"phase1": phase1, "phase2": phase2, "phase3": phase3, "phase4": phase4, "phase5": phase5}
+# ---------------------------------------------------------------- phase 6 --
+def phase6() -> None:
+    """Three personas, one directory. Each refusal must come from the layer
+    that owns the decision, and say so."""
+    def call(tool: str, args: dict, token: str):
+        _, b = rpc("tools/call", {"name": tool, "arguments": args}, token)
+        return tool_result(b)
+
+    alice = user_token("alice@entraemulator.dev")
+    carol = user_token("carol@entraemulator.dev")
+    bob = user_token("bob@entraemulator.dev")
+
+    err, text = call("list_sources", {}, alice)
+    roles_alice = json.loads(text).get("yourRoles") if err is False else []
+    err, text = call("list_sources", {}, carol)
+    roles_carol = json.loads(text).get("yourRoles") if err is False else []
+    check("phase6", "the directory decides each caller's role",
+          roles_alice == ["Data.Analyst"] and roles_carol == ["Data.Finance"],
+          f"alice={roles_alice} carol={roles_carol}")
+
+    err, _ = call("run_query", {"sql": "SELECT COUNT(*) AS n FROM dbo.fct_revenue_summary"}, alice)
+    check("phase6", "an analyst reads the business tables", err is False)
+
+    err, text = call("run_query", {"sql": "SELECT customer_id, email FROM dbo.dim_customer"}, alice)
+    check("phase6", "an analyst is refused a personal-data column",
+          bool(err) and "may not read" in text, text[:70])
+
+    err, text = call("run_query", {"sql": "SELECT * FROM dbo.dim_customer"}, alice)
+    check("phase6", "SELECT * cannot be used to reach a withheld column",
+          bool(err) and "SELECT *" in text, text[:80])
+
+    err, text = call("describe_table", {"table": "dbo.dim_customer"}, alice)
+    described = json.loads(text) if err is False else {}
+    names = [c_["name"] for c_ in described.get("columns", [])]
+    check("phase6", "withheld columns are not even described",
+          "email" not in names and described.get("withheldColumns", 0) == 2, str(names))
+
+    err, text = call("run_query", {"sql": "SELECT customer_id, email FROM dbo.dim_customer"}, carol)
+    check("phase6", "finance reads the same column the analyst cannot",
+          err is False, text[:60])
+
+    err, text = call("run_query", {"sql": "SELECT COUNT(*) FROM dbo.fct_revenue_summary"}, bob)
+    check("phase6", "a user with no role on the source is refused BY the source",
+          bool(err) and "access denied" in text.lower(), text[:70])
+
+    kv = c.CFG["DAS_KEYVAULT_URL"].rstrip("/")
+    have = []
+    for bot in ("das-analyst", "das-finance"):
+        st, _, _ = c.http("GET", f"{kv}/secrets/om-bot-{bot}?api-version=7.5",
+                          headers=c.bearer("https://vault.azure.net"))
+        have.append(st == 200)
+    check("phase6", "the catalog has a read-only bot per role", all(have),
+          "das-analyst, das-finance")
+
+
+PHASES = {"phase1": phase1, "phase2": phase2, "phase3": phase3, "phase4": phase4,
+          "phase5": phase5, "phase6": phase6}
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()

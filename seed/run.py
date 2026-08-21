@@ -11,8 +11,7 @@ STEPS = [
     ("seed.apps", "app registrations"),
     ("seed.govern", "OpenMetadata semantics"),
     ("seed.apim", "gateway APIs + policies"),
-    # ("seed.authz", "personas + policies"),        # Phase 6
-    # ("seed.apim", "gateway APIs + policies"),     # Phase 4/5
+    ("seed.authz", "personas + access rules"),
 ]
 
 if __name__ == "__main__":

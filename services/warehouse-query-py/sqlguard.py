@@ -58,6 +58,7 @@ class Verdict:
     sql: str                          # the rewritten statement actually executed
     tables: tuple[str, ...]           # schema-qualified tables it reads
     row_limit: int
+    columns: tuple[str, ...] = ()     # schema.table.column it reads; schema.table.* for a star
 
 
 def _table_name(t: exp.Table) -> tuple[str | None, str | None, str]:
@@ -133,7 +134,44 @@ def guard(sql: str, policy: Policy) -> Verdict:
     # 6. row ceiling — rewrite rather than trust the caller
     limited, row_limit = _apply_limit(root, policy)
     return Verdict(sql=limited.sql(dialect=policy.dialect), tables=tuple(sorted(tables)),
-                   row_limit=row_limit)
+                   row_limit=row_limit, columns=_columns_read(tree, tables))
+
+
+def _columns_read(tree: exp.Expression, tables: set[str]) -> tuple[str, ...]:
+    """Every column the statement READS, qualified by table.
+
+    A column named in WHERE or GROUP BY has been read as surely as one in the
+    projection, so the whole tree is walked rather than the select list. Where
+    a bare column name could belong to more than one table in scope, one
+    candidate per table is reported: the caller of this function decides access,
+    and it must fail closed rather than guess.
+    """
+    by_alias: dict[str, str] = {}
+    for t in tree.find_all(exp.Table):
+        parts = [p.name for p in (t.args.get("db"), t.this) if p]
+        qualified = ".".join(parts[-2:]) if len(parts) >= 2 else (parts[0] if parts else "")
+        if qualified in tables:
+            by_alias[(t.alias or t.name).lower()] = qualified
+
+    out: set[str] = set()
+    for star in tree.find_all(exp.Star):
+        parent = star.parent
+        qualifier = getattr(parent, "table", "") if parent is not None else ""
+        targets = [by_alias[qualifier.lower()]] if qualifier and qualifier.lower() in by_alias \
+            else sorted(tables)
+        out.update(f"{t}.*" for t in targets)
+    for column in tree.find_all(exp.Column):
+        name = column.name
+        if not name or name == "*":
+            continue
+        qualifier = (column.table or "").lower()
+        if qualifier and qualifier in by_alias:
+            out.add(f"{by_alias[qualifier]}.{name}")
+        elif len(tables) == 1:
+            out.add(f"{next(iter(tables))}.{name}")
+        else:
+            out.update(f"{t}.{name}" for t in tables)
+    return tuple(sorted(out))
 
 
 def _apply_limit(root: exp.Expression, policy: Policy) -> tuple[exp.Expression, int]:

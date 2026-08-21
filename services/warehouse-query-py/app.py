@@ -27,6 +27,7 @@ import time
 import urllib.parse
 import urllib.request
 
+import access
 import mcp as mcpproto
 from credential import Credential, Settings, TokenError
 from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
@@ -49,6 +50,8 @@ INSECURE = os.environ.get("DAS_ENTRA_TLS_INSECURE", "false").lower() in ("1", "t
 
 SOURCES = load_sources()
 CRED = Credential(Settings.from_env())
+RULES = access.Rules()
+ROLES = access.RoleResolver(lambda: CRED.managed_identity_token(access.GRAPH_AUDIENCE))
 app = FastAPI(title="warehouse-query", version="0.1.0",
               description="Read-only query execution over governed data sources.")
 
@@ -77,7 +80,9 @@ class Principal:
         self.sub = claims.get("sub", "")
         self.oid = claims.get("oid", "")
         self.name = claims.get("preferred_username") or claims.get("upn") or claims.get("appid", "")
-        self.roles = tuple(claims.get("roles") or [])
+        # The directory decides the role: the claim when the token carries one,
+        # a Graph lookup when it does not (see access.RoleResolver).
+        self.roles = ROLES.roles_for(claims)
 
     @property
     def key(self) -> str:
@@ -221,6 +226,12 @@ def run_query(body: dict = Body(..., examples=[{"sql": "SELECT TOP 10 * FROM dbo
         audit(op="run_query", user=p.name, source=src.name, verdict="blocked",
               reason=str(e), sql=sql[:500])
         raise HTTPException(400, f"query refused: {e}") from None
+    try:
+        RULES.check(p.roles, verdict.tables, verdict.columns)
+    except access.Denied as e:
+        audit(op="run_query", user=p.name, roles=list(p.roles), source=src.name,
+              verdict="denied", reason=str(e), sql=sql[:500])
+        raise HTTPException(403, str(e)) from None
 
     try:
         result = backend_for(src).run(src, verdict, _principal_token(src, p))
@@ -276,6 +287,26 @@ def _tools() -> list[dict]:
                                      one.dialect if one else "tsql")
 
 
+def _filter_columns(p: Principal, described: dict) -> tuple[dict, list[str]]:
+    """Describe only the columns the caller may read, and say how many were
+    withheld. Listing a column the caller cannot select would send the model
+    down a path that can only end in a refusal."""
+    qualified = described.get("qualifiedName", "")
+    kept, hidden = [], []
+    for col in described.get("columns", []):
+        try:
+            RULES.check(p.roles, (qualified,), (f"{qualified}.{col['name']}",))
+            kept.append(col)
+        except access.Denied:
+            hidden.append(col["name"])
+    out = {**described, "columns": kept}
+    if hidden:
+        out["withheldColumns"] = len(hidden)
+        out["note"] = ("Some columns are not available to your role and are not listed; "
+                       "do not select them.")
+    return out, hidden
+
+
 def _sources_payload() -> dict:
     return {"sources": [{"name": s.name, "kind": s.kind, "dialect": s.dialect,
                          "authzTier": s.authz_tier, "openMetadataService": s.om_service_fqn,
@@ -287,7 +318,7 @@ def _dispatch(p: Principal, name: str, args: dict) -> dict:
     error, so the model can read the reason and adapt."""
     try:
         if name == "list_sources":
-            return mcpproto.text_content(_sources_payload())
+            return mcpproto.text_content({**_sources_payload(), "yourRoles": list(p.roles)})
         src = _source(args.get("source"))
         if name == "list_tables":
             tables = backend_for(src).list_tables(src, _principal_token(src, p))
@@ -297,8 +328,9 @@ def _dispatch(p: Principal, name: str, args: dict) -> dict:
         if name == "describe_table":
             table = args.get("table") or ""
             out = backend_for(src).describe(src, table, _principal_token(src, p))
-            audit(op="describe_table", user=p.name, source=src.name, table=table,
-                  verdict="ok", via="mcp")
+            out, hidden = _filter_columns(p, out)
+            audit(op="describe_table", user=p.name, roles=list(p.roles), source=src.name,
+                  table=table, verdict="ok", hidden=hidden, via="mcp")
             return mcpproto.text_content({"source": src.name, **out})
         if name == "run_query":
             sql = args.get("sql") or ""
@@ -310,11 +342,18 @@ def _dispatch(p: Principal, name: str, args: dict) -> dict:
                 audit(op="run_query", user=p.name, source=src.name, verdict="blocked",
                       reason=str(e), sql=sql[:500], via="mcp")
                 return mcpproto.text_content(f"query refused: {e}", is_error=True)
+            try:
+                RULES.check(p.roles, verdict.tables, verdict.columns)
+            except access.Denied as e:
+                audit(op="run_query", user=p.name, roles=list(p.roles), source=src.name,
+                      verdict="denied", reason=str(e), sql=sql[:500], via="mcp")
+                return mcpproto.text_content(f"refused: {e}", is_error=True)
             result = backend_for(src).run(src, verdict, _principal_token(src, p))
             ms = int((time.time() - t0) * 1000)
-            audit(op="run_query", user=p.name, oid=p.oid, source=src.name, verdict="ok",
-                  tables=list(verdict.tables), rows=result["rowCount"], ms=ms,
-                  authz_tier=src.authz_tier, sql=verdict.sql[:1000], via="mcp")
+            audit(op="run_query", user=p.name, oid=p.oid, roles=list(p.roles),
+                  source=src.name, verdict="ok", tables=list(verdict.tables),
+                  rows=result["rowCount"], ms=ms, authz_tier=src.authz_tier,
+                  sql=verdict.sql[:1000], via="mcp")
             return mcpproto.text_content({"source": src.name, "sql": verdict.sql,
                                           "tables": list(verdict.tables), "elapsedMs": ms,
                                           **result})
