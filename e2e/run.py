@@ -500,9 +500,59 @@ def phase10() -> None:
           "vscode, claude-code, claude-desktop, cursor, sdk")
 
 
+# --------------------------------------------------------------- phase 11 --
+def phase11() -> None:
+    """Production readiness — the parts that can be checked without a tenant.
+
+    None of this proves the service works in Azure; only running it there does,
+    and docs/parity.md says so in every row. What is checkable here is whether
+    the CLAIM is still true: that switching environments is configuration, that
+    the template describes real resources, and that the settings a tenant needs
+    are written down rather than remembered.
+    """
+    import subprocess
+
+    audit = subprocess.run([sys.executable, "scripts/check_prod_paths.py", "--strict", "--quiet"],
+                           capture_output=True, text=True)
+    offenders = [line.strip() for line in audit.stdout.splitlines() if line.strip().startswith("✗")]
+    check("phase11", "no development-only path without a stated reason",
+          audit.returncode == 0, offenders[0][:100] if offenders else "")
+
+    template = pathlib.Path("infra/main.bicep")
+    check("phase11", "the infrastructure is described as code", template.exists(),
+          f"{len(template.read_text().splitlines())} lines" if template.exists() else "")
+
+    prod = pathlib.Path(".env.prod.example")
+    example = pathlib.Path(".env.example")
+    if prod.exists() and example.exists():
+        def keys(path):
+            return {line.split("=", 1)[0] for line in path.read_text().splitlines()
+                    if line.startswith("DAS_")}
+        missing = keys(example) - keys(prod)
+        check("phase11", "every setting the code reads is in the production template",
+              not missing, ", ".join(sorted(missing)) if missing else f"{len(keys(prod))} settings")
+        text = prod.read_text()
+        check("phase11", "production defaults are the safe ones",
+              "DAS_ENTRA_TLS_INSECURE=false" in text and "DAS_APIM_VALIDATE_JWT=true" in text
+              and "DAS_HARNESS_AUTH=device" in text,
+              "TLS verified, gateway validates, interactive sign-in")
+    else:
+        check("phase11", "a production settings template exists", False, "")
+
+    parity = pathlib.Path("docs/parity.md")
+    body = parity.read_text() if parity.exists() else ""
+    rows = [line for line in body.splitlines() if line.startswith("| ") and "|" in line[2:]]
+    claims_azure = [line for line in rows
+                    if "not yet" not in line and "n/a" not in line and "---" not in line
+                    and "Witnessed on Azure" not in line]
+    check("phase11", "the ledger claims nothing on Azure that has not been run there",
+          bool(rows) and not claims_azure,
+          f"{len(rows)} rows, none claiming Azure" if not claims_azure else claims_azure[0][:80])
+
+
 PHASES = {"phase1": phase1, "phase2": phase2, "phase3": phase3, "phase4": phase4,
           "phase5": phase5, "phase6": phase6, "phase7": phase7, "phase8": phase8,
-          "phase9": phase9, "phase10": phase10}
+          "phase9": phase9, "phase10": phase10, "phase11": phase11}
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
