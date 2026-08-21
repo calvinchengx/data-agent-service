@@ -13,3 +13,6 @@ evals/reports/
 load/reports/
 .nwave/
 seed/state.json
+
+# Go build output (the Dockerfile builds it; the tree should not carry it)
+services/warehouse-query-go/warehouse-query
