@@ -49,11 +49,15 @@ Two consequences, both handled rather than hidden:
 
 * the authorization server does not **advertise** a registration endpoint it
   does not have, so a client fails at configuration rather than at
-  registration. Our protected-resource document stays strictly RFC 9728 — no
-  invented fields to describe the limitation, because a field only we emit is
-  invisible to every client that does not know it while making the document
-  non-standard for all of them. Where to get a client id is documentation's
-  job, and this is that documentation;
+  registration;
+* our protected-resource document says `client_registration_required: false`.
+  OAuth metadata documents permit extension parameters, and this one is pinned
+  by the executor contract so both implementations emit it identically — an
+  executor that omitted it would send a client down a path with no ending. It
+  is the one extension: the client suite checks that every other field is
+  RFC 9728, because field creep in a document clients parse is how two
+  implementations quietly stop agreeing. (MCP *tool* definitions carry no
+  extensions at all — a different document with a different rule.)
 * the resource server publishes **no copy of the authorization server's
   metadata**. A client reads that document from the authorization server it was
   pointed at; a copy here would be a third place for the same facts — endpoints,

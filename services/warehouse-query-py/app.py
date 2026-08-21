@@ -434,12 +434,12 @@ def protected_resource(request: Request):
         "scopes_supported": [f"{AUDIENCE}/{REQUIRED_SCOPE}"],
         "bearer_methods_supported": ["header"],
         "resource_documentation": f"{base}/docs",
+        # Entra implements no RFC 7591 registration endpoint, so a client
+        # cannot invent its own identity here: it uses one registered in the
+        # tenant. OAuth metadata documents permit extension parameters, and
+        # both executors emit this one identically because the contract pins
+        # it — an executor that omitted it would send a client down a path
+        # with no ending. (The MCP TOOL definitions carry no extensions; that
+        # is a different document with a different rule.)
+        "client_registration_required": False,
     })
-    # Nothing beyond RFC 9728 is added here. Entra implements no dynamic client
-    # registration, so a client needs a client id that exists in the tenant —
-    # but inventing fields to say so would make this document non-standard in
-    # order to describe a standard limitation, and a client that does not know
-    # our invented field is no better off. The authoritative signal is already
-    # public: the authorization server's own metadata advertises no
-    # `registration_endpoint`. Where to get a client id is documentation's job
-    # (docs/09-mcp-clients.md), not a field only we emit.

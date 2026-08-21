@@ -221,18 +221,21 @@ def discovery(tok: str) -> None:
           not as_meta.get("registration_endpoint"),
           "no registration_endpoint; clients use a pre-registered client id")
 
-    # The document a client receives must stay a standards document. Fields
-    # only we emit would be invisible to every client that does not know them,
-    # while making the document non-standard for all of them.
-    known = {"resource", "authorization_servers", "scopes_supported",
-             "bearer_methods_supported", "resource_documentation", "resource_name",
-             "resource_signing_alg_values_supported", "resource_policy_uri",
-             "resource_tos_uri", "jwks_uri", "tls_client_certificate_bound_access_tokens",
-             "authorization_details_types_supported", "dpop_signing_alg_values_supported",
-             "dpop_bound_access_tokens_required", "signed_metadata"}
-    unknown = sorted(set(meta) - known)
-    check("the protected-resource document carries no invented fields", not unknown,
-          ", ".join(unknown) or "RFC 9728 fields only")
+    # OAuth metadata documents permit extension parameters, so the rule here is
+    # not "nothing beyond the RFC" but "nothing that is not deliberate": every
+    # extension must be one the executor contract pins, so both implementations
+    # emit it and a reader can find out what it means. Field creep in a document
+    # clients parse is how two executors quietly stop agreeing.
+    rfc9728 = {"resource", "authorization_servers", "scopes_supported",
+               "bearer_methods_supported", "resource_documentation", "resource_name",
+               "resource_signing_alg_values_supported", "resource_policy_uri",
+               "resource_tos_uri", "jwks_uri", "tls_client_certificate_bound_access_tokens",
+               "authorization_details_types_supported", "dpop_signing_alg_values_supported",
+               "dpop_bound_access_tokens_required", "signed_metadata"}
+    pinned = {"client_registration_required"}   # services/conformance/run.py asserts it
+    unknown = sorted(set(meta) - rfc9728 - pinned)
+    check("every field is either RFC 9728 or pinned by the executor contract", not unknown,
+          ", ".join(unknown) or f"{len(set(meta) & rfc9728)} standard + {len(set(meta) & pinned)} pinned")
 
 
 # ------------------------------------------------------- reference client --
