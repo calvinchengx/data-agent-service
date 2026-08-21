@@ -169,6 +169,22 @@ def om_subscription_key() -> str:
     return key
 
 
+def set_rate_limit(calls: int) -> None:
+    """Re-apply the policies with a different allowance.
+
+    The load driver uses this: throughput scenarios need the limit out of the
+    way, and the scenario that PROVES the limit needs it low. Both are this
+    repo's own gateway configuration, so the driver owns them rather than
+    asking the reader to remember to change a file.
+    """
+    global RATE_CALLS
+    RATE_CALLS = str(calls)
+    put_policy("apis/warehouse", jwt_policy())
+    put_policy("apis/warehouse-rest", jwt_policy())
+    put_policy("apis/om", jwt_policy(OM_SWAP))
+    c.log(f"rate limit now {calls} calls / {RATE_WINDOW}s")
+
+
 def main() -> dict:
     # 1. the executor's own MCP server, proxied
     put_api("warehouse", "Governed data query", "warehouse", EXECUTOR_MCP, mcp_mode="passthrough")
@@ -225,5 +241,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default="contoso")
     ap.add_argument("--reset", action="store_true")
-    ap.parse_args()
-    c.log(json.dumps(main(), indent=1))
+    ap.add_argument("--rate-calls", type=int, default=None,
+                    help="re-apply the policies with this allowance and exit")
+    a = ap.parse_args()
+    if a.rate_calls is not None:
+        set_rate_limit(a.rate_calls)
+    else:
+        c.log(json.dumps(main(), indent=1))

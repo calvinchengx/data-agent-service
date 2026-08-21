@@ -1,0 +1,214 @@
+"""`make load` — the load runs, their thresholds, and the gateway's cost.
+
+    python -m load.run                    # every scenario
+    python -m load.run --only query       # one of them
+    python -m load.run --vus 50 --stage 60s
+
+Scenarios run in a k6 container on the same network as the stack, so they reach
+the gateway and the executor exactly as the agent does.
+
+Three things are measured, and the third is the reason the first two are run
+twice:
+
+  * **query** — MCP tool calls through the gateway to the executor: sign-in
+    on-behalf-of, guard, TDS, back again.
+  * **catalog** — the passthrough to OpenMetadata with the bot swap.
+  * **the gateway's cost** — the same query scenario aimed straight at the
+    executor. The difference between the two p95s is what API Management costs
+    on this path, which is a number worth knowing before choosing where to put
+    a policy.
+
+And one that is not about throughput at all: **ratelimit** deliberately exceeds
+the configured allowance and asserts the excess is refused. A limit nobody has
+watched fire is a comment, not a control.
+
+The absolute numbers describe a laptop running SQL Server in a container, not
+Fabric capacity. What transfers is the SHAPE: the gateway's overhead, whether
+the executor's token cache holds under concurrency, and regressions between two
+commits of this repo.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import time
+
+ROOT = pathlib.Path(__file__).resolve().parent
+REPORTS = ROOT / "reports"
+REPO = ROOT.parent
+K6_IMAGE = os.environ.get("DAS_K6_IMAGE", "grafana/k6:latest")
+NETWORK = os.environ.get("DAS_COMPOSE_NETWORK", "data-agent-service_default")
+
+SCENARIOS = {
+    "query": {"script": "query.js", "env": {"DAS_LOAD_TARGET": "gateway"},
+              "what": "MCP tool calls through the gateway"},
+    "query-direct": {"script": "query.js", "env": {"DAS_LOAD_TARGET": "direct"},
+                     "what": "the same calls straight at the executor (gateway cost)"},
+    "catalog": {"script": "catalog.js", "env": {},
+                "what": "catalog search through the gateway"},
+    "ratelimit": {"script": "ratelimit.js", "env": {},
+                  "what": "the gateway's rate limit refusing the excess"},
+}
+
+PASSTHROUGH = (
+    "DAS_APIM_BASE", "DAS_EXECUTOR_URL", "DAS_AGENT_CLIENT_ID", "DAS_AGENT_AUDIENCE",
+    "DAS_WAREHOUSE_MCP_PATH", "DAS_OM_MCP_PATH", "DAS_OM_SUBSCRIPTION_KEY",
+    "DAS_TEST_PASSWORD", "DAS_RATE_CALLS",
+)
+
+
+def compose(*args: str, quiet: bool = True) -> subprocess.CompletedProcess:
+    """Run a command inside the stack's network (the tools container).
+
+    The driver itself runs on the host because it starts k6 in a container;
+    anything that must SPEAK to the stack goes through here, so there is one
+    answer to "where does this run" rather than two.
+    """
+    envfile = os.environ.get("ENVFILE", ".env")
+    cmd = ["docker", "compose", "--env-file", envfile, "--profile", "tools",
+           "run", "--rm", "-T", "tools", *args]
+    proc = subprocess.run(cmd, cwd=REPO, capture_output=quiet, text=True)
+    if proc.returncode != 0 and quiet:
+        print((proc.stdout or "") + (proc.stderr or ""))
+    return proc
+
+
+def set_rate_limit(calls: int) -> None:
+    compose("python", "-m", "seed.apim", "--rate-calls", str(calls))
+
+
+def env_for(scenario: dict, args) -> dict[str, str]:
+    from seed import common as c
+
+    env = {k: c.CFG[k] for k in PASSTHROUGH if k in c.CFG}
+    env["DAS_AUTHORITY"] = c.AUTHORITY
+    env["DAS_LOAD_USER"] = args.user
+    env["DAS_LOAD_VUS_LOW"] = str(max(1, args.vus // 4))
+    env["DAS_LOAD_VUS_HIGH"] = str(args.vus)
+    env["DAS_LOAD_STAGE"] = args.stage
+    env["DAS_LOAD_P95_MS"] = str(args.p95)
+    env.update(scenario["env"])
+    return env
+
+
+def run_scenario(name: str, args) -> dict:
+    scenario = SCENARIOS[name]
+    env = env_for(scenario, args)
+    summary = REPORTS / f"{name}.summary.json"
+    cmd = ["docker", "run", "--rm", "--network", NETWORK,
+           "-v", f"{REPO}/load/k6:/scripts:ro", "-v", f"{REPORTS}:/out"]
+    for key, value in env.items():
+        cmd += ["-e", f"{key}={value}"]
+    cmd += [K6_IMAGE, "run", "--quiet", "--summary-export", f"/out/{name}.summary.json",
+            f"/scripts/{scenario['script']}"]
+
+    print(f"\n{name}: {scenario['what']}", flush=True)
+    started = time.time()
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    took = time.time() - started
+    if not summary.exists():
+        print(proc.stdout[-2000:] or proc.stderr[-2000:])
+        raise SystemExit(f"{name}: k6 produced no summary")
+    data = json.loads(summary.read_text())
+    metrics = data.get("metrics", {})
+
+    def stat(metric: str, field: str):
+        value = metrics.get(metric, {}).get(field)
+        return round(value, 1) if isinstance(value, (int, float)) else value
+
+    out = {
+        "scenario": name,
+        "what": scenario["what"],
+        "passed": proc.returncode == 0,
+        "seconds": round(took, 1),
+        "requests": stat("http_reqs", "count"),
+        "rps": stat("http_reqs", "rate"),
+        "http_failed_rate": stat("http_req_failed", "rate"),
+        "p50_ms": stat("http_req_duration", "med"),
+        "p95_ms": stat("http_req_duration", "p(95)"),
+        "p99_ms": stat("http_req_duration", "p(99)"),
+        "checks_passed": stat("checks", "passes"),
+        "checks_failed": stat("checks", "fails"),
+    }
+    for extra in ("query_ms", "describe_ms", "search_ms"):
+        if extra in metrics:
+            out[f"{extra}_p95"] = stat(extra, "p(95)")
+    for counter in ("throttled", "served"):
+        if counter in metrics:
+            out[counter] = stat(counter, "count")
+    if "refusals" in metrics:
+        out["refusal_rate"] = stat("refusals", "rate")
+
+    mark = "\033[32mok\033[0m" if out["passed"] else "\033[31mFAIL\033[0m"
+    print(f"  {mark}  {out['requests']} requests at {out['rps']}/s · "
+          f"p50 {out['p50_ms']}ms · p95 {out['p95_ms']}ms · p99 {out['p99_ms']}ms"
+          + (f" · throttled {out.get('throttled')}/{out.get('served', 0) + (out.get('throttled') or 0)}"
+             if "throttled" in out else ""), flush=True)
+    if not out["passed"]:
+        for line in (proc.stdout or "").splitlines():
+            if "threshold" in line.lower() or "✗" in line:
+                print("      " + line.strip())
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only", action="append", choices=sorted(SCENARIOS))
+    ap.add_argument("--vus", type=int, default=int(os.environ.get("DAS_LOAD_VUS", "20")))
+    ap.add_argument("--stage", default=os.environ.get("DAS_LOAD_STAGE", "20s"))
+    ap.add_argument("--p95", type=int, default=int(os.environ.get("DAS_LOAD_P95_MS", "1500")))
+    ap.add_argument("--user", default=os.environ.get("DAS_LOAD_USER", "carol@entraemulator.dev"))
+    ap.add_argument("--env", default=os.environ.get("DAS_ENV", "local"))
+    args = ap.parse_args()
+
+    REPORTS.mkdir(exist_ok=True)
+    names = args.only or list(SCENARIOS)
+
+    # The gateway's allowance is part of the experiment rather than a fixed
+    # fact: a throughput run must not be measuring the rate limiter, and the
+    # run that proves the limiter needs it low enough to hit in seconds.
+    from seed import common as c
+
+    configured = int(c.CFG.get("DAS_RATE_CALLS", "60"))
+    results = []
+    for name in names:
+        set_rate_limit(configured if name == "ratelimit" else 1_000_000)
+        results.append(run_scenario(name, args))
+    set_rate_limit(configured)
+    by_name = {r["scenario"]: r for r in results}
+
+    report = {"vus": args.vus, "stage": args.stage, "p95_threshold_ms": args.p95,
+              "scenarios": results}
+
+    if "query" in by_name and "query-direct" in by_name:
+        gateway, direct = by_name["query"], by_name["query-direct"]
+        tax = {
+            "p50_ms": round((gateway["p50_ms"] or 0) - (direct["p50_ms"] or 0), 1),
+            "p95_ms": round((gateway["p95_ms"] or 0) - (direct["p95_ms"] or 0), 1),
+            "rps_change_pct": round(100 * ((gateway["rps"] or 0) - (direct["rps"] or 1))
+                                    / (direct["rps"] or 1), 1),
+        }
+        report["gateway_cost"] = tax
+        print(f"\ngateway cost (through APIM − direct): "
+              f"p50 +{tax['p50_ms']}ms · p95 +{tax['p95_ms']}ms · "
+              f"throughput {tax['rps_change_pct']}%")
+
+    stamp = os.environ.get("DAS_REPORT_STAMP") or str(int(time.time()))
+    out = REPORTS / f"load-{stamp}.json"
+    out.write_text(json.dumps(report, indent=1))
+    print(f"\nreport: {out}")
+    print("Numbers describe this machine, not Fabric capacity; what transfers is the shape.")
+
+    failed = [r["scenario"] for r in results if not r["passed"]]
+    if failed:
+        print(f"thresholds not met: {', '.join(failed)}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

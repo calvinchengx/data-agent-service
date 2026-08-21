@@ -64,8 +64,8 @@ test: ## Unit + e2e witnesses (Phase 4+)
 eval: ## Accuracy evals per use case (Phase 7)
 	$(TOOLS) python -m evals.runner $(ARGS)
 
-load: ## Load tests (Phase 8)
-	$(TOOLS) python -m load.run $(ARGS)
+load: ## Load tests (Phase 8) — k6 in a container on the stack's network
+	$(PY) -m load.run $(ARGS)
 
 ask: ## Ask the agent a question: make ask Q="..."
 	$(TOOLS) python -m agent.cli $(ARGS) "$(Q)"

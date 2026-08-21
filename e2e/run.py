@@ -315,8 +315,45 @@ def phase7() -> None:
           all(q.get("required_semantics") for q in l3), f"{len(l3)} L3 questions")
 
 
+# ---------------------------------------------------------------- phase 8 --
+def phase8() -> None:
+    """The load report, read rather than re-run.
+
+    `make test` must stay quick, so this asserts against the most recent
+    report `make load` wrote instead of driving k6 itself: the thresholds are
+    already gates inside that run, and what belongs here is that the run
+    happened, met them, and measured the things the plan claims it measures.
+    """
+    reports = sorted(pathlib.Path("load/reports").glob("load-*.json"))
+    if not reports:
+        check("phase8", "a load report exists", False, "run `make load` first")
+        return
+    report = json.loads(reports[-1].read_text())
+    scenarios = {s["scenario"]: s for s in report.get("scenarios", [])}
+
+    check("phase8", "every load scenario met its thresholds",
+          bool(scenarios) and all(s["passed"] for s in scenarios.values()),
+          ", ".join(sorted(scenarios)))
+
+    query = scenarios.get("query")
+    if query:
+        check("phase8", "the gateway path sustains load without errors",
+              (query.get("http_failed_rate") or 0) < 0.01 and (query.get("refusal_rate") or 0) < 0.01,
+              f"{query['requests']} requests at {query['rps']}/s, p95 {query['p95_ms']}ms")
+
+    cost = report.get("gateway_cost")
+    check("phase8", "the gateway's cost is measured, not assumed", bool(cost),
+          f"p95 +{cost['p95_ms']}ms, throughput {cost['rps_change_pct']}%" if cost else "")
+
+    limit = scenarios.get("ratelimit")
+    check("phase8", "the rate limit refuses the excess",
+          bool(limit) and (limit.get("throttled") or 0) > 0,
+          f"{limit.get('throttled')} of {(limit.get('served') or 0) + (limit.get('throttled') or 0)} throttled"
+          if limit else "")
+
+
 PHASES = {"phase1": phase1, "phase2": phase2, "phase3": phase3, "phase4": phase4,
-          "phase5": phase5, "phase6": phase6, "phase7": phase7}
+          "phase5": phase5, "phase6": phase6, "phase7": phase7, "phase8": phase8}
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
