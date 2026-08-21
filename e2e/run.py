@@ -40,15 +40,20 @@ def claims(token: str) -> dict:
 
 
 def user_token(upn: str) -> str:
-    """A user token. The password grant stands in for the interactive
-    authorization-code + PKCE flow a real client performs; the TOKEN is the same
-    shape, which is what everything downstream depends on."""
-    st, _, b = c.http("POST", f"{c.AUTHORITY}/oauth2/v2.0/token", form={
-        "grant_type": "password", "client_id": c.CFG["DAS_AGENT_CLIENT_ID"],
-        "username": upn, "password": PASSWORD, "scope": f"{AUD}/access_as_user"})
-    if st != 200:
-        raise SystemExit(f"could not obtain a token for {upn}: {st} {b[:200]}")
-    return json.loads(b)["access_token"]
+    """A token for one persona, however this environment allows it.
+
+    `DAS_HARNESS_AUTH` decides: the password grant against a development
+    tenant, the device code flow when a person is present, or a token supplied
+    by the environment in CI. A production tenant disables the first, so a
+    witness suite that could only do that could never run against Azure — and
+    a witness that cannot run in production witnesses nothing about it.
+    """
+    from agent import identity
+
+    try:
+        return identity.token_for(upn)
+    except identity.SignInUnavailable as e:
+        raise SystemExit(f"could not sign in as {upn}: {e}") from None
 
 
 def rpc(method: str, params: dict, token: str | None, path="/warehouse/mcp", extra=None, mid=1):
@@ -120,12 +125,21 @@ def phase3() -> None:
     check("phase3", "the user token is addressed to this API",
           ac["aud"] == AUD and "access_as_user" in (ac.get("scp") or ""), ac["aud"])
 
-    endpoint = os.environ.get("IDENTITY_ENDPOINT", "https://entra-emulator:8443/msi/token")
-    header = os.environ.get("IDENTITY_HEADER", "managed-identity-secret")
-    st, _, b = c.http("GET", f"{endpoint}?resource=https://vault.azure.net&api-version=2019-08-01",
-                      headers={"X-IDENTITY-HEADER": header})
-    check("phase3", "the service has a managed identity (App Service protocol)", st == 200,
-          claims(json.loads(b)["access_token"])["aud"] if st == 200 else b[:80])
+    # No default endpoint: the platform sets these two variables, and inventing
+    # a value here would make the check pass against a hostname that exists
+    # only locally — the exact thing that turns "witnessed" into "witnessed
+    # somewhere else".
+    endpoint = os.environ.get("IDENTITY_ENDPOINT", "")
+    header = os.environ.get("IDENTITY_HEADER", "")
+    if not endpoint:
+        check("phase3", "the service has a managed identity (App Service protocol)", False,
+              "IDENTITY_ENDPOINT is unset in this environment")
+    else:
+        st, _, b = c.http("GET",
+                          f"{endpoint}?resource=https://vault.azure.net&api-version=2019-08-01",
+                          headers={"X-IDENTITY-HEADER": header})
+        check("phase3", "the service has a managed identity (App Service protocol)", st == 200,
+              claims(json.loads(b)["access_token"])["aud"] if st == 200 else b[:80])
 
     mt = c.load_state()["apps"]["middle_tier"]
     kv = c.CFG["DAS_KEYVAULT_URL"].rstrip("/")

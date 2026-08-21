@@ -87,6 +87,12 @@ def env_for(scenario: dict, args) -> dict[str, str]:
     env = {k: c.CFG[k] for k in PASSTHROUGH if k in c.CFG}
     env["DAS_AUTHORITY"] = c.AUTHORITY
     env["DAS_LOAD_USER"] = args.user
+    # k6 cannot sign a person in. Where the tenant forbids the password grant,
+    # the token is obtained here — by the same means every other harness uses —
+    # and handed to the generator.
+    if os.environ.get("DAS_HARNESS_AUTH", "password").lower() != "password":
+        from agent import identity
+        env["DAS_LOAD_TOKEN"] = identity.token_for(args.user)
     env["DAS_LOAD_VUS_LOW"] = str(max(1, args.vus // 4))
     env["DAS_LOAD_VUS_HIGH"] = str(args.vus)
     env["DAS_LOAD_STAGE"] = args.stage

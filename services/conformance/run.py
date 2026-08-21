@@ -33,13 +33,14 @@ def check(name: str, ok: bool, detail: str = "") -> bool:
 
 
 def token(upn: str) -> str:
-    st, _, b = c.http("POST", f"{c.AUTHORITY}/oauth2/v2.0/token", form={
-        "grant_type": "password", "client_id": c.CFG["DAS_AGENT_CLIENT_ID"],
-        "username": upn, "password": c.CFG.get("DAS_TEST_PASSWORD", "Password1!"),
-        "scope": f"{c.CFG['DAS_AGENT_AUDIENCE']}/access_as_user"})
-    if st != 200:
-        raise SystemExit(f"cannot sign in as {upn}: {st} {b[:200]}")
-    return json.loads(b)["access_token"]
+    """A token for one persona, via the shared harness sign-in — see
+    agent/identity.py for why there are three ways to get one."""
+    from agent import identity
+
+    try:
+        return identity.token_for(upn)
+    except identity.SignInUnavailable as e:
+        raise SystemExit(f"cannot sign in as {upn}: {e}") from None
 
 
 class Executor:

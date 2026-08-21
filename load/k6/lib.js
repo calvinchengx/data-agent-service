@@ -5,8 +5,11 @@
 import http from 'k6/http';
 import { check } from 'k6';
 
-export const GATEWAY = __ENV.DAS_APIM_BASE || 'https://apim-emulator:8445';
-export const EXECUTOR = __ENV.DAS_EXECUTOR_URL || 'http://warehouse-query:8090';
+// No defaults: load/run.py passes every endpoint from the environment it was
+// told to measure. A default here would be a local address that quietly
+// answers when a production run was intended.
+export const GATEWAY = __ENV.DAS_APIM_BASE;
+export const EXECUTOR = __ENV.DAS_EXECUTOR_URL;
 export const AUTHORITY = __ENV.DAS_AUTHORITY;
 export const CLIENT_ID = __ENV.DAS_AGENT_CLIENT_ID;
 export const AUDIENCE = __ENV.DAS_AGENT_AUDIENCE;
@@ -16,7 +19,13 @@ export const PASSWORD = __ENV.DAS_TEST_PASSWORD || 'Password1!';
 // One sign-in for the whole run, in setup(): the token is what a client holds
 // for an hour, so re-minting per iteration would measure the token endpoint
 // rather than the thing under test.
+//
+// A load generator cannot complete an interactive sign-in, so against a tenant
+// that forbids the password grant the driver supplies a token instead
+// (`DAS_LOAD_TOKEN`, minted by load/run.py through the same harness sign-in
+// every other check uses).
 export function signIn() {
+  if (__ENV.DAS_LOAD_TOKEN) return __ENV.DAS_LOAD_TOKEN;
   const res = http.post(`${AUTHORITY}/oauth2/v2.0/token`, {
     grant_type: 'password', client_id: CLIENT_ID, username: USER,
     password: PASSWORD, scope: `${AUDIENCE}/access_as_user`,
