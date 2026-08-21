@@ -32,6 +32,25 @@ make seed          # workspace contoso-analytics, warehouse contoso_warehouse, 9
 
 Seeds and harnesses run **inside the compose network** (`tools` container) so they reach every dependency exactly as the service does. The warehouse is addressed the way Fabric addresses it — advertised `connectionString`, database by display name, Entra token over TDS; see `docs/upstream-issues.md` #2 for the one DNS alias that makes that work locally.
 
+## Query it (Phases 3–5)
+
+```sh
+make seed          # warehouse + app registrations + OpenMetadata + gateway
+make test          # 23 witnesses across phases 1-5
+```
+
+The agent-facing surface is two MCP endpoints on the gateway:
+
+| Endpoint | What it is | Tools |
+|---|---|---|
+| `/warehouse/mcp` | our executor, proxied (`mcpMode: passthrough`) | `list_sources`, `list_tables`, `describe_table`, `run_query` |
+| `/om/mcp` | OpenMetadata's own MCP server, proxied with a read-only bot | the catalog's 17 tools (`search_metadata`, `get_entity_details`, …) |
+
+Every call carries the user's bearer. The executor validates it, exchanges it
+on-behalf-of for a data-plane token, and the warehouse applies that user's own
+permissions — `alice` (Viewer on the workspace) reads; `bob` (no role) is
+refused by the source, not by our code.
+
 `make clean` resets volumes (OpenMetadata DB, fabric state, apim state).
 
 ## Production

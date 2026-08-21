@@ -197,7 +197,7 @@ services:
   # Container listens on 8445 (arm's port); host side moves to 8446 as the
   # family BOM does.
   apim-emulator:
-    image: ghcr.io/calvinchengx/azure-apim-emulator:${APIM_EMULATOR_VERSION:-0.3.0}
+    image: ghcr.io/calvinchengx/azure-apim-emulator:${APIM_EMULATOR_VERSION:-0.4.0}
     depends_on:
       entra-emulator:
         condition: service_healthy
@@ -231,7 +231,36 @@ services:
     working_dir: /app
 
   # ------------------------------------------------- data-agent-service (ours)
-  # Added in Phase 4.
+  # The executor. Reaches Fabric's TDS front as the ASKING USER (OBO) and holds
+  # no secret in its environment: its managed identity is discovered through the
+  # standard IDENTITY_ENDPOINT/IDENTITY_HEADER contract, and any secret it needs
+  # comes from Key Vault.
+  warehouse-query:
+    build:
+      context: .
+      dockerfile: services/warehouse-query-${DAS_EXECUTOR:-py}/Dockerfile
+    depends_on:
+      entra-emulator:
+        condition: service_healthy
+      fabric-emulator:
+        condition: service_healthy
+      keyvault-emulator:
+        condition: service_healthy
+    ports:
+      - "${EXECUTOR_PORT:-8090}:8090"
+    env_file: ${ENVFILE:-.env}
+    environment:
+      # Managed identity, App Service protocol — the same two variables the
+      # platform sets in Azure.
+      IDENTITY_ENDPOINT: "https://entra-emulator:8443/msi/token"
+      IDENTITY_HEADER: "${DAS_MI_HEADER:-managed-identity-secret}"
+      DAS_PUBLIC_BASE_URL: "${DAS_APIM_BASE:-https://apim-emulator:8445}/warehouse"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8090/health',timeout=5).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
 volumes:
   tools-venv:

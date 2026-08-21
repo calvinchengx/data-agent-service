@@ -10,6 +10,7 @@ STEPS = [
     ("seed.provision", "warehouse + data"),
     ("seed.apps", "app registrations"),
     ("seed.govern", "OpenMetadata semantics"),
+    ("seed.apim", "gateway APIs + policies"),
     # ("seed.authz", "personas + policies"),        # Phase 6
     # ("seed.apim", "gateway APIs + policies"),     # Phase 4/5
 ]
