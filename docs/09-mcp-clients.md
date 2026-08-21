@@ -14,7 +14,7 @@ make client-config ARGS="--auth token"    # embed a bearer instead of OAuth
 | Evidence | What it rules out |
 |---|---|
 | **Protocol suite** (hand-built JSON-RPC) | version negotiation that echoes whatever it is asked; wrong error codes; a `null` body on a notification; a schema a client cannot generate a form from |
-| **The official `mcp` SDK** drives a full session | that the server only works with a client written to match it. The SDK has no knowledge of this service and no reason to be accommodating |
+| **Both official SDKs** — Python and TypeScript — drive a full session | that the server only works with a client written to match it. Two languages rather than one on purpose: a Python server that only a Python client can drive passes the first witness and fails the second |
 | **Discovery**, followed from the challenge itself | a client that cannot find out how to authenticate. The check reads `WWW-Authenticate` and fetches the URL it names, from where a client stands — testing the document on the service behind the gateway proves nothing about the URL a client is actually given |
 | **Generated configuration** | a README that names a URL which stopped being true |
 
@@ -47,9 +47,13 @@ that expects to self-register.
 
 Two consequences, both handled rather than hidden:
 
-* our protected-resource document says `client_registration_required: false`
-  and offers a `client_id_hint`, so a client can be pointed at the right
-  identity instead of failing at a registration endpoint that does not exist;
+* the authorization server does not **advertise** a registration endpoint it
+  does not have, so a client fails at configuration rather than at
+  registration. Our protected-resource document stays strictly RFC 9728 — no
+  invented fields to describe the limitation, because a field only we emit is
+  invisible to every client that does not know it while making the document
+  non-standard for all of them. Where to get a client id is documentation's
+  job, and this is that documentation;
 * the resource server publishes **no copy of the authorization server's
   metadata**. A client reads that document from the authorization server it was
   pointed at; a copy here would be a third place for the same facts — endpoints,
@@ -61,10 +65,11 @@ A client that requires self-registration needs a bearer header instead.
 
 | Client | Transport | Auth | Status |
 |---|---|---|---|
-| Official `mcp` SDK (Python) | Streamable HTTP | header / OAuth | **witnessed** — full session, tool call, refusal, in `make test` |
+| Official MCP SDK — **Python** | Streamable HTTP | header / OAuth | **witnessed** — full session, tool call, refusal, in `make test` |
+| Official MCP SDK — **TypeScript** | Streamable HTTP | header / OAuth | **witnessed** — independent implementation, same session |
 | Claude Code | Streamable HTTP | OAuth or `--header` | config generated; OAuth needs the pre-registered client id |
 | Claude Desktop, Cursor, VS Code | Streamable HTTP | OAuth or headers | config generated |
-| Any MCP SDK (TypeScript, others) | Streamable HTTP | header / OAuth | same protocol as the witnessed SDK |
+| Any other MCP SDK | Streamable HTTP | header / OAuth | same protocol as the two witnessed SDKs |
 | Hosted connectors (e.g. ChatGPT) | Streamable HTTP | OAuth | **production only** — requires a publicly reachable HTTPS endpoint, which a local stack does not have |
 
 The last row is a property of the deployment, not the protocol. It is listed as

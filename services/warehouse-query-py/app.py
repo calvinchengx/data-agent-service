@@ -434,10 +434,12 @@ def protected_resource(request: Request):
         "scopes_supported": [f"{AUDIENCE}/{REQUIRED_SCOPE}"],
         "bearer_methods_supported": ["header"],
         "resource_documentation": f"{base}/docs",
-        # Entra does not implement RFC 7591 dynamic client registration, so a
-        # client cannot invent its own identity here: it uses one that has been
-        # registered in the tenant. Saying so in the document is kinder than
-        # letting a client discover it by failing to register.
-        "client_registration_required": False,
-        "client_id_hint": os.environ.get("DAS_AGENT_CLIENT_ID", ""),
     })
+    # Nothing beyond RFC 9728 is added here. Entra implements no dynamic client
+    # registration, so a client needs a client id that exists in the tenant —
+    # but inventing fields to say so would make this document non-standard in
+    # order to describe a standard limitation, and a client that does not know
+    # our invented field is no better off. The authoritative signal is already
+    # public: the authorization server's own metadata advertises no
+    # `registration_endpoint`. Where to get a client id is documentation's job
+    # (docs/09-mcp-clients.md), not a field only we emit.

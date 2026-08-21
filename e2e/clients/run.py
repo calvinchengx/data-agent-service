@@ -9,10 +9,11 @@ Two kinds of evidence, because they answer different doubts:
     wrong: version negotiation, error codes, the shape of a notification, and
     that every tool schema is valid JSON Schema with no vendor extensions.
 
-  * **The reference client** is the official `mcp` SDK. It was not written
-    against this server and cannot be accommodating: if `initialize`,
-    `tools/list` and `tools/call` work through it, they work for anything built
-    on it — which is most MCP clients.
+  * **Two reference clients**, the official SDKs for Python and TypeScript.
+    Neither was written against this server and neither has reason to be
+    accommodating. Two languages rather than one on purpose: a Python server
+    that only a Python client can drive passes the first witness and fails the
+    second, and that failure is the one worth catching.
 
 What cannot be witnessed here is a client that needs a publicly reachable
 HTTPS endpoint (a hosted connector). That is a property of the deployment, not
@@ -25,7 +26,9 @@ import argparse
 import asyncio
 import json
 import os
+import pathlib
 import re
+import subprocess
 import sys
 
 from seed import common as c
@@ -209,13 +212,27 @@ def discovery(tok: str) -> None:
           and "S256" in (as_meta.get("code_challenge_methods_supported") or []),
           "authorization_code + PKCE S256")
 
-    # Entra implements no RFC 7591 registration endpoint. A client that can only
-    # self-register cannot use this resource; one that accepts a configured
-    # client id can. Better stated than discovered by failing.
-    check("dynamic client registration is absent, and the metadata does not claim it",
-          not as_meta.get("registration_endpoint")
-          and meta.get("client_registration_required") is False,
-          "clients use a pre-registered client id")
+    # Entra implements no RFC 7591 registration endpoint, so a client that can
+    # only self-register cannot use this resource and one that accepts a
+    # configured client id can. The check is that the authorization server does
+    # not ADVERTISE an endpoint it does not have — a client that trusted such a
+    # claim would fail at registration instead of at configuration.
+    check("the authorization server does not advertise registration it lacks",
+          not as_meta.get("registration_endpoint"),
+          "no registration_endpoint; clients use a pre-registered client id")
+
+    # The document a client receives must stay a standards document. Fields
+    # only we emit would be invisible to every client that does not know them,
+    # while making the document non-standard for all of them.
+    known = {"resource", "authorization_servers", "scopes_supported",
+             "bearer_methods_supported", "resource_documentation", "resource_name",
+             "resource_signing_alg_values_supported", "resource_policy_uri",
+             "resource_tos_uri", "jwks_uri", "tls_client_certificate_bound_access_tokens",
+             "authorization_details_types_supported", "dpop_signing_alg_values_supported",
+             "dpop_bound_access_tokens_required", "signed_metadata"}
+    unknown = sorted(set(meta) - known)
+    check("the protected-resource document carries no invented fields", not unknown,
+          ", ".join(unknown) or "RFC 9728 fields only")
 
 
 # ------------------------------------------------------- reference client --
@@ -252,13 +269,13 @@ async def _drive_reference_client(tok: str) -> dict:
 
 
 def reference_client(tok: str) -> None:
-    print("\nreference client (official mcp SDK)")
+    print("\nreference client — official Python SDK")
     try:
         out = asyncio.run(asyncio.wait_for(_drive_reference_client(tok), timeout=120))
     except Exception as e:  # noqa: BLE001 — the failure IS the result
-        check("the official SDK completes a session", False, f"{type(e).__name__}: {e}"[:160])
+        check("the Python SDK completes a session", False, f"{type(e).__name__}: {e}"[:160])
         return
-    check("the official SDK completes a session", bool(out.get("server")),
+    check("the Python SDK completes a session", bool(out.get("server")),
           f"{out.get('server')} @ {out.get('version')}")
     check("it lists the same tools", "run_query" in out.get("tools", []),
           ", ".join(out.get("tools", [])))
@@ -266,6 +283,44 @@ def reference_client(tok: str) -> None:
           out.get("text", "")[:80])
     check("a refusal reaches it as a tool error it can show the user",
           out.get("refused") is True, out.get("refusal_text", "")[:80])
+
+
+TS_WITNESS = pathlib.Path(__file__).resolve().parent / "typescript_sdk.mjs"
+JS_HOME = pathlib.Path(os.environ.get("DAS_JS_HOME", "/opt/mcp-js"))
+
+
+def reference_client_typescript(tok: str) -> None:
+    """The same connection from a different language.
+
+    The script runs from the directory holding its dependencies because ES
+    module resolution starts at the importing file, not at the working
+    directory — so it is copied there rather than run in place.
+    """
+    print("\nreference client — official TypeScript SDK")
+    if not (JS_HOME / "node_modules").exists():
+        check("the TypeScript SDK completes a session", False,
+              f"no MCP SDK at {JS_HOME}; rebuild the tools image")
+        return
+    staged = JS_HOME / TS_WITNESS.name
+    try:
+        staged.write_text(TS_WITNESS.read_text())
+        env = dict(os.environ)
+        if c.CFG.get("DAS_ENTRA_TLS_INSECURE", "false").lower() in ("1", "true", "yes"):
+            # The family's self-signed-certificate switch, in node's spelling.
+            # Off in production, where the gateway presents a real certificate.
+            env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
+        proc = subprocess.run(["node", staged.name, URL, tok], cwd=JS_HOME,
+                              capture_output=True, text=True, timeout=180, env=env)
+    except Exception as e:  # noqa: BLE001
+        check("the TypeScript SDK completes a session", False, f"{type(e).__name__}: {e}"[:160])
+        return
+    for line in (proc.stdout or "").splitlines():
+        if line.strip():
+            print(f"      {line.strip()}")
+    detail = (proc.stdout or proc.stderr or "").strip().splitlines()
+    check("the TypeScript SDK completes a session, lists the tools, and sees the guard refuse",
+          proc.returncode == 0,
+          (detail[0] if proc.returncode == 0 else (proc.stderr or "").strip()[-140:]))
 
 
 def main() -> int:
@@ -279,6 +334,7 @@ def main() -> int:
     discovery(tok)
     if not a.skip_sdk:
         reference_client(tok)
+        reference_client_typescript(tok)
 
     passed = sum(1 for _, ok in _results if ok)
     print(f"\n{passed}/{len(_results)} client checks passed")
