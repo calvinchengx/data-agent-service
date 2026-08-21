@@ -23,6 +23,15 @@ make status
 | OpenMetadata | http://localhost:8585 | admin / admin (1.13.2) |
 | apim-emulator | https://localhost:8446 | management + gateway |
 
+## Seed the warehouse (Phase 1)
+
+```sh
+make tools-build   # once; the python runtime for seeds/harnesses
+make seed          # workspace contoso-analytics, warehouse contoso_warehouse, 9 gold tables
+```
+
+Seeds and harnesses run **inside the compose network** (`tools` container) so they reach every dependency exactly as the service does. The warehouse is addressed the way Fabric addresses it — advertised `connectionString`, database by display name, Entra token over TDS; see `docs/upstream-issues.md` #2 for the one DNS alias that makes that work locally.
+
 `make clean` resets volumes (OpenMetadata DB, fabric state, apim state).
 
 ## Production

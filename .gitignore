@@ -12,3 +12,4 @@ dist/
 evals/reports/
 load/reports/
 .nwave/
+seed/state.json

@@ -113,6 +113,17 @@ services:
       FABRIC_WAREHOUSE_SQL_URL: "server=sqlserver;user id=sa;password=Str0ng!Passw0rd;encrypt=disable;dial timeout=90;connection timeout=90"
     volumes:
       - fabric-data:/data
+    # Fabric encodes the WORKSPACE in a warehouse's SQL host
+    # (`<workspace>.datawarehouse.fabric.microsoft.com`) and a client names the
+    # database by display name. The emulator echoes the REST request's host into
+    # `connectionString` and resolves the workspace from the login server name
+    # (by id or name), so one DNS alias per seeded workspace lets a container use
+    # the documented, production-identical path with no override. Add one alias
+    # per workspace you seed.
+    networks:
+      default:
+        aliases:
+          - contoso-analytics.datawarehouse.fabric.microsoft.com
     healthcheck:
       test: ["CMD", "/usr/local/bin/fabric-emulator", "healthcheck"]
       interval: 10s
@@ -205,10 +216,25 @@ services:
       timeout: 3s
       retries: 5
 
+  # ------------------------------------------------------------- tools (ours)
+  # Seeds, e2e, evals, load — run INSIDE the network so they reach every
+  # dependency the way the service does:  docker compose run --rm tools <cmd>
+  tools:
+    profiles: [tools]
+    build:
+      context: .
+      dockerfile: docker/tools/Dockerfile
+    env_file: ${ENVFILE:-.env}
+    volumes:
+      - ./:/app:rw
+      - tools-venv:/app/.venv
+    working_dir: /app
+
   # ------------------------------------------------- data-agent-service (ours)
-  # Added in Phase 4. Placeholder kept out until there is something to run.
+  # Added in Phase 4.
 
 volumes:
+  tools-venv:
   entra-data:
   fabric-data:
   om-db-data:

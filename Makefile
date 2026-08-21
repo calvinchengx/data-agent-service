@@ -9,7 +9,8 @@
 # ENV=prod points every harness at real Azure via .env.prod (discipline rule 2).
 ENV     ?= local
 ENVFILE := $(if $(filter prod,$(ENV)),.env.prod,.env)
-COMPOSE  = docker compose --env-file $(ENVFILE) $(PROFILE)
+COMPOSE  = ENVFILE=$(ENVFILE) docker compose --env-file $(ENVFILE) $(PROFILE)
+TOOLS    = $(COMPOSE) --profile tools run --rm tools
 
 ifeq ($(OS),Windows_NT)
   SHELL := sh.exe
@@ -18,7 +19,7 @@ endif
 
 PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
-.PHONY: help doctor up down restart clean status logs ps pull seed test eval load ask
+.PHONY: help doctor up down restart clean status logs ps pull tools-build seed test eval load ask
 
 help: ## Show the available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -51,17 +52,20 @@ ps: ## Container states
 logs: ## Follow logs (SERVICE=name to filter)
 	$(COMPOSE) logs -f $(SERVICE)
 
+tools-build: ## Build the tools image (seeds/harnesses runtime)
+	$(COMPOSE) --profile tools build tools
+
 seed: ## Seed warehouse data, OpenMetadata semantics, authz, and APIM resources (Phases 1-6)
-	$(PY) seed/run.py --env $(ENV)
+	$(TOOLS) python -m seed.run $(ARGS)
 
 test: ## Unit + e2e witnesses (Phase 4+)
-	$(PY) e2e/run.py --env $(ENV)
+	$(TOOLS) python -m e2e.run $(ARGS)
 
 eval: ## Accuracy evals per use case (Phase 7)
-	$(PY) evals/runner.py --env $(ENV)
+	$(TOOLS) python -m evals.runner $(ARGS)
 
 load: ## Load tests (Phase 8)
-	$(PY) load/run.py --env $(ENV)
+	$(TOOLS) python -m load.run $(ARGS)
 
 ask: ## Ask the agent a question: make ask Q="..."
-	$(PY) -m agent.cli "$(Q)"
+	$(TOOLS) python -m agent.cli "$(Q)"
