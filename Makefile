@@ -19,7 +19,7 @@ endif
 
 PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
-.PHONY: help doctor up down restart clean status logs ps pull tools-build seed test eval load ask
+.PHONY: help doctor up down restart clean status logs ps pull tools-build seed test eval load client-config ask
 
 help: ## Show the available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -66,6 +66,9 @@ eval: ## Accuracy evals per use case (Phase 7)
 
 load: ## Load tests (Phase 8) — k6 in a container on the stack's network
 	$(PY) -m load.run $(ARGS)
+
+client-config: ## Paste-ready MCP client configuration (ARGS="--auth token")
+	$(TOOLS) python -m e2e.clients.configs $(ARGS)
 
 ask: ## Ask the agent a question: make ask Q="..."
 	$(TOOLS) python -m agent.cli $(ARGS) "$(Q)"

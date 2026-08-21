@@ -454,9 +454,41 @@ def phase9() -> None:
               f"python {py_rps}/s vs go {go_rps}/s")
 
 
+# --------------------------------------------------------------- phase 10 --
+def phase10() -> None:
+    """Client-agnostic: the surface works for clients that know nothing about it.
+
+    Delegated to e2e/clients/run.py, which drives the endpoint both by hand
+    (protocol shape, error codes, schema validity, discovery) and through the
+    official MCP SDK — an implementation with no knowledge of this server and
+    no reason to be accommodating.
+    """
+    import subprocess
+
+    out = subprocess.run([sys.executable, "-m", "e2e.clients.run"],
+                         capture_output=True, text=True, env={**os.environ})
+    tail = (out.stdout or out.stderr).strip().splitlines()
+    summary = next((line for line in reversed(tail) if "client checks passed" in line), "")
+    check("phase10", "every client-compatibility check passes",
+          out.returncode == 0 and summary.startswith(summary.split("/")[0]),
+          summary.strip()[:80])
+    if out.returncode != 0:
+        for line in tail:
+            if "FAIL" in line:
+                print("      " + line.strip())
+
+    # The configuration a person pastes into a client is generated from the
+    # running stack, so it cannot name a URL that stopped being true.
+    gen = subprocess.run([sys.executable, "-m", "e2e.clients.configs", "--client", "vscode"],
+                         capture_output=True, text=True, env={**os.environ})
+    check("phase10", "client configuration is generated from the running stack",
+          gen.returncode == 0 and c.CFG.get("DAS_WAREHOUSE_MCP_PATH", "/warehouse/mcp") in gen.stdout,
+          "vscode, claude-code, claude-desktop, cursor, sdk")
+
+
 PHASES = {"phase1": phase1, "phase2": phase2, "phase3": phase3, "phase4": phase4,
           "phase5": phase5, "phase6": phase6, "phase7": phase7, "phase8": phase8,
-          "phase9": phase9}
+          "phase9": phase9, "phase10": phase10}
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()

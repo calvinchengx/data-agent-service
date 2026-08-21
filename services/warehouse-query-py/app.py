@@ -31,7 +31,7 @@ import access
 import mcp as mcpproto
 from credential import Credential, Settings, TokenError
 from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from jose import jwt
 from sources import SQL_SCOPE, backend_for, guard, load_sources
 from sqlguard import Denied
@@ -111,10 +111,30 @@ def principal(authorization: str | None) -> Principal:
     return Principal(claims, token)
 
 
+def _metadata_url() -> str:
+    """Where a client should look for this resource's metadata (RFC 9728 §3.1).
+
+    The well-known segment goes between the host and the resource's PATH —
+    `https://host/.well-known/oauth-protected-resource/warehouse/mcp`, not
+    `https://host/warehouse/.well-known/…`. Getting this wrong is invisible
+    until a real client follows the challenge and gets a 404, which is exactly
+    what happened here.
+    """
+    base = os.environ.get("DAS_PUBLIC_BASE_URL", "").rstrip("/")
+    if not base:
+        return ""
+    parts = urllib.parse.urlsplit(base)
+    path = parts.path.rstrip("/")
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, "/.well-known/oauth-protected-resource" + path, "", ""))
+
+
 def _challenge() -> dict[str, str]:
-    base = os.environ.get("DAS_PUBLIC_BASE_URL", "")
-    return {"WWW-Authenticate":
-            f'Bearer realm="{AUDIENCE}", resource_metadata="{base}/.well-known/oauth-protected-resource"'}
+    url = _metadata_url()
+    challenge = f'Bearer realm="{AUDIENCE}"'
+    if url:
+        challenge += f', resource_metadata="{url}"'
+    return {"WWW-Authenticate": challenge}
 
 
 def _source(name: str | None):
@@ -388,7 +408,9 @@ async def mcp_endpoint(request: Request, authorization: str | None = Header(defa
     out = [r for r in (mcpproto.handle(m, tools=tools, call=lambda n, a: _dispatch(p, n, a))
                        for m in messages) if r is not None]
     if not out:
-        return JSONResponse(status_code=202, content=None)
+        # A notification gets 202 and NOTHING: a JSON `null` is a body, and a
+        # client that parses what it receives should not be handed one.
+        return Response(status_code=202)
     return JSONResponse(out if batch else out[0])
 
 
@@ -412,19 +434,10 @@ def protected_resource(request: Request):
         "scopes_supported": [f"{AUDIENCE}/{REQUIRED_SCOPE}"],
         "bearer_methods_supported": ["header"],
         "resource_documentation": f"{base}/docs",
+        # Entra does not implement RFC 7591 dynamic client registration, so a
+        # client cannot invent its own identity here: it uses one that has been
+        # registered in the tenant. Saying so in the document is kinder than
+        # letting a client discover it by failing to register.
+        "client_registration_required": False,
+        "client_id_hint": os.environ.get("DAS_AGENT_CLIENT_ID", ""),
     })
-
-
-@app.get("/.well-known/oauth-authorization-server", include_in_schema=False)
-def authorization_server():
-    """RFC 8414 pointer: the tenant is the authorization server, so clients are
-    sent to its own metadata rather than a copy that could drift."""
-    authority = ISSUER[:-len("/v2.0")] if ISSUER.endswith("/v2.0") else ISSUER
-    return JSONResponse({"issuer": ISSUER,
-                         "authorization_endpoint": f"{authority}/oauth2/v2.0/authorize",
-                         "token_endpoint": f"{authority}/oauth2/v2.0/token",
-                         "jwks_uri": JWKS_URL,
-                         "scopes_supported": [f"{AUDIENCE}/{REQUIRED_SCOPE}"],
-                         "response_types_supported": ["code"],
-                         "grant_types_supported": ["authorization_code", "refresh_token"],
-                         "code_challenge_methods_supported": ["S256"]})

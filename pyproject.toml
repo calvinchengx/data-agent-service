@@ -7,6 +7,8 @@ license = "Apache-2.0"
 dependencies = [
   "anthropic>=1.0.0",
   "fastapi>=0.141.1",
+  "jsonschema>=4.26.0",
+  "mcp>=2.0.0",
   "mssql-python>=0.9",
   "python-jose[cryptography]>=3.5.0",
   "sqlglot>=30.17.0",
@@ -15,6 +17,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "mcp>=2.0.0",
     "pytest>=8",
     "ruff>=0.6",
 ]
