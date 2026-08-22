@@ -278,7 +278,16 @@ def run(
                 answer.ms or int((time.time() - t0) * 1000),
             )
             results.append(result)
-            mark = "\033[32mpass\033[0m" if result.passed else "\033[31mFAIL\033[0m"
+            # Three outcomes, three labels. A decline printed as FAIL reads as
+            # a failure to anyone watching the run, however carefully the
+            # summary keeps it out of the denominator -- and the console is
+            # what a person actually reads.
+            if s.declined:
+                mark = "\033[33mskip\033[0m"
+            elif result.passed:
+                mark = "\033[32mpass\033[0m"
+            else:
+                mark = "\033[31mFAIL\033[0m"
             print(
                 f"  {mark}  [{question['tier']}] {label}: {question['question'][:64]}"
                 + (f"  — {s.detail}" if s.detail and not result.passed else ""),
