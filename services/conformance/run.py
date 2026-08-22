@@ -274,6 +274,19 @@ def conform(base: str) -> None:
         and described.get("withheldColumns", 0) > 0,
         f"{described.get('withheldColumns')} withheld",
     )
+    # The same question asked of the REST surface. Every other assertion here
+    # drives MCP, and that blind spot was real: one implementation filtered in
+    # its shared handler and the other only in its MCP dispatch, so the two
+    # disclosed different column lists from the same service and 27 green
+    # checks said nothing about it.
+    st, rest_described = ex.rest("GET", "/tables/dbo.dim_customer", alice)
+    check(
+        "withheld columns are not described over REST either",
+        st == 200
+        and "email" not in [c_["name"] for c_ in rest_described.get("columns", [])]
+        and rest_described.get("withheldColumns", 0) > 0,
+        f"http {st}, {rest_described.get('withheldColumns')} withheld",
+    )
     err, text = ex.tool(
         "run_query", {"sql": "SELECT customer_id, email FROM dbo.dim_customer"}, carol
     )

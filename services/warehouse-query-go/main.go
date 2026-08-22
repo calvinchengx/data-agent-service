@@ -25,7 +25,7 @@ import (
 
 var (
 	sources  map[string]Source
-	backend  = NewTdsBackend()
+	backend  Backend = NewTdsBackend()
 	rules    *Rules
 	roles    *RoleResolver
 	cred     *Credential

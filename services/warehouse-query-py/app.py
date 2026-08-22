@@ -298,12 +298,21 @@ def describe_table(
             reason=str(e)[:300],
         )
         raise HTTPException(403 if denied else 502, _engine_message(e)) from None
+    # Describe only what the caller may read. This is the same filtering the
+    # MCP path applies, and it belongs on BOTH surfaces: the Go executor has
+    # always done it in its shared handler, and this route returning the raw
+    # description meant the two implementations disclosed different things
+    # from the same service. The conformance suite drives MCP, so it could not
+    # see the difference.
+    out, hidden = _filter_columns(p, out)
     audit(
         op="describe_table",
         user=p.name,
+        roles=list(p.roles),
         source=src.name,
         table=qualified_name,
         verdict="ok",
+        hidden=len(hidden),
         ms=int((time.time() - t0) * 1000),
     )
     return {"source": src.name, **out}

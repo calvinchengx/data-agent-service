@@ -20,6 +20,7 @@ dependencies = [
 dev = [
     "mcp>=2.0.0",
     "pytest>=8",
+    "pytest-cov>=7",
     # Pinned to a floor rather than a version: the ruleset below is what makes
     # runs reproducible, and an older ruff would not understand it.
     "ruff>=0.16",

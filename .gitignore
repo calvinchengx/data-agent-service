@@ -20,3 +20,9 @@ website/src/content/docs/
 website/.astro/
 _site/
 .pnpm-store/
+
+# Coverage artefacts: the numbers are published as badges, not committed.
+.coverage
+coverage.xml
+cover.out
+htmlcov/
