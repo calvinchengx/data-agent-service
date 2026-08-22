@@ -233,11 +233,41 @@ def ensure_data_plane_scope() -> None:
     First-party resources in a real tenant expose their own scopes, so this
     finds them and does nothing.
     """
-    scope = c.CFG.get("DAS_SQL_SCOPE", "")
+    for scope in data_plane_scopes():
+        _expose(scope)
+
+
+def data_plane_scopes() -> list[str]:
+    """Every delegated scope this deployment performs an exchange for.
+
+    One list, because the failure is identical whichever resource is missing
+    and it always reads as an outage rather than as a missing registration:
+    the token is issued, and the resource refuses it at sign-in. The Databricks
+    adapter hit this in phase 13 and the publisher hit it again in phase 16 --
+    the second time on Fabric, for a dashboard rather than a query.
+    """
+    scopes = [c.CFG.get("DAS_SQL_SCOPE", "")]
+    scopes.extend(
+        src["obo_scope"]
+        for src in json.loads(c.CFG.get("DAS_SOURCES", "[]") or "[]")
+        if isinstance(src, dict) and src.get("obo_scope")
+    )
+    # Publishing a dashboard reaches two more resources as the user: Fabric to
+    # create the items, and Power BI to evaluate the DAX that verifies them.
+    scopes.append(
+        c.CFG.get("DAS_FABRIC_SCOPE", "https://api.fabric.microsoft.com/user_impersonation")
+    )
+    scopes.append(
+        c.CFG.get("DAS_PBI_SCOPE", "https://analysis.windows.net/powerbi/api/user_impersonation")
+    )
+    return [s for s in dict.fromkeys(scopes) if s]
+
+
+def _expose(scope: str) -> None:
     resource, _, value = scope.rpartition("/")
     if not resource or not value:
         return
-    app_id = c.graph_ensure_resource_app(resource, "Azure SQL Database")
+    app_id = c.graph_ensure_resource_app(resource, resource)
     app = by_app_id(app_id)
     if app and has_scope(app, value):
         return

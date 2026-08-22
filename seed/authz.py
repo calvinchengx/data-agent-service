@@ -85,6 +85,19 @@ PERSONAS = [
         "role": None,
         "workspace_role": None,
     },
+    # Publishing is a privileged act, and Fabric already says so: creating an
+    # item needs Contributor, while asking a question needs only Viewer. The
+    # first attempt to publish a promoted dashboard was refused for exactly
+    # that reason -- as the ASKING USER, which is the property the whole
+    # service advertises. So the flow needs someone who may write, and
+    # modelling that as a separate person is how it actually works: an analyst
+    # proposes a dashboard, someone who owns the workspace publishes it.
+    {
+        "upn": "erin@entraemulator.dev",
+        "displayName": "Erin Publisher",
+        "role": "Data.Admin",
+        "workspace_role": "Contributor",
+    },
 ]
 
 # role -> the security group that grants it. These are what an IGA tool

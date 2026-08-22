@@ -43,7 +43,7 @@ unlikely.
 | **Runs on your laptop, deploys to real Azure unchanged** | The whole stack runs on the emulator family; switching to Fabric, APIM and Entra is configuration, not a code path | [`docs/10-production.md`](docs/10-production.md) |
 | **Nothing here is claimed without something that checks it** | Every capability carries a command that proves it; where something is designed but not built, the docs say so | 88 end-to-end witnesses, in CI on every push |
 
-Status: **Phases 0-15 landed** — see [docs/00-plan.md](docs/00-plan.md).
+Status: **Phases 0-16 landed** — see [docs/00-plan.md](docs/00-plan.md).
 
 ## Quick start
 

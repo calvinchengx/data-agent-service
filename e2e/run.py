@@ -1348,6 +1348,174 @@ def phase15() -> None:
     )
 
 
+def phase16() -> None:
+    """Publishing: a dashboard that is checked before it is recorded.
+
+    The whole point of the verify step is that it can REFUSE, so both outcomes
+    are witnessed -- a measure that agrees with its SQL is published and
+    recorded, and one that does not is neither.
+    """
+    from agent import identity
+    from publisher import model, publish, report
+    from seed.govern import om
+
+    state = c.load_state()
+    workspace, warehouse = state.get("workspace", ""), state.get("warehouse", "")
+
+    model.COLUMNS_BY_TABLE = {
+        "dbo.fct_revenue_summary": ("country", "revenue_usd", "fiscal_year_label")
+    }
+    measures = model.measures_for(
+        ("sum(t0.revenue_usd)",), ("dbo.fct_revenue_summary",), {"revenue_usd": "Net Revenue"}
+    )
+    tmsl = model.tmsl(
+        "witness",
+        workspace,
+        warehouse,
+        {"dbo.fct_revenue_summary": [{"name": "revenue_usd", "dataType": "double"}]},
+        measures,
+    )
+    check(
+        "phase16",
+        "the model reads the warehouse in place, carrying no copy of it",
+        tmsl["model"]["tables"][0]["partitions"][0]["mode"] == "directLake"
+        and tmsl["compatibilityLevel"] == 1604,
+        "directLake, compatibilityLevel 1604",
+    )
+
+    # Publishing is a privileged act and Fabric says so: creating an item needs
+    # Contributor, asking a question needs only Viewer. Witnessed as the
+    # ASKING USER, which is the property the service advertises -- a viewer who
+    # could publish would mean the OBO chain was not reaching Fabric at all.
+    viewer = identity.token_for("carol@entraemulator.dev")
+    from publisher import fabric as pfab
+
+    refused = ""
+    try:
+        pfab.create_or_update(
+            workspace,
+            "semanticModels",
+            "SemanticModel",
+            "witness_viewer_denied",
+            "should not exist",
+            [publish.part("model.bim", tmsl)],
+            pfab.on_behalf_of(viewer, pfab.FABRIC_AUDIENCE, "witness"),
+        )
+    except Exception as e:  # noqa: BLE001 — the refusal IS the assertion
+        refused = str(e)
+    check(
+        "phase16",
+        "a viewer may ask questions and may not publish",
+        "403" in refused or "InsufficientPrivileges" in refused,
+        refused[:80] or "a viewer published a dashboard",
+    )
+
+    report_path = pathlib.Path(__file__).resolve().parents[1] / "promoter" / "candidates.json"
+    released = (
+        json.loads(report_path.read_text()).get("released", []) if report_path.exists() else []
+    )
+    candidate = next((r for r in released if r["source"] == state.get("warehouse_name")), None)
+    if candidate is None:
+        check(
+            "phase16",
+            "a released candidate is available to publish",
+            False,
+            "run `python -m promoter.run` against a stack with recurring traffic",
+        )
+        return
+
+    publisher = identity.token_for("erin@entraemulator.dev")
+    columns = {
+        t: [{"name": col, "dataType": "string"} for col in ("country", "fiscal_year_label")]
+        + [{"name": "revenue_usd", "dataType": "double"}]
+        for t in candidate["tables"]
+    }
+
+    def run_sql(source: str, sql: str):
+        base = GW + c.CFG.get("DAS_WAREHOUSE_MCP_PATH", "/warehouse/mcp")
+        _st, _hd, text = c.http(
+            "POST",
+            base,
+            headers={"Authorization": "Bearer " + publisher},
+            json_body={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "run_query", "arguments": {"sql": sql, "source": source}},
+            },
+        )
+        payload = json.loads(text)["result"]
+        return json.loads(payload["content"][0]["text"])["rows"]
+
+    done = publish.publish(
+        candidate,
+        user_token=publisher,
+        workspace=workspace,
+        warehouse=warehouse,
+        columns=columns,
+        names={"revenue_usd": "Net Revenue"},
+        run_sql=run_sql,
+    )
+    check(
+        "phase16",
+        "the semantic model and the report are both created in Fabric",
+        bool(done.semantic_model_id) and bool(done.report_id),
+        f"model {done.semantic_model_id[:8]} · report {done.report_id[:8]}",
+    )
+    check(
+        "phase16",
+        "the DAX measure answers what the SQL it came from answers",
+        done.agrees,
+        done.note,
+    )
+
+    # The refusal path. A measure that disagrees must not reach the catalog,
+    # because a dashboard nobody can trust is worse than one that never
+    # shipped -- people stop checking after the first week.
+    disagreeing, _note = publish.compare(
+        done.rows_dax, [[*row[:-1], float(row[-1]) + 1] for row in done.rows_sql]
+    )
+    check(
+        "phase16",
+        "a measure that disagrees with its SQL is refused",
+        not disagreeing,
+        "a wrong answer would have been published",
+    )
+
+    if done.agrees:
+        publish.record_lineage(done, candidate)
+    dash = om(
+        "GET",
+        f"/dashboards/name/das_dashboards.{done.title.replace(' ', '_')}",
+        ok=(200, 404),
+    )
+    check(
+        "phase16",
+        "the published dashboard is in the catalog",
+        isinstance(dash, dict) and bool(dash.get("id")),
+        dash.get("fullyQualifiedName", "not found") if isinstance(dash, dict) else "not found",
+    )
+    lineage = (
+        om(
+            "GET",
+            f"/lineage/dashboard/{dash['id']}?upstreamDepth=1&downstreamDepth=0",
+            ok=(200, 404),
+        )
+        if isinstance(dash, dict) and dash.get("id")
+        else {}
+    )
+    nodes = {n["id"]: n.get("fullyQualifiedName", "") for n in (lineage or {}).get("nodes", [])}
+    upstream = {nodes.get(e["fromEntity"], "") for e in (lineage or {}).get("upstreamEdges", [])}
+    check(
+        "phase16",
+        "the dashboard's lineage names the tables it reads",
+        any(t.rpartition(".")[2] in u for u in upstream for t in candidate["tables"]),
+        ", ".join(sorted(upstream)) or "no upstream lineage",
+    )
+
+    assert report.visual_type(tuple(candidate["dimensions"])) in {"card", "barChart", "tableEx"}
+
+
 # ---------------------------------------------------------------- quality --
 def quality() -> None:
     """The lint and type gates, asserted by RUNNING them.
@@ -1469,6 +1637,7 @@ PHASES = {
     "phase13": phase13,
     "phase14": phase14,
     "phase15": phase15,
+    "phase16": phase16,
 }
 
 MANIFEST = pathlib.Path(__file__).resolve().parents[1] / "docs" / "witnesses.json"

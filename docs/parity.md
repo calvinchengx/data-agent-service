@@ -28,6 +28,9 @@ same check has been watched passing against a real tenant.
 | Managed identity (App Service protocol) | 🟢 | `e2e.run` phase3 | not yet |
 | Infrastructure definition parses, and declares what the runbook copies | 🟢 | `e2e.run` phase11, `terraform validate` | not yet |
 | App registration, exposed scope and federated credential are declared | 🟢 | `terraform validate` | not yet — and the emulator cannot witness the federated path at all (upstream #6) |
+| A promoted dashboard is published under the asker's identity, and a viewer cannot | 🟢 | `e2e.run` phase16 | not yet |
+| The DAX measure answers what the SQL it was promoted from answers | 🟢 | `e2e.run` phase16 | not yet |
+| The published report **renders** | ⬜ | none, and there cannot be one here — the emulator persists a report definition and does not interpret it, deliberately | not yet |
 | On-behalf-of carries the **user** to the data plane | 🟢 | `e2e.run` phase3 | not yet |
 | Secretless OBO (federated credential) | 🔴 blocked upstream (#6) | — | not yet — expected to work; step 3 of the runbook |
 | MCP tools published through the gateway | 🟢 | `e2e.run` phase4 | not yet |
