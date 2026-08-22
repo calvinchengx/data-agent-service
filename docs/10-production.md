@@ -157,7 +157,7 @@ make test ENV=prod          # the witnesses
 make eval ENV=prod          # accuracy, including the catalog ablation
 ```
 
-### How the harness signs in, and why there is no service principal
+### How the harness signs in
 
 The evals need two identities, and neither is an application secret.
 
@@ -171,12 +171,35 @@ and re-run whatever the agent ran. In Azure it takes a **managed identity** —
 the same `IDENTITY_ENDPOINT` the executor uses — so it holds no credential at
 all. Grant that identity read access on the warehouse and nothing else.
 
-A dedicated service principal with a client secret would work and is
-deliberately not recommended. It is a standing credential that must be stored,
-rotated and audited, in a settings file that already says
-`DAS_SEED_CLIENT_SECRET=` empty for exactly that reason. A managed identity
-removes the secret rather than protecting it, which is the same argument the
-executor's own on-behalf-of path makes.
+**A service principal is not the thing to avoid — a stored secret is.** The two
+are easy to conflate, and worth separating, because a managed identity *is* a
+service principal: it has a service principal object in the directory like any
+other. What differs is only what proves its identity.
+
+| Credential | Who stores it | Rotation |
+|---|---|---|
+| Client secret | you | yours to do, forever |
+| Certificate | you | yours to do, forever |
+| Federated credential | nobody | nothing to rotate |
+| Managed identity | the platform | the platform's |
+
+So a dedicated service principal is a perfectly good answer, provided its
+credential is federated rather than stored. For CI that is an app registration
+trusting the GitHub Actions OIDC issuer:
+
+```
+issuer   https://token.actions.githubusercontent.com
+subject  repo:<org>/<repo>:ref:refs/heads/main
+audience api://AzureADTokenExchange
+```
+
+`seed/apps.py::ensure_federated_credential` already creates exactly this shape —
+it is how the executor's on-behalf-of path became secretless — so wiring the
+harness to it is configuration rather than new machinery.
+
+`client_credentials` with a secret still works and is still supported: set
+`DAS_SEED_CLIENT_ID` and `DAS_SEED_CLIENT_SECRET`. It is the third choice
+because it is the only one that leaves something to leak.
 
 Where no managed identity exists — a laptop against a real tenant — supply a
 token instead: `DAS_ACCESS_TOKEN_<AUDIENCE>`, minted however the tenant allows.
