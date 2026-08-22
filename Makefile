@@ -23,7 +23,7 @@ endif
 
 PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
-.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance client-config ask
+.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance client-config ask docs coverage coverage-python coverage-go coverage-manifest witnesses-manifest witnesses-check unit
 
 help: ## Show the available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -147,6 +147,21 @@ witnesses-manifest: ## Record this run's witness counts into docs/witnesses.json
 
 witnesses-check: ## Fail if docs/witnesses.json disagrees with a real run
 	$(TOOLS) python -m e2e.run --check-manifest $(ARGS)
+
+# The one toolchain that is NOT containerised. The docs site is built by
+# pnpm on the host, and that is a deliberate exception: it produces a static
+# site rather than touching the stack, and a container round-trip for every
+# edit would make writing docs slower than writing code.
+#
+# The trap it creates, which has already cost a day: installing node_modules
+# from inside a Linux container leaves platform-specific binaries (esbuild)
+# that the host cannot execute, and the failure names esbuild rather than the
+# install, so it reads as a broken dependency. If `make docs` fails that way,
+# `rm -rf node_modules website/node_modules && pnpm install --frozen-lockfile`
+# on the HOST is the fix.
+docs: ## Build the documentation site locally (pnpm on the host, not a container)
+	pnpm install --frozen-lockfile
+	pnpm run docs:build
 
 eval: ## Accuracy evals per use case (Phase 7)
 	$(TOOLS) python -m evals.runner $(ARGS)
