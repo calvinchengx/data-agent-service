@@ -81,9 +81,20 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      # Bicep is bundled with the az CLI, which the runner image already has.
-      - name: bicep build
-        run: az bicep build --file infra/main.bicep --stdout > /dev/null
+      # Terraform replaced Bicep: one definition covers the resources AND the
+      # app registration, which ARM cannot express. All three steps are offline
+      # -- `init -backend=false` only fetches providers, and nothing here
+      # contacts Azure or touches state.
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.0
+          terraform_wrapper: false
+      - name: terraform fmt
+        run: terraform -chdir=infra/terraform fmt -check -recursive
+      - name: terraform init
+        run: terraform -chdir=infra/terraform init -backend=false -input=false
+      - name: terraform validate
+        run: terraform -chdir=infra/terraform validate
 
   # The whole thing, from nothing: bring the stack up, seed it, and run every
   # witness. This is the job that would notice a fresh clone cannot reach green.
@@ -101,6 +112,11 @@ jobs:
         run: make stack
       - name: executor contract, both implementations
         run: make conformance
+      # The witnesses badge is generated from docs/witnesses.json by the docs
+      # site, which never runs the stack. This is what stops that number
+      # drifting away from what the suite actually witnesses.
+      - name: the witnesses badge matches this run
+        run: make witnesses-check
       - name: what failed
         if: failure()
         run: |
