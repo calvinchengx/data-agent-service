@@ -38,6 +38,25 @@ for upn in '$PERSONAS'.split():
 " 2>/dev/null | tr -d '\r' | grep '^DAS_TOKEN_')
 [ -n "$MINTED" ] || { echo "could not mint tokens — is the stack up?"; exit 1; }
 
+# The gateway answers on a PUBLISHED port here, not on its compose hostname,
+# and the published port is chosen by compose rather than by us -- 8445 is
+# taken on this host, so the gateway lands on 8446. Asking docker keeps this
+# correct when that changes; a literal would be right until the day it wasn't.
+GW_ADDR=$(docker compose port apim-emulator 8445 2>/dev/null | tail -1)
+if [ -n "$GW_ADDR" ]; then
+  export DAS_CLAUDE_APIM_BASE="https://localhost:${GW_ADDR##*:}"
+  echo "gateway (published): $DAS_CLAUDE_APIM_BASE"
+fi
+
+# The catalog's gateway key is a `keyvault:` reference, and Key Vault is
+# inside the network too -- so it is resolved there and handed over as a
+# literal, exactly like the tokens. Resolving on the host fails twice: no
+# DAS_KEYVAULT_URL in this process, and no route to the vault if there were.
+OM_KEY=$(docker compose --profile tools run --rm -T tools python -c "
+from seed import common as c
+print(c.setting('DAS_OM_SUBSCRIPTION_KEY'))" 2>/dev/null | tr -d '\r' | tail -1)
+[ -n "$OM_KEY" ] && export DAS_OM_SUBSCRIPTION_KEY="$OM_KEY"
+
 export DAS_HARNESS_AUTH=token
 while IFS= read -r line; do export "${line?}"; done <<< "$MINTED"
 echo "tokens minted: $(echo "$MINTED" | wc -l | tr -d ' ') personas"
@@ -48,23 +67,49 @@ DAS_SOURCES=$(python3 scripts/host_sources.py)
 # sign-in goes through a name only the compose network resolves cannot be
 # scored from here, and saying so now is better than a traceback thirty lines
 # deep once the model has already been asked.
-if ! uv run python - <<'PREFLIGHT'
-import json, socket, sys, urllib.parse
+# The scorer signs in to each source to run the reference SQL. A source whose
+# sign-in goes through a name only the compose network resolves cannot be
+# scored from here, and saying so now is better than a traceback thirty lines
+# deep once the model has already been asked.
+#
+# Scoped to the sources THIS run needs, read from the questions themselves. An
+# earlier version asked whether any CONFIGURED source was unreachable, which
+# refused a PostgreSQL-only use case because a Fabric source existed in the
+# same file — a preflight that blocks a run it has no reason to block.
+if ! DAS_EVAL_USECASE="${DAS_EVAL_USECASE:-}" uv run python - "$@" <<'PREFLIGHT'
+import json, pathlib, socket, sys, urllib.parse
 sys.path.insert(0, ".")
 from seed import common as c
 
+argv = sys.argv[1:]
+usecase = "contoso"
+for i, arg in enumerate(argv):
+    if arg == "--usecase" and i + 1 < len(argv):
+        usecase = argv[i + 1]
+    elif arg.startswith("--usecase="):
+        usecase = arg.split("=", 1)[1]
+
+questions = pathlib.Path("evals/usecases") / usecase / "questions.jsonl"
+default = c.CFG.get("DAS_DEFAULT_SOURCE", "")
+needed = set()
+for line in questions.read_text().splitlines():
+    if line.strip():
+        needed.add(json.loads(line).get("source") or default)
+
+kinds = {
+    s["name"]: s.get("kind", "fabric")
+    for s in json.loads(c.CFG.get("DAS_SOURCES", "[]"))
+}
 issuer = urllib.parse.urlsplit(c.CFG["DAS_ENTRA_ISSUER"]).hostname or ""
 try:
     socket.gethostbyname(issuer)
 except OSError:
-    kinds = {s.get("kind", "fabric") for s in json.loads(c.CFG.get("DAS_SOURCES", "[]"))}
-    if kinds - {"postgres"}:
-        print(f"cannot score every source from the host: the tenant ({issuer}) is not")
-        print("resolvable here, and a TDS source signs in through it for the reference SQL.")
-        print("Reachable from here: PostgreSQL sources. Try:")
-        print("  make eval-cli ARGS=\"--usecase support --tier L3 --ablation\"")
-        print("For the Fabric use case, run the in-container path (needs ANTHROPIC_API_KEY):")
-        print("  make eval ARGS=\"--usecase contoso --tier L3 --ablation\"")
+    unreachable = sorted(n for n in needed if kinds.get(n, "fabric") != "postgres")
+    if unreachable:
+        print(f"cannot score {usecase} from the host: it needs {', '.join(unreachable)},")
+        print(f"which signs in through the tenant ({issuer}) for the reference SQL, and that")
+        print("name is not resolvable here. Run the in-container path instead (needs an API key):")
+        print(f'  make eval ARGS="--usecase {usecase} --tier L3 --ablation"')
         sys.exit(1)
 PREFLIGHT
 then exit 1; fi

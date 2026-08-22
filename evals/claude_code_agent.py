@@ -46,6 +46,17 @@ WAREHOUSE_TOOLS = ("list_sources", "list_tables", "describe_table", "run_query")
 CATALOG_TOOLS = ("search_metadata", "semantic_search", "get_entity_details", "get_entity_lineage")
 
 
+# The floor. Not a straw man — a competent instruction with NOTHING in it about
+# consulting a catalog, checking a definition, or abstaining. Gold at 100% says
+# the harness cannot be the reason for a failure; this says what the score is
+# when none of the guidance helps, so the catalog delta is measured against a
+# real bottom rather than against zero.
+NAIVE_PROMPT = (
+    "You answer questions about data using the tools available to you. "
+    "Query what you need and give the user a clear answer."
+)
+
+
 def _insecure() -> bool:
     """Is the gateway's certificate self-signed here?
 
@@ -85,7 +96,40 @@ def _setting(key: str, default: str = "") -> str:
     return os.environ.get(key) or str(c.CFG.get(key, default))
 
 
-def mcp_config(token: str, *, om: bool) -> dict:
+def _stdio_catalog(strip: bool) -> dict:
+    """The catalog served through the bridge, optionally without its meaning.
+
+    A stdio entry rather than the gateway URL because the redaction happens in
+    the bridge: the tool surface has to stay identical — same names, same
+    schemas, same call sequence — while the fields carrying business meaning
+    come back empty. Removing the SERVER instead removes knowledge and tools
+    at once, and a delta measured that way cannot say which one mattered.
+    """
+    root = _setting("DAS_HOST_REPO") or str(pathlib.Path(__file__).resolve().parents[1])
+    args = [
+        "compose",
+        "--project-directory",
+        root,
+        "--env-file",
+        str(pathlib.Path(root) / ".env"),
+        "--profile",
+        "tools",
+        "run",
+        "--rm",
+        "-T",
+        "tools",
+        "python",
+        "-m",
+        "e2e.clients.stdio_bridge",
+        "--server",
+        "catalog",
+    ]
+    if strip:
+        args.append("--strip-semantics")
+    return {"command": "docker", "args": args}
+
+
+def mcp_config(token: str, *, om: bool, catalog: str = "full") -> dict:
     # No literal address here at all. `DAS_APIM_BASE` is the gateway the rest
     # of the service already uses; `DAS_CLAUDE_APIM_BASE` overrides it only
     # because this harness runs on the HOST, where the gateway answers on its
@@ -98,7 +142,9 @@ def mcp_config(token: str, *, om: bool) -> dict:
             "headers": {"Authorization": "Bearer " + token},
         }
     }
-    if om:
+    if om and catalog == "schema":
+        servers["catalog"] = _stdio_catalog(strip=True)
+    elif om:
         headers = {"Authorization": "Bearer " + token}
         key = c.setting("DAS_OM_SUBSCRIPTION_KEY") or _setting("DAS_OM_SUBSCRIPTION_KEY")
         if key:
@@ -151,12 +197,14 @@ def ask(
     token: str,
     *,
     om: bool = True,
+    catalog: str = "full",
+    naive: bool = False,
     model: str = "",
     effort: str = "",
     timeout: int = 300,
 ) -> agent_mod.Answer:
     del effort  # Claude Code has no per-call effort switch
-    config = mcp_config(token, om=om)
+    config = mcp_config(token, om=om, catalog=catalog)
     with tempfile.TemporaryDirectory() as tmp:
         path = pathlib.Path(tmp) / "mcp.json"
         path.write_text(json.dumps(config))
@@ -180,7 +228,7 @@ def ask(
             "--allowedTools",
             " ".join(allowed),
             "--system-prompt",
-            agent_mod.system_prompt(),
+            NAIVE_PROMPT if naive else agent_mod.system_prompt(),
         ]
         if model:
             cmd += ["--model", model]

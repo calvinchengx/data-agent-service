@@ -238,6 +238,8 @@ def run(
     *,
     agent_kind: str,
     om: bool,
+    catalog: str = "full",
+    naive: bool = False,
     repeats: int,
     tier: str | None,
     user: str,
@@ -259,7 +261,13 @@ def run(
                 answer = GoldAgent(token).ask(question)
             elif agent_kind == "claude-code":
                 answer = claude_code_agent.ask(
-                    question["question"], token, om=om, model=model, effort=effort
+                    question["question"],
+                    token,
+                    om=om,
+                    catalog=catalog,
+                    naive=naive,
+                    model=model,
+                    effort=effort,
                 )
             else:
                 answer = agent_mod.ask(
@@ -383,6 +391,18 @@ def main() -> int:
         help="run twice, with and without the catalog, and report the delta",
     )
     ap.add_argument("--no-context", action="store_true", help="run without the catalog only")
+    ap.add_argument(
+        "--schema-arm",
+        action="store_true",
+        help="add a third arm: the catalog connected but stripped of meaning, so the "
+        "delta separates 'did not know the definition' from 'had fewer tools'",
+    )
+    ap.add_argument(
+        "--floor",
+        action="store_true",
+        help="add a naive-prompt arm, to bound the bottom of the scale",
+    )
+    ap.add_argument("--naive", action="store_true", help="use the naive prompt for a single run")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--tier", default=None)
     ap.add_argument("--user", default=DEFAULT_USER)
@@ -391,19 +411,36 @@ def main() -> int:
     ap.add_argument("--env", default=os.environ.get("DAS_ENV", "local"))
     a = ap.parse_args()
 
-    runs: list[tuple[str, bool]] = []
+    # (label, catalog server present, catalog content, naive prompt)
+    runs: list[tuple[str, bool, str, bool]] = []
     if a.ablation:
-        runs = [("with catalog", True), ("without catalog", False)]
+        runs = [("with catalog", True, "full", False), ("without catalog", False, "full", False)]
+        if a.schema_arm:
+            # Inserted between the two, because that is where it sits
+            # conceptually: same tools as the full arm, same absence of meaning
+            # as the empty one.
+            runs.insert(1, ("schema only", True, "schema", False))
+        if a.floor:
+            runs.append(("naive floor", False, "full", True))
     else:
-        runs = [("without catalog" if a.no_context else "with catalog", not a.no_context)]
+        runs = [
+            (
+                "without catalog" if a.no_context else "with catalog",
+                not a.no_context,
+                "full",
+                a.naive,
+            )
+        ]
 
     report = {"usecase": a.usecase, "agent": a.agent, "runs": {}}
-    for label, om in runs:
+    for label, om, catalog, naive in runs:
         print(f"\n{label}")
         results = run(
             a.usecase,
             agent_kind=a.agent,
             om=om,
+            catalog=catalog,
+            naive=naive,
             repeats=a.repeats,
             tier=a.tier,
             user=a.user,
