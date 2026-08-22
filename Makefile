@@ -142,6 +142,16 @@ coverage: coverage-python coverage-go ## Both suites, both floors
 coverage-manifest: ## Record this run's coverage into docs/coverage.json (badge source)
 	python3 scripts/coverage_manifest.py
 
+GITLEAKS = docker run --rm -v "$(PWD):/repo" -w /repo zricethezav/gitleaks:v8.30.0
+
+secrets: ## Scan the working tree AND the history for committed secrets
+	@echo "== gitleaks (working tree)"; $(GITLEAKS) dir . --config .gitleaks.toml --no-banner --redact --verbose
+	@echo "== gitleaks (history)";      $(GITLEAKS) git . --config .gitleaks.toml --no-banner --redact --verbose
+
+vulns: ## Reachable vulnerabilities in the Go executor (govulncheck)
+	docker run --rm -v "$(PWD):/src" -w /src/services/warehouse-query-go $(GO_IMAGE) \
+		sh -c 'go run golang.org/x/vuln/cmd/govulncheck@latest ./...'
+
 witnesses-manifest: ## Record this run's witness counts into docs/witnesses.json
 	$(TOOLS) python -m e2e.run --write-manifest $(ARGS)
 

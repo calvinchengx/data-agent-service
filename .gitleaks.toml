@@ -1,0 +1,39 @@
+# Secret scanning.
+#
+# The history is clean: 134 commits, no findings, with every default rule
+# armed. So this file is deliberately small -- an allowlist is a hole, and each
+# one below is a generated artifact that is already gitignored rather than a
+# class of secret we have decided to tolerate.
+#
+# In CI the allowlist is close to unnecessary: a fresh checkout contains none of
+# these paths. It matters for `make secrets` on a developer's machine, where a
+# working tree holds caches and reports full of real, short-lived tokens. Those
+# ARE secrets; the point is that they are not in the repository, and a scanner
+# that cries wolf about them is a scanner people stop running.
+#
+# Note what is NOT allowlisted: docs, the README, .env.example and the seeds.
+# Seeded local credentials are published deliberately, but keeping those paths
+# armed is what would catch a real credential pasted into a document by
+# accident -- the most likely way one would ever land here.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated artifacts, none of them tracked by git"
+
+paths = [
+  # The pnpm content-addressable store for the docs site. Third-party package
+  # contents, including test fixtures that legitimately contain JWTs.
+  '''^\.pnpm-store/''',
+  '''(^|/)node_modules/''',
+  # k6 output and our own reports. The summaries embed the bearer tokens the
+  # load run used: real tokens, minutes of life, never committed.
+  '''^load/reports/''',
+  '''^evals/reports/''',
+  # What the seed wrote into the local stack: ids and the client secret it
+  # provisioned in the emulated Key Vault.
+  '''^seed/state\.json$''',
+  # The built docs site.
+  '''^website/dist/''',
+  '''^_site/''',
+]

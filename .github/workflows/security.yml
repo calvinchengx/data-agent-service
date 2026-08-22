@@ -1,0 +1,69 @@
+# Secret scanning and reachable-vulnerability scanning.
+#
+# Runs on pushes to main and on every pull request, because both are how work
+# lands here; and weekly, because vulnerabilities are published against code
+# that has not changed -- a repository that is finished still needs watching.
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '41 6 * * 2' # weekly, Tuesday 06:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    # A wedged run should fail rather than sit in GitHub's six-hour default,
+    # where "pending" and "stuck" look identical.
+    timeout-minutes: 15
+    steps:
+      # Full history: a secret that was committed and later removed is still
+      # in the pack, still cloneable, and still leaked. Scanning only the tip
+      # would report clean on exactly the case that matters most.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.0
+        run: |
+          curl -fsSL -o /tmp/gl.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gl.tgz -C /tmp gitleaks
+          sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan the working tree
+        run: gitleaks dir . --config .gitleaks.toml --no-banner --redact --verbose
+
+      # --verbose here too, and it is not noise: without it a failing history
+      # scan logs "leaks found: 3" and nothing else, so the one job whose
+      # entire purpose is to say WHICH line names no line. --redact still
+      # masks the value itself.
+      - name: Scan the history
+        run: gitleaks git . --config .gitleaks.toml --no-banner --redact --verbose
+
+  vulnerabilities:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/warehouse-query-go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/warehouse-query-go/go.mod
+          cache-dependency-path: services/warehouse-query-go/go.sum
+      # Reports only vulnerabilities the code can actually REACH, so a finding
+      # here is a call path rather than a dependency-tree coincidence.
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
