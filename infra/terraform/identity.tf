@@ -1,10 +1,10 @@
 # The identity chain, declared.
 #
-# Bicep could not express any of this: app registrations are Microsoft Graph
-# objects, not ARM resources, so the template this replaces left them to a
-# runbook. Both of the identity defects that cost the most time in this project
-# were mistakes in those hand-typed steps, which is the argument for declaring
-# them rather than describing them.
+# ARM cannot express any of this: app registrations are Microsoft Graph
+# objects, not ARM resources, so a resource-only definition has to leave them to
+# a runbook of hand-typed commands. Both of the identity defects that cost the
+# most time in this project were mistakes in exactly those steps, which is the
+# argument for declaring them rather than describing them.
 
 data "azurerm_client_config" "current" {}
 
@@ -92,8 +92,9 @@ resource "azuread_service_principal" "api" {
 }
 
 # The federated credential: the executor's managed identity proves it is the
-# API app WITHOUT a client secret. The Bicep path fell back to a secret in Key
-# Vault because a runbook step is easy to skip; declared, it is the default.
+# API app WITHOUT a client secret. When this step lives in a runbook it is easy
+# to skip, and the fallback secret in Key Vault becomes the path everyone
+# actually takes; declared here, secretless is the default.
 #
 # docs/upstream-issues.md #6 records that the local stack cannot exercise this
 # -- the entra emulator does not implement federated client assertions -- so

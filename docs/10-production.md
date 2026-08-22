@@ -10,10 +10,10 @@ lists every use of a development-only surface and fails on any that is not
 explicitly allowed with a reason.
 
 > **Not yet witnessed.** Nothing here has been run against a real tenant. The
-> template compiles, the harnesses are environment-agnostic, and every step
-> below is the operation this repo already performs locally — but "should work"
-> and "was watched working" are different claims, and `docs/parity.md` records
-> which is which.
+> definition parses and type-checks, the harnesses are environment-agnostic, and
+> every step below is the operation this repo already performs locally — but
+> "should work" and "was watched working" are different claims, and
+> `docs/parity.md` records which is which.
 
 ## What you need
 

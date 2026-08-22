@@ -11,12 +11,13 @@ same check has been watched passing against a real tenant.
 > against a tenant. A row that said otherwise would be the one thing this ledger
 > exists to prevent.
 >
-> What that costs is not hypothetical. While the definition was Bicep, the
-> runbook beside it drifted until its deploy command named three parameters that
-> did not exist and omitted two that were required — it could not have run, and
-> nothing said so, because nothing ever ran it. `terraform validate` and the
-> phase11 witnesses now check the definition against what the runbook claims,
-> which narrows that gap without closing it. Only a tenant closes it.
+> What that costs is not hypothetical. An earlier revision of this repo let the
+> runbook drift from the definition it called until its deploy command named
+> three parameters that did not exist and omitted two that were required — it
+> could not have run, and nothing said so, because nothing ever ran it.
+> `terraform validate` and the phase11 witnesses now check the definition
+> against what the runbook claims, which narrows that gap without closing it.
+> Only a tenant closes it.
 
 ## The system
 

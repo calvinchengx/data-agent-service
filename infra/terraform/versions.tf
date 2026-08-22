@@ -3,8 +3,8 @@
 # Two providers, doing two different jobs. `azurerm` declares the resources
 # ARM owns. `azuread` declares the app registration, its identifier URI, its
 # exposed scope and the federated credential — Microsoft Graph objects that
-# ARM cannot express at all, and which the Bicep template this replaces had to
-# leave to a runbook of `az ad` commands.
+# ARM cannot express at all, and which a resource-only definition has to leave
+# to a runbook of `az ad` commands.
 #
 # That gap was not cosmetic: the two hardest identity defects in this project
 # (an OBO exchange addressed to the wrong audience, and a missing

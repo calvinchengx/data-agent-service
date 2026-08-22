@@ -1,5 +1,5 @@
-# Every input the deployment takes. One-for-one with the Bicep parameters this
-# replaces, so an existing .env.prod keeps working.
+# Every input the deployment takes. Named to match the settings they become, so
+# filling .env.prod from `terraform output` is a copy rather than a lookup.
 
 variable "name" {
   description = "Short name that prefixes every resource. Lowercase letters and digits."

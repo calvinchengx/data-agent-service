@@ -813,8 +813,13 @@ def phase11() -> None:
     for f in tf_files:
         declared |= set(re.findall(r'^output "([a-z_0-9]+)"', f.read_text(), re.M))
     needed = {
-        "apim_name", "apim_gateway_url", "executor_url", "vault_uri",
-        "issuer", "executor_principal_id", "api_app_client_id",
+        "apim_name",
+        "apim_gateway_url",
+        "executor_url",
+        "vault_uri",
+        "issuer",
+        "executor_principal_id",
+        "api_app_client_id",
     }
     check(
         "phase11",
@@ -829,9 +834,17 @@ def phase11() -> None:
     # worst failure mode available.
     main_tf = (infra / "main.tf").read_text() if (infra / "main.tf").exists() else ""
     required_env = {
-        "DAS_ENTRA_ISSUER", "DAS_AGENT_AUDIENCE", "DAS_MIDDLE_TIER_CLIENT_ID",
-        "DAS_KEYVAULT_URL", "DAS_SOURCES", "DAS_SQL_AUDIENCE", "DAS_SQL_SCOPE",
-        "DAS_ROLE_SOURCE", "DAS_REQUIRED_SCOPE", "DAS_OM_URL", "AZURE_CLIENT_ID",
+        "DAS_ENTRA_ISSUER",
+        "DAS_AGENT_AUDIENCE",
+        "DAS_MIDDLE_TIER_CLIENT_ID",
+        "DAS_KEYVAULT_URL",
+        "DAS_SOURCES",
+        "DAS_SQL_AUDIENCE",
+        "DAS_SQL_SCOPE",
+        "DAS_ROLE_SOURCE",
+        "DAS_REQUIRED_SCOPE",
+        "DAS_OM_URL",
+        "AZURE_CLIENT_ID",
     }
     absent = {name for name in required_env if f'"{name}"' not in main_tf}
     check(
@@ -845,6 +858,35 @@ def phase11() -> None:
     # the comment recording that its absence is deliberate, and a check that
     # trips on its own explanation is a check nobody keeps.
     insecure_set = '"DAS_ENTRA_TLS_INSECURE"' in main_tf
+    # The runbook and the definition drifting apart is not hypothetical: an
+    # earlier revision told operators to pass three parameters that did not
+    # exist and omitted two that were required, so its deploy command could not
+    # have run. Nothing noticed, because nothing ever ran it. Asserting the
+    # example against the declarations is the cheap half of that lesson.
+    all_tf = "".join(f.read_text() for f in tf_files)
+    declared_vars = set(re.findall(r'^variable "([a-z_0-9]+)"', all_tf, re.M))
+    required_vars = {
+        m.group(1)
+        for m in re.finditer(r'^variable "([a-z_0-9]+)"\s*\{(.*?)^\}', all_tf, re.M | re.S)
+        if "default" not in m.group(2)
+    }
+    runbook = pathlib.Path("docs/10-production.md").read_text()
+    example = re.search(r"```hcl\n(.*?)```", runbook, re.S)
+    given = set(re.findall(r"^([a-z_0-9]+)\s*=", example.group(1), re.M)) if example else set()
+    unknown, missing = given - declared_vars, required_vars - given
+    check(
+        "phase11",
+        "the runbook's example names only settings the definition declares",
+        bool(example) and not unknown,
+        ", ".join(sorted(unknown)) if unknown else f"{len(given)} settings, all declared",
+    )
+    check(
+        "phase11",
+        "the runbook's example sets every setting the definition requires",
+        bool(example) and not missing,
+        ", ".join(sorted(missing)) if missing else f"{len(required_vars)} required, all present",
+    )
+
     check(
         "phase11",
         "the insecure development switch is never set in production",

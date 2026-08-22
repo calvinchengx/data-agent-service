@@ -81,10 +81,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      # Terraform replaced Bicep: one definition covers the resources AND the
-      # app registration, which ARM cannot express. All three steps are offline
-      # -- `init -backend=false` only fetches providers, and nothing here
-      # contacts Azure or touches state.
+      # One definition covers the resources AND the app registration, which
+      # ARM cannot express. All three steps are offline -- `init
+      # -backend=false` only fetches providers, and nothing here contacts Azure
+      # or touches state.
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.14.0
