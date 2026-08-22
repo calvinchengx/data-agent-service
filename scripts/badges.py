@@ -19,6 +19,18 @@ import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "docs" / "witnesses.json"
+COVERAGE = ROOT / "docs" / "coverage.json"
+
+# Not flattering on purpose. A repo that fails its build under 90% should not
+# paint 75% green.
+SCALE = ((90, "brightgreen"), (80, "green"), (70, "yellowgreen"), (60, "yellow"), (40, "orange"))
+
+
+def colour_for(pct: float) -> str:
+    for floor, name in SCALE:
+        if pct >= floor:
+            return name
+    return "red"
 
 
 def badge(label: str, message: str, colour: str) -> dict[str, object]:
@@ -54,7 +66,27 @@ def main() -> int:
     (out / "witnesses.json").write_text(
         json.dumps(badge("witnesses", f"{passed}/{total}", colour)) + "\n"
     )
-    print(f"badges: witnesses={passed}/{total} → {out}")
+
+    # The coverage badges README.md points at. They are emitted here, from a
+    # committed manifest, because the docs site never runs a test suite -- and
+    # a badge whose endpoint nothing writes is a broken image on the front
+    # page, which is how these two spent their first day.
+    if not COVERAGE.exists():
+        print(f"FAIL: {COVERAGE} does not exist — run `make coverage-manifest`.")
+        return 1
+    try:
+        numbers = json.loads(COVERAGE.read_text())
+        python_pct, go_pct = float(numbers["python"]), float(numbers["go"])
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        print(f"FAIL: {COVERAGE} is not a coverage manifest ({e}).")
+        return 1
+
+    for name, pct in (("python", python_pct), ("go", go_pct)):
+        (out / f"coverage-{name}.json").write_text(
+            json.dumps(badge(f"{name} coverage", f"{pct:.0f}%", colour_for(pct))) + "\n"
+        )
+
+    print(f"badges: witnesses={passed}/{total} python={python_pct}% go={go_pct}% → {out}")
     return 0
 
 

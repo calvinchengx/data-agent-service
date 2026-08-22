@@ -139,6 +139,9 @@ coverage-go: ## Go unit coverage, failing under the floor
 
 coverage: coverage-python coverage-go ## Both suites, both floors
 
+coverage-manifest: ## Record this run's coverage into docs/coverage.json (badge source)
+	python3 scripts/coverage_manifest.py
+
 witnesses-manifest: ## Record this run's witness counts into docs/witnesses.json
 	$(TOOLS) python -m e2e.run --write-manifest $(ARGS)
 

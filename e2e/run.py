@@ -1396,6 +1396,54 @@ def quality() -> None:
 
     config = pathlib.Path(".golangci.yml")
     text = config.read_text() if config.exists() else ""
+    # Every shields endpoint the README points at must actually be written by
+    # scripts/badges.py. Two of them were not: the README advertised python and
+    # go coverage, a second script that nothing called would have produced
+    # them, and the site published only the witnesses document -- so the front
+    # page carried two broken images and no test could tell.
+    #
+    # This runs the generator rather than restating what it emits, because a
+    # hardcoded list of expected filenames is the same drift in a new place.
+    import tempfile
+
+    readme = pathlib.Path("README.md").read_text()
+    wanted = set(re.findall(r"data-agent-service%2F([a-z-]+)\.json", readme))
+    with tempfile.TemporaryDirectory() as tmp:
+        generated = subprocess.run(
+            [sys.executable, "scripts/badges.py", "--out", tmp],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        produced = {f.stem for f in pathlib.Path(tmp).glob("*.json")}
+    missing = wanted - produced
+    check(
+        "quality",
+        "every badge the README shows is an endpoint the site actually publishes",
+        generated.returncode == 0 and not missing,
+        ", ".join(sorted(missing)) if missing else f"{len(wanted)} badges, all generated",
+    )
+
+    # A green coverage badge must imply a passing gate. CI fails the build under
+    # the floor independently, so the only window where the badge could be wrong
+    # is between a drop and a manifest refresh -- and the build is already red
+    # for the whole of it. This closes the other direction: a manifest that
+    # records a number the gate would reject.
+    floor = 90.0
+    try:
+        recorded = json.loads(pathlib.Path("docs/coverage.json").read_text())
+        low = {k: v for k, v in recorded.items() if float(v) < floor}
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+        recorded, low = {}, {"manifest": str(e)}
+    check(
+        "quality",
+        "the recorded coverage is at or above the floor the gate enforces",
+        bool(recorded) and not low,
+        ", ".join(f"{k}={v}" for k, v in low.items())
+        if low
+        else ", ".join(f"{k} {v}%" for k, v in sorted(recorded.items())),
+    )
+
     check(
         "quality",
         "go lint configuration is present and enables the checks that matter",
@@ -1460,9 +1508,32 @@ if __name__ == "__main__":
         help="fail if the committed manifest disagrees with this run",
     )
     a = ap.parse_args()
-    for name in a.only or sorted(PHASES):
-        print(f"\n{name}")
-        PHASES[name]()
+
+    # The gateway allows 60 calls a minute per caller, counted by the bearer
+    # token -- and the whole suite signs in as the same few personas. A full
+    # run makes far more than 60 calls, so late phases were being throttled by
+    # early ones and the result depended on where in the 60-second window each
+    # phase happened to land. That is how the same tree scored 86/86 and 80/86
+    # minutes apart, and a manifest written from either would have been a
+    # badge that lies.
+    #
+    # Raising it for the duration is honest because nothing here witnesses the
+    # WAREHOUSE limit: phase12 proves the gateway's cost controls against the
+    # LLM route's own quota, which this does not touch. load/run.py does the
+    # same thing for the same reason.
+    from seed.apim import set_rate_limit
+
+    throttle = int(c.CFG.get("DAS_RATE_CALLS", "60"))
+    full_run = not a.only
+    if full_run:
+        set_rate_limit(1_000_000)
+    try:
+        for name in a.only or sorted(PHASES):
+            print(f"\n{name}")
+            PHASES[name]()
+    finally:
+        if full_run:
+            set_rate_limit(throttle)
     failed = [r for r in _results if not r[2]]
     print(f"\n{len(_results) - len(failed)}/{len(_results)} checks passed")
 
