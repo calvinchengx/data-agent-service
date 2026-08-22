@@ -8,6 +8,10 @@
 #
 # ENV=prod points every harness at real Azure via .env.prod (discipline rule 2).
 ENV     ?= local
+# `make stack` runs the benchmark its witnesses read. Short and permissive by
+# default: the point there is that both executors serve load, not what a shared
+# runner's latency is. Override for a real measurement.
+STACK_LOAD_ARGS ?= --vus 5 --stage 10s --p95 5000
 ENVFILE := $(if $(filter prod,$(ENV)),.env.prod,.env)
 COMPOSE  = ENVFILE=$(ENVFILE) docker compose --env-file $(ENVFILE) $(PROFILE)
 TOOLS    = $(COMPOSE) --profile tools run --rm -e ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN tools
@@ -19,7 +23,7 @@ endif
 
 PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
-.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load lint format typecheck conformance client-config ask
+.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance client-config ask
 
 help: ## Show the available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -60,6 +64,8 @@ stack: ## Everything from nothing: start, seed, apply, verify (what CI runs)
 	$(MAKE) seed
 	@echo "== applying ids the seed created (the executor reads them at start)"
 	$(COMPOSE) up -d
+	$(MAKE) load-compare ARGS="$(STACK_LOAD_ARGS)"
+	$(MAKE) load ARGS="$(STACK_LOAD_ARGS)"
 	$(MAKE) test
 
 seed: ## Seed warehouse data, OpenMetadata semantics, authz, and APIM resources (Phases 1-6)
@@ -70,6 +76,10 @@ seed: ## Seed warehouse data, OpenMetadata semantics, authz, and APIM resources 
 # moves the failure onto whoever clones. LINT_MODE=host is the escape hatch,
 # not the default.
 GOLANGCI  = golangci/golangci-lint:v2.13.1
+# Terraform runs in a container like every other tool here, so a fresh clone
+# still needs Docker and nothing else. `init -backend=false` downloads the
+# providers and touches no state, which is what makes these checks offline.
+TERRAFORM = docker run --rm -v "$(PWD)/infra/terraform:/w" -w /w hashicorp/terraform:1.14
 LINT_MODE ?= container
 ifeq ($(LINT_MODE),host)
   RUFF = uv run ruff
@@ -84,10 +94,13 @@ endif
 lint: ## Lint and type-check everything (never edits; use `make format` for that)
 	@echo "== ruff (python lint)";      $(RUFF) check .
 	@echo "== ruff (python format)";    $(RUFF) format --check .
+	@echo "== terraform (infra)";       $(TERRAFORM) fmt -check -recursive
+	@$(TERRAFORM) init -backend=false -input=false >/dev/null && $(TERRAFORM) validate
 	@echo "== ty (python types)";       $(TY) check
 	@echo "== golangci-lint (go)";      $(GOLINT)
 
 format: ## Apply formatting and safe fixes — the only target that edits files
+	$(TERRAFORM) fmt -recursive
 	$(RUFF) check . --fix
 	$(RUFF) format .
 	docker run --rm -v "$(PWD):/src" -w /src/services/warehouse-query-go $(GOLANGCI) golangci-lint fmt ./...
@@ -101,11 +114,26 @@ typecheck: ## Python types only
 test: ## Unit + e2e witnesses (Phase 4+)
 	$(TOOLS) python -m e2e.run $(ARGS)
 
+witnesses-manifest: ## Record this run's witness counts into docs/witnesses.json
+	$(TOOLS) python -m e2e.run --write-manifest $(ARGS)
+
+witnesses-check: ## Fail if docs/witnesses.json disagrees with a real run
+	$(TOOLS) python -m e2e.run --check-manifest $(ARGS)
+
 eval: ## Accuracy evals per use case (Phase 7)
 	$(TOOLS) python -m evals.runner $(ARGS)
 
 load: ## Load tests (Phase 8) — k6 in a container on the stack's network
 	$(PY) -m load.run $(ARGS)
+
+load-compare: ## Measure BOTH executors under the same load (Phase 9; writes load-py.json and load-go.json)
+	@echo "== python executor"
+	DAS_REPORT_STAMP=py $(PY) -m load.run --only query-direct $(ARGS)
+	@echo "== swapping in the go executor (DAS_EXECUTOR=go); nothing above it changes"
+	DAS_EXECUTOR=go $(COMPOSE) up -d --build --wait warehouse-query
+	DAS_REPORT_STAMP=go $(PY) -m load.run --only query-direct $(ARGS)
+	@echo "== restoring the python executor"
+	$(COMPOSE) up -d --build --wait warehouse-query
 
 client-config: ## Paste-ready MCP client configuration (ARGS="--auth token")
 	$(TOOLS) python -m e2e.clients.configs $(ARGS)

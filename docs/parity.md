@@ -5,11 +5,18 @@ check in this repo runs against the emulator family and passes; the check is
 named, so a green row can always be re-run. **Witnessed on Azure** means the
 same check has been watched passing against a real tenant.
 
-> Every row in the Azure column reads `not yet`. The infrastructure template
-> compiles and the harnesses are environment-agnostic (`make test eval load
-> ENV=prod` needs no code change), but nothing here has been run against a
-> tenant. A row that said otherwise would be the one thing this ledger exists
-> to prevent.
+> Every row in the Azure column reads `not yet`. The infrastructure definition
+> parses and type-checks and the harnesses are environment-agnostic (`make test
+> eval load ENV=prod` needs no code change), but nothing here has been run
+> against a tenant. A row that said otherwise would be the one thing this ledger
+> exists to prevent.
+>
+> What that costs is not hypothetical. While the definition was Bicep, the
+> runbook beside it drifted until its deploy command named three parameters that
+> did not exist and omitted two that were required — it could not have run, and
+> nothing said so, because nothing ever ran it. `terraform validate` and the
+> phase11 witnesses now check the definition against what the runbook claims,
+> which narrows that gap without closing it. Only a tenant closes it.
 
 ## The system
 
@@ -18,6 +25,8 @@ same check has been watched passing against a real tenant.
 | Warehouse holds the seeded data, aggregates agree with facts | 🟢 | `e2e.run` phase1 | not yet |
 | Catalog carries schema, glossary, metrics, and a read-only bot | 🟢 | `e2e.run` phase2 | not yet |
 | Managed identity (App Service protocol) | 🟢 | `e2e.run` phase3 | not yet |
+| Infrastructure definition parses, and declares what the runbook copies | 🟢 | `e2e.run` phase11, `terraform validate` | not yet |
+| App registration, exposed scope and federated credential are declared | 🟢 | `terraform validate` | not yet — and the emulator cannot witness the federated path at all (upstream #6) |
 | On-behalf-of carries the **user** to the data plane | 🟢 | `e2e.run` phase3 | not yet |
 | Secretless OBO (federated credential) | 🔴 blocked upstream (#6) | — | not yet — expected to work; step 3 of the runbook |
 | MCP tools published through the gateway | 🟢 | `e2e.run` phase4 | not yet |

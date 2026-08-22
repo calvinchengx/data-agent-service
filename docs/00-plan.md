@@ -27,7 +27,7 @@ Consequences already applied: MCP OAuth discovery endpoints are served by our ow
 | 2 | **Load benchmarked** | k6 (gateway+executor, OM path) + asyncio E2E driver; thresholds gate `make load` | Phase 8 report; same scripts in prod |
 | 3 | **Accuracy evals by use case** | 5-tier eval suite per use case; execution accuracy, grounding, semantic fidelity, abstention, guardrail; **ablation** OM-context on/off | Phase 7 scorecard |
 | 4 | **Performance options: Go vs Python** | Two executor implementations behind one OpenAPI contract, one conformance suite, one k6 run | Phase 9 comparison table + ADR |
-| 5 | **Same setup in production** | `infra/` Bicep/azd; `docs/10-production.md` runbook; `make test eval load ENV=prod` | parity.md column "witnessed on real Azure" |
+| 5 | **Same setup in production** | `infra/terraform/`; `docs/10-production.md` runbook; `make test eval load ENV=prod` | parity.md column "witnessed on real Azure" |
 | 6 | **Per-user authorization** | Entra groups/app roles → APIM claims, OM roles/policies, Fabric SQL GRANT/RLS; OBO carries user identity to SQL | Persona evals (`alice` vs `bob`) |
 | 7 | **Client-agnostic MCP** | Streamable HTTP + MCP OAuth discovery (RFC 9728/8414 + DCR) at APIM; no vendor fields | Client matrix: Claude, ChatGPT, Cursor, VS Code, reference SDKs |
 
@@ -97,7 +97,7 @@ Agent workflow (prompt encodes the *workflow*, never a table name): find glossar
 | C9 | `agent/` | Py, Claude Agent SDK | generic | CLI; MCP clients via APIM; tool allow-list; `context.py` (D1 seam) |
 | C10 | `evals/` | Py stdlib (+ optional LLM judge) | generic runner / per-use-case data | `usecases/<name>/{questions.jsonl, personas.json}`; scorecards; ablation |
 | C11 | `load/` | k6 + Py asyncio | generic | Gateway+executor, OM path, E2E; thresholds |
-| C12 | `infra/` | Bicep / azd | generic | APIM, Container Apps (UAMI), Key Vault, app registrations (FIC→MI), Fabric items |
+| C12 | `infra/terraform/` | Terraform (azurerm + azuread) | generic | APIM, Container Apps (UAMI), Key Vault, **app registration + exposed scope + federated credential** (which ARM cannot express), Fabric items via seed |
 | C13 | `e2e/` | Py stdlib | generic | Token chain, MCP via APIM, guard rejections, client matrix |
 | C14 | `docs/`, `parity.md`, `witnesses.json`, `members.json` entry, `adr/` | md/json | generic | Family-standard |
 | C15 | `agent/skills/` | SKILL.md folders (Agent SDK) | generic | Procedural skills only: `om-grounded-sql`, `dialect-<x>`, `result-presentation`, `dashboard-authoring`, `om-context-native`; selected by config; hashes pinned into eval reports |
@@ -228,7 +228,7 @@ data-agent-service/
   seed/             provision.py govern.py authz.py apim.py policies/*.xml data/
   evals/            runner.py usecases/contoso/{questions.jsonl,personas.json} usecases/<second>/
   load/             k6/*.js agent_load.py
-  infra/            main.bicep (or azd)
+  infra/terraform/  versions variables identity main outputs
   e2e/              run.py clients/
   docs/             00-plan.md 01-quickstart … 07-evaluation 08-load-testing 10-production parity.md witnesses.json adr/
   scripts/          doctor.sh status.sh

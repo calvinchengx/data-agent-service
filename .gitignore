@@ -26,3 +26,11 @@ _site/
 coverage.xml
 cover.out
 htmlcov/
+
+# Terraform: providers and state are environment, not source.
+infra/terraform/.terraform/
+infra/terraform/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+tfplan

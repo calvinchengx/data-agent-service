@@ -25,73 +25,109 @@ explicitly allowed with a reason.
 | OpenMetadata | a reachable instance (Collate SaaS or your own) |
 | Local tools | `az`, `docker`, Python 3.12+ |
 
-## 1. Register the API application
+## 1. Deploy the infrastructure
 
-The app registration is the middle tier: OBO addresses the user's token to the
-application doing the exchange, so the app whose audience the gateway validates
-is the same app the executor authenticates as.
+Everything Azure and Entra own is declared in `infra/terraform/`, including the
+app registration. Earlier revisions of this runbook created that registration by
+hand, and both of the identity defects that cost the most time here were
+mistakes in those hand-typed steps — an on-behalf-of exchange addressed to the
+wrong audience, and a missing `user_impersonation` scope. They are declared now.
 
-```bash
-az ad app create --display-name "data-agent-service API" \
-  --identifier-uris "api://data-agent-service" \
-  --sign-in-audience AzureADMyOrg
-```
-
-Expose the delegated scope (`access_as_user`) and pre-authorise the clients your
-users sign in with — Claude Code, Claude Desktop, your own app. The portal's
-*Expose an API* blade is the shortest path; `seed/apps.py` performs the same
-Graph calls if you would rather script it.
-
-Grant the app **`Application.Read.All`** (application permission, admin
-consented) so the executor can resolve a caller's roles when the token does not
-carry them.
-
-## 2. Deploy the infrastructure
+State lives wherever your team keeps it; the definition does not choose:
 
 ```bash
-az deployment group create -g <rg> -f infra/main.bicep \
-  -p middleTierClientId=<appId> \
-     executorImage=<registry>/warehouse-query:<tag> \
-     publisherEmail=<you> publisherName="<team>" \
-     openMetadataMcpUrl=https://catalog.example.com/mcp \
-     sources='[{"name":"contoso_warehouse","kind":"fabric","dialect":"tsql","authz_tier":"user","om_service_fqn":"fabric_contoso","workspace":"contoso-analytics","item":"contoso_warehouse"}]' \
-     accessRules='[{"role":"Data.Analyst","allow_tables":["dbo.*"],"deny_columns":["dbo.dim_customer.email"]}]'
+terraform -chdir=infra/terraform init \
+  -backend-config="resource_group_name=<rg>" \
+  -backend-config="storage_account_name=<sa>" \
+  -backend-config="container_name=tfstate" \
+  -backend-config="key=data-agent-service.tfstate"
 ```
 
-This creates the gateway, the executor's container app and its **user-assigned
-managed identity**, the vault, the role assignments, and Log Analytics. It does
-not create the app registration (Graph), the Fabric objects (Fabric REST) or the
-catalog — those are created by the same seed scripts you already run locally,
-which is what keeps the two environments one system.
+Write a `prod.tfvars` — every value here is one you choose, not one you copy:
 
-Note `sources[].tds_server` is **absent**: in Azure the warehouse's address
-comes from the `connectionString` Fabric advertises. The local stack overrides
-it only because the emulator advertises an address that is not dialable
-(`docs/upstream-issues.md` #2).
+```hcl
+name                = "contoso"
+location            = "australiaeast"
+resource_group_name = "data-agent-rg"
+audience            = "api://data-agent-service"
+openmetadata_url    = "https://catalog.example.com"
+executor_image      = "<registry>/warehouse-query:<tag>"
+publisher_name      = "Data Platform"
+publisher_email     = "data-platform@example.com"
 
-## 3. Make the executor's identity the app's credential
-
-This is what makes on-behalf-of **secretless**: the executor proves it is the
-middle tier with a token from its own managed identity, and no secret exists
-anywhere.
+# tds_server is absent on purpose: in Azure the warehouse's address comes from
+# the connectionString Fabric advertises. The local stack overrides it only
+# because the emulator advertises an address that is not dialable
+# (docs/upstream-issues.md #2).
+sources = [{
+  name           = "contoso_warehouse"
+  kind           = "fabric"
+  dialect        = "tsql"
+  authz_tier     = "user"
+  om_service_fqn = "fabric_contoso"
+  workspace      = "contoso-analytics"
+  item           = "contoso_warehouse"
+}]
+```
 
 ```bash
-CLIENT_ID=$(az deployment group show -g <rg> -n main \
-  --query properties.outputs.executorIdentityClientId.value -o tsv)
-
-az ad app federated-credential create --id <appId> --parameters "{
-  \"name\": \"executor-managed-identity\",
-  \"issuer\": \"https://login.microsoftonline.com/$(az account show --query tenantId -o tsv)/v2.0\",
-  \"subject\": \"$CLIENT_ID\",
-  \"audiences\": [\"api://AzureADTokenExchange\"]
-}"
+terraform -chdir=infra/terraform plan  -var-file=prod.tfvars -out=tfplan
+terraform -chdir=infra/terraform apply tfplan
 ```
+
+Read the plan before applying it. On a first apply it should create the gateway,
+the executor's container app and its **user-assigned managed identity**, the
+vault and its role assignments, Log Analytics, and the app registration with its
+exposed scope and federated credential.
+
+It does not create the Fabric objects (Fabric REST) or the catalog — those come
+from the same seed scripts you already run locally, which is what keeps the two
+environments one system.
+
+### Directory permissions
+
+Declaring the app registration needs more than deploying resources does:
+**`Application.ReadWrite.OwnedBy`** to create it, and Application Administrator
+(or equivalent) to consent to the exposed scope. Where the directory is
+administered separately, set `manage_app_registration = false` and pass an
+existing `api_app_client_id`; the rest of the definition is unchanged, and the
+app registration becomes your directory team's to create — with the same
+audience and the same `access_as_user` scope.
+
+Whoever creates it must also grant the app **`Application.Read.All`**
+(application permission, admin consented), so the executor can resolve a
+caller's roles when the token does not carry them.
+
+## 2. What secretless means here
+
+The federated credential is what makes on-behalf-of secretless: the executor
+proves it is the middle tier with a token from its own managed identity, and no
+secret exists anywhere. The subject of that credential is the managed identity's
+**principal (object) id** — not its client id, which is a different value and
+fails in a way that looks like a trust problem rather than a typo.
 
 A client secret in the vault (`das-executor-client-secret`) remains supported as
 a fallback and is what the local stack uses, because the emulator cannot
 validate a token it issued itself (`docs/upstream-issues.md` #6). In Azure you
 should not need it — and if you create one, the executor still prefers the
 federated credential.
+
+**This is the one part of the definition no local run can witness.** The entra
+emulator does not implement federated client assertions, so `make test` proves
+the fallback path and says nothing about the preferred one. `docs/parity.md`
+records it as unwitnessed, and it stays that way until someone applies this to a
+tenant.
+
+## 3. Fill in the environment
+
+```bash
+cp .env.prod.example .env.prod
+terraform -chdir=infra/terraform output
+```
+
+Every value marked `<from deploy>` in `.env.prod.example` is an output above.
+`e2e/run.py` asserts that correspondence, so a value the runbook tells you to
+copy cannot quietly stop being produced.
 
 ## 4. Seed the tenant
 
@@ -155,6 +191,12 @@ it has no managed identity, which the vault-backed named value needs.
 
 ## Rolling back
 
-Everything the seeds create is idempotent and named. `az deployment group
-delete` does not remove the Fabric or catalog objects — delete the Fabric
-workspace and the OpenMetadata service explicitly if you want the tenant clean.
+Everything the seeds create is idempotent and named. `terraform destroy` removes
+what the definition owns and nothing else — it does not remove the Fabric or
+catalog objects, so delete the Fabric workspace and the OpenMetadata service
+explicitly if you want the tenant clean.
+
+Two things survive a destroy on purpose: the Key Vault, which is soft-deleted
+for 90 days rather than purged (it holds the catalog bot's token, and recovery
+is exactly what that retention is for), and any app registration you passed in
+rather than let Terraform declare.

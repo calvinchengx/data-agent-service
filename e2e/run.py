@@ -796,12 +796,60 @@ def phase11() -> None:
         offenders[0][:100] if offenders else "",
     )
 
-    template = pathlib.Path("infra/main.bicep")
+    infra = pathlib.Path("infra/terraform")
+    tf_files = sorted(infra.glob("*.tf"))
     check(
         "phase11",
         "the infrastructure is described as code",
-        template.exists(),
-        f"{len(template.read_text().splitlines())} lines" if template.exists() else "",
+        bool(tf_files),
+        f"{len(tf_files)} files, {sum(len(f.read_text().splitlines()) for f in tf_files)} lines",
+    )
+
+    # A definition that merely EXISTS proves nothing. Every value the runbook
+    # tells an operator to copy out of the deployment must actually be an
+    # output, or filling .env.prod becomes a hunt through the portal -- which
+    # is how a setting ends up guessed.
+    declared = set()
+    for f in tf_files:
+        declared |= set(re.findall(r'^output "([a-z_0-9]+)"', f.read_text(), re.M))
+    needed = {
+        "apim_name", "apim_gateway_url", "executor_url", "vault_uri",
+        "issuer", "executor_principal_id", "api_app_client_id",
+    }
+    check(
+        "phase11",
+        "every value the runbook copies is an output of the definition",
+        needed <= declared,
+        ", ".join(sorted(needed - declared)) if needed - declared else f"{len(declared)} outputs",
+    )
+
+    # The environment the executor runs with is the whole reason the local and
+    # production stacks are one system. If the definition stops setting one of
+    # these, the service still starts and behaves differently, which is the
+    # worst failure mode available.
+    main_tf = (infra / "main.tf").read_text() if (infra / "main.tf").exists() else ""
+    required_env = {
+        "DAS_ENTRA_ISSUER", "DAS_AGENT_AUDIENCE", "DAS_MIDDLE_TIER_CLIENT_ID",
+        "DAS_KEYVAULT_URL", "DAS_SOURCES", "DAS_SQL_AUDIENCE", "DAS_SQL_SCOPE",
+        "DAS_ROLE_SOURCE", "DAS_REQUIRED_SCOPE", "DAS_OM_URL", "AZURE_CLIENT_ID",
+    }
+    absent = {name for name in required_env if f'"{name}"' not in main_tf}
+    check(
+        "phase11",
+        "the executor is given every setting it needs to run",
+        not absent,
+        ", ".join(sorted(absent)) if absent else f"{len(required_env)} settings",
+    )
+
+    # The QUOTED form is what an env block sets; the bare name also appears in
+    # the comment recording that its absence is deliberate, and a check that
+    # trips on its own explanation is a check nobody keeps.
+    insecure_set = '"DAS_ENTRA_TLS_INSECURE"' in main_tf
+    check(
+        "phase11",
+        "the insecure development switch is never set in production",
+        not insecure_set,
+        "PRESENT" if insecure_set else "absent, and the comment says why",
     )
 
     prod = pathlib.Path(".env.prod.example")
@@ -1310,14 +1358,67 @@ PHASES = {
     "phase15": phase15,
 }
 
+MANIFEST = pathlib.Path(__file__).resolve().parents[1] / "docs" / "witnesses.json"
+
+
+def manifest() -> dict:
+    """What this run witnessed, per phase, in a form a badge can read.
+
+    Committed to the repository so the docs site can publish the badge without
+    running the stack, and re-checked by `--check-manifest` so a stale count
+    fails the build instead of quietly advertising a number nobody proved.
+    """
+    phases: dict[str, dict[str, int]] = {}
+    for phase, _name, ok, _detail in _results:
+        entry = phases.setdefault(phase, {"passed": 0, "total": 0})
+        entry["total"] += 1
+        entry["passed"] += 1 if ok else 0
+    return {
+        "passed": sum(1 for r in _results if r[2]),
+        "total": len(_results),
+        "phases": dict(sorted(phases.items())),
+    }
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", action="append", choices=sorted(PHASES))
     ap.add_argument("--env", default=os.environ.get("DAS_ENV", "local"))
+    ap.add_argument(
+        "--write-manifest",
+        action="store_true",
+        help=f"record this run's witness counts in {MANIFEST.name}",
+    )
+    ap.add_argument(
+        "--check-manifest",
+        action="store_true",
+        help="fail if the committed manifest disagrees with this run",
+    )
     a = ap.parse_args()
     for name in a.only or sorted(PHASES):
         print(f"\n{name}")
         PHASES[name]()
     failed = [r for r in _results if not r[2]]
     print(f"\n{len(_results) - len(failed)}/{len(_results)} checks passed")
+
+    # A partial run knows nothing about the phases it skipped, so it must never
+    # touch the manifest — that is how a badge starts under-reporting.
+    if (a.write_manifest or a.check_manifest) and a.only:
+        print("refusing to write or check the manifest from a partial run (--only)")
+        sys.exit(2)
+    if a.write_manifest:
+        MANIFEST.write_text(json.dumps(manifest(), indent=2) + "\n")
+        print(f"wrote {MANIFEST.relative_to(MANIFEST.parents[1])}")
+    if a.check_manifest:
+        current = manifest()
+        recorded = json.loads(MANIFEST.read_text()) if MANIFEST.exists() else {}
+        if recorded != current:
+            print(
+                f"FAIL: {MANIFEST.name} is stale — it records "
+                f"{recorded.get('passed')}/{recorded.get('total')}, this run witnessed "
+                f"{current['passed']}/{current['total']}. Run `make witnesses-manifest`."
+            )
+            sys.exit(1)
+        print(f"{MANIFEST.name} matches this run")
+
     sys.exit(1 if failed else 0)

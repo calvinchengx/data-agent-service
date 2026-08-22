@@ -4,6 +4,8 @@
 [![Docs](https://github.com/calvinchengx/data-agent-service/actions/workflows/docs-site.yml/badge.svg)](https://calvinchengx.github.io/data-agent-service/docs/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
+[![witnesses](https://img.shields.io/endpoint?url=https%3A%2F%2Fcalvinchengx.github.io%2Fdata-agent-service%2Fwitnesses.json)](https://calvinchengx.github.io/data-agent-service/docs/07-evaluation/)
+
 **A governed Data Agent: natural-language questions over Fabric Warehouses (and other sources), grounded in the glossary, metrics and schema held in OpenMetadata, fronted by Azure API Management with Entra identity — runnable locally on the emulator family and unchanged against real Azure.**
 
 📖 **[Documentation site](https://calvinchengx.github.io/data-agent-service/docs/)** — the full
@@ -33,7 +35,7 @@ or `make stack` to do the whole bring-up from nothing, which is what CI runs.
 | `services/` | The warehouse-query executor (Python and Go), and the contract both answer to |
 | `agent/`, `evals/`, `e2e/` | The agent, the accuracy suite, and the witnesses |
 | `seed/` | Datasets, warehouse provisioning, OpenMetadata semantics, identity setup |
-| `infra/` | Bicep for real Azure; `docs/10-production.md` is the runbook |
+| `infra/terraform/` | Terraform for real Azure; `docs/10-production.md` is the runbook |
 | `.github/workflows/ci.yml` | Four jobs; `docs/11-ci.md` says what each proves |
 | `website/` | The docs site — Astro + Starlight, generated from `docs/`, which stays the source of truth |
 | `scripts/` | `doctor.sh`, `status.sh`, `check-discipline.sh`, `preflight.py` |
