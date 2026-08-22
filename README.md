@@ -2,7 +2,7 @@
 
 **A governed Data Agent: natural-language questions over Fabric Warehouses (and other sources), grounded in the glossary, metrics and schema held in OpenMetadata, fronted by Azure API Management with Entra identity — runnable locally on the emulator family and unchanged against real Azure.**
 
-Status: **Phase 0 (scaffold)** — see [docs/00-plan.md](docs/00-plan.md).
+Status: **Phases 0-14 landed** — see [docs/00-plan.md](docs/00-plan.md).
 
 ## Quick start
 
@@ -12,7 +12,8 @@ make up       # entra, keyvault, arm, fabric (+ SQL Server), OpenMetadata 1.13.2
 make status   # "stack OK" is the verdict
 ```
 
-Then (as phases land): `make seed`, `make test`, `make eval`, `make load`, `make ask Q="…"`.
+Then `make seed`, `make test`, `make eval`, `make load`, `make ask Q="…"` —
+or `make stack` to do the whole bring-up from nothing, which is what CI runs.
 
 ## What is here
 
@@ -21,7 +22,13 @@ Then (as phases land): `make seed`, `make test`, `make eval`, `make load`, `make
 | `docker-compose.yml` | Pinned, published images only — dependencies are used as-is |
 | `.env.example` | Every `DAS_*` setting; copy to `.env` (local) or `.env.prod` (real Azure) |
 | `docs/00-plan.md` | Architecture, decisions, phases, evaluation, load, authz, extension |
-| `scripts/` | `doctor.sh`, `status.sh` |
+| `docs/` | Quickstart, architecture, authorization, evaluation, load, MCP clients, adding a source, production, CI |
+| `services/` | The warehouse-query executor (Python and Go), and the contract both answer to |
+| `agent/`, `evals/`, `e2e/` | The agent, the accuracy suite, and the witnesses |
+| `seed/` | Datasets, warehouse provisioning, OpenMetadata semantics, identity setup |
+| `infra/` | Bicep for real Azure; `docs/10-production.md` is the runbook |
+| `.github/workflows/ci.yml` | Four jobs; `docs/11-ci.md` says what each proves |
+| `scripts/` | `doctor.sh`, `status.sh`, `check-discipline.sh`, `preflight.py` |
 
 ## Discipline
 
