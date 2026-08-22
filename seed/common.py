@@ -56,6 +56,13 @@ CLIENT_SECRET = CFG.get("DAS_SEED_CLIENT_SECRET", "daemon-app-secret")
 # The platform injects this wherever a managed identity exists — the same
 # variable the executor reads, so the harness and the service agree.
 IDENTITY_ENDPOINT = os.environ.get("IDENTITY_ENDPOINT", "")
+# GitHub Actions injects these into a job that requests `id-token: write`. The
+# names are GitHub's, not ours, which is why they carry no DAS_ prefix.
+OIDC_REQUEST_URL = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL", "")
+OIDC_REQUEST_TOKEN = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "")
+# What Entra calls the audience of a federated client assertion. Fixed by the
+# protocol, not a setting.
+EXCHANGE_AUDIENCE = "api://AzureADTokenExchange"
 
 FABRIC_AUD = CFG.get("DAS_FABRIC_AUDIENCE", "https://api.fabric.microsoft.com")
 SQL_AUD = CFG.get("DAS_SQL_AUDIENCE", "https://database.windows.net")
@@ -143,6 +150,42 @@ def token(audience: str) -> str:
             _TOK[audience] = (time.time() + 3300, payload["access_token"])
             return payload["access_token"]
 
+    # A federated credential before a stored one. On GitHub Actions the runner
+    # is handed a short-lived OIDC token proving which repository and ref is
+    # running; Entra trusts that issuer and subject, and exchanges it for an
+    # app token. No secret exists at any point -- nothing to store, nothing to
+    # rotate, nothing to leak. It is the same mechanism the executor's
+    # on-behalf-of path uses, pointed at a different issuer.
+    if OIDC_REQUEST_URL and OIDC_REQUEST_TOKEN:
+        st, _, body = http(
+            "GET",
+            f"{OIDC_REQUEST_URL}&audience={urllib.parse.quote(EXCHANGE_AUDIENCE)}",
+            headers={"Authorization": f"Bearer {OIDC_REQUEST_TOKEN}"},
+        )
+        if st == 200:
+            assertion = json.loads(body).get("value", "")
+            st, _, body = http(
+                "POST",
+                f"{AUTHORITY}/oauth2/v2.0/token",
+                form={
+                    "grant_type": "client_credentials",
+                    "client_id": CLIENT_ID,
+                    "client_assertion_type": (
+                        "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+                    ),
+                    "client_assertion": assertion,
+                    "scope": f"{audience}/.default",
+                },
+            )
+            if st == 200:
+                payload = json.loads(body)
+                _TOK[audience] = (
+                    time.time() + int(payload.get("expires_in", 3600)) - 60,
+                    payload["access_token"],
+                )
+                return payload["access_token"]
+            log(f"federated exchange for {audience} failed ({st}); falling through")
+
     if not CLIENT_SECRET:
         raise SystemExit(
             f"no way to obtain a token for {audience}.\n"
@@ -151,6 +194,8 @@ def token(audience: str) -> str:
             "  - on a laptop: supply one with "
             f"DAS_ACCESS_TOKEN_{re.sub(r'[^A-Z0-9]+', '_', audience.upper())}, "
             "minted however your tenant allows;\n"
+            "  - in CI: a federated credential, which needs no secret either "
+            "(ACTIONS_ID_TOKEN_REQUEST_URL, see docs/10-production.md);\n"
             "  - locally: DAS_SEED_CLIENT_SECRET is set by the emulator seed.\n"
             "A service principal with a checked-in secret is deliberately NOT "
             "the answer -- see docs/10-production.md."

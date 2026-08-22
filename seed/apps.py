@@ -351,6 +351,17 @@ def main() -> dict:
     ensure_federated_credential(api_id, "executor-managed-identity", c.ISSUER, mi_client_id)
     ensure_secret(api_id, "das-executor-client-secret")
 
+    # The identity CI signs in as, if a repository has been named. A federated
+    # credential rather than a secret: the runner proves which repository and
+    # ref is running with a short-lived OIDC token, and nothing is stored on
+    # either side. Configured rather than assumed, because the subject names a
+    # specific repository and branch and a wrong one silently trusts nobody.
+    ci_subject = c.CFG.get("DAS_CI_SUBJECT", "")
+    if ci_subject:
+        ensure_federated_credential(
+            api_id, "github-actions", "https://token.actions.githubusercontent.com", ci_subject
+        )
+
     unapproved = ensure_unapproved_client()
 
     out = {

@@ -79,3 +79,47 @@ def test_paired_compares_only_the_questions_both_arms_ran():
     assert result["compared"] == 3
     assert result["only_first"] == 1
     assert result["only_second"] == 0
+
+
+# ------------------------------------------------------- how gold signs in --
+def test_the_token_helper_prefers_credentials_that_are_not_stored(monkeypatch):
+    """Order matters more than any single path here.
+
+    A supplied token, then a managed identity, then a federated credential,
+    then a stored secret. Each earlier option removes a secret rather than
+    protecting one, and the last is supported because some deployments have
+    nothing else — not because it is the recommendation.
+    """
+    import re
+
+    from seed import common as c
+
+    audience = "https://database.windows.net"
+    key = "DAS_ACCESS_TOKEN_" + re.sub(r"[^A-Z0-9]+", "_", audience.upper())
+    monkeypatch.setenv(key, "supplied-token")
+    c._TOK.clear()
+    assert c.token(audience) == "supplied-token"
+
+
+def test_no_credential_at_all_names_the_ways_forward(monkeypatch):
+    """The failure this replaced posted an empty secret and reported a token
+    endpoint error, which pointed at the wrong thing entirely."""
+    import re
+
+    import pytest
+
+    from seed import common as c
+
+    audience = "https://example.invalid"
+    monkeypatch.delenv(
+        "DAS_ACCESS_TOKEN_" + re.sub(r"[^A-Z0-9]+", "_", audience.upper()), raising=False
+    )
+    monkeypatch.setattr(c, "IDENTITY_ENDPOINT", "")
+    monkeypatch.setattr(c, "OIDC_REQUEST_URL", "")
+    monkeypatch.setattr(c, "CLIENT_SECRET", "")
+    c._TOK.clear()
+    with pytest.raises(SystemExit) as raised:
+        c.token(audience)
+    message = str(raised.value)
+    for option in ("managed identity", "federated credential", "DAS_SEED_CLIENT_SECRET"):
+        assert option in message, f"the refusal does not mention {option}"
