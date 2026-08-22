@@ -215,9 +215,15 @@ def _derive_graph_url() -> str:
     """Microsoft Graph in production; in a tenant that serves its own Graph the
     issuer's origin does. Config wins over both (`DAS_GRAPH_URL`)."""
     issuer = os.environ.get("DAS_ENTRA_ISSUER", "")
-    if "graph.microsoft.com" in issuer or not issuer:
+    if not issuer:
+        return "https://graph.microsoft.com/v1.0"
+    # Match the HOST, not a substring of the URL. `"login.microsoftonline.com"
+    # in issuer` is true of https://login.microsoftonline.com.example.net/, and
+    # a suffix test is true of https://notlogin.microsoftonline.com/ -- both
+    # would send a Graph call, with a token, to a host we did not mean.
+    host = (urllib.parse.urlsplit(issuer).hostname or "").lower()
+    microsoft = {"graph.microsoft.com", "login.microsoftonline.com"}
+    if host in microsoft or any(host.endswith("." + h) for h in microsoft):
         return "https://graph.microsoft.com/v1.0"
     parts = urllib.parse.urlsplit(issuer)
-    if parts.netloc.endswith("login.microsoftonline.com"):
-        return "https://graph.microsoft.com/v1.0"
     return f"{parts.scheme}://{parts.netloc}/graph/v1.0"
