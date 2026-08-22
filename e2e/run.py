@@ -1212,6 +1212,42 @@ def phase13() -> None:
         f"naive says {ranking['elapsed_minutes'][0]}",
     )
 
+    # The reversal exists because the generator gives Billing long customer
+    # waits. That is realistic and it is also TUNED, so it is worth knowing
+    # whether it is a property of the design or of one lucky draw: a headline
+    # that held only at the seeded dataset would be an artefact, and better
+    # found here than by someone reproducing it.
+    import collections
+    import statistics
+
+    from seed.datasets import support as support_data
+
+    ticket_col = {n: k for k, (n, _t) in enumerate(support_data.COLUMNS["tickets"])}
+    agent_col = {n: k for k, (n, _t) in enumerate(support_data.COLUMNS["agents"])}
+    seeds = (20260822, 1, 7, 99, 12345, 555, 2026, 31337, 4242, 8675309)
+    held = []
+    for seed in seeds:
+        generated = support_data.generate(seed=seed)
+        team_of = {a[agent_col["agent_id"]]: a[agent_col["team"]] for a in generated["agents"]}
+        by_resolution = collections.defaultdict(list)
+        by_elapsed = collections.defaultdict(list)
+        for ticket in generated["tickets"]:
+            if ticket[ticket_col["status"]] != "resolved":
+                continue
+            team = team_of[ticket[ticket_col["agent_id"]]]
+            by_resolution[team].append(ticket[ticket_col["resolution_minutes"]])
+            by_elapsed[team].append(ticket[ticket_col["elapsed_minutes"]])
+        fastest = min(by_resolution, key=lambda t: statistics.mean(by_resolution[t]))
+        naive = min(by_elapsed, key=lambda t: statistics.mean(by_elapsed[t]))
+        held.append(fastest != naive and fastest == "Billing" and naive == "Frontline")
+    check(
+        "phase13",
+        "the reversal is a property of the design, not of one seed",
+        all(held),
+        f"{sum(held)}/{len(seeds)} seeds put Billing first on the catalog's rule "
+        f"and Frontline first on wall-clock",
+    )
+
 
 def phase14() -> None:
     """Skills: loaded by configuration, and carrying method rather than meaning.

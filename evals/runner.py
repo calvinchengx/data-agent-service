@@ -30,7 +30,7 @@ from typing import Any
 from agent import agent as agent_mod
 from agent import identity
 from agent import skills as skills_mod
-from evals import claude_code_agent
+from evals import claude_code_agent, stats
 from evals import score as scoring
 from seed import common as c
 
@@ -296,6 +296,10 @@ def summarise(results: list[Result]) -> dict:
             "pass_rate": (
                 round(100 * sum(1 for r in scored if r.passed) / len(scored), 1) if scored else None
             ),
+            # A pass rate from a handful of questions is not a measurement.
+            # Carrying the interval beside it makes a thin sample announce
+            # itself rather than borrow the authority of a percentage.
+            "pass_rate_95ci": stats.wilson(sum(1 for r in scored if r.passed), len(scored)),
         }
     return {
         "n": len(results),
@@ -416,8 +420,26 @@ def main() -> int:
         l3_without = without["by_tier"].get("L3", {}).get("pass_rate")
         if l3_with is not None and l3_without is not None:
             delta["L3_pass_rate"] = round(l3_with - l3_without, 1)
+
+        # Both arms answered the SAME questions, so the pairing is the whole
+        # point: each question is its own control for difficulty, and only the
+        # questions the two arms disagree about carry any evidence.
+        def passes(arm: str) -> dict[str, bool]:
+            return {
+                r["id"]: r["passed"]
+                for r in report["runs"][arm]["results"]
+                if not r["score"].get("declined")
+            }
+
+        paired = stats.paired(passes("with catalog"), passes("without catalog"))
+        delta["mcnemar"] = paired
         report["ablation_delta"] = delta
         print(f"\nablation delta (catalog − no catalog): {json.dumps(delta)}")
+        print(
+            f"paired: {paired['compared']} questions compared, "
+            f"{paired.get('only_first', 0)} gained, {paired.get('only_second', 0)} lost "
+            f"— {paired['note']}"
+        )
 
     REPORTS.mkdir(exist_ok=True)
     stamp = os.environ.get("DAS_REPORT_STAMP") or str(int(time.time()))

@@ -225,6 +225,28 @@ each question is its own control for difficulty, which is most of the variance.
 Reported alongside **Wilson intervals per tier** — never a bare point estimate,
 and never pooled across tiers where L1 sits at ceiling and dilutes.
 
+### What item 3 did to the headline
+
+Applying the intervals and the paired test to the run that produced
+"80% against 40%":
+
+| Metric | With catalog | Without | Paired |
+|---|---|---|---|
+| Semantic fidelity | 4/5, CI 37.6–96.4 | 2/5, CI 11.8–76.9 | +2 / −0, **p = 0.5** |
+| Execution accuracy | 1/5, CI 3.6–62.4 | 0/5, CI 0.0–43.4 | +1 / −0, **p = 1.0** |
+| Grounding | 5/5 | 5/5 | no discordant pair |
+
+**Two questions changed hands. That is the entire evidential content of the
+run.** The confidence intervals overlap heavily; the p-values say what anyone
+should have assumed from five questions. The direction is consistent and every
+question that moved, moved the same way — which is worth something, and is not
+a measurement.
+
+This is the item working. The number did not get worse; the claim did, and it
+was always this weak. What makes the catalog's importance credible today is not
+the ablation but the **flip itself** (item 2): a property of the data, verified
+across ten seeds, that needs no model to demonstrate.
+
 ### 4–6. What is still missing
 
 **Sample.** 31 questions against a documented target of 60–100 per use case,
