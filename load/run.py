@@ -225,43 +225,101 @@ def run_scenario(name: str, args) -> dict:
 EXECUTOR_LABEL = "com.calvinx.das.executor"
 
 
-def running_executor() -> str | None:
-    """Which implementation the stack is actually running, from the image label.
-
-    A comparison is only worth having if each half measured what it claims to.
-    Nothing in the HTTP surface says which implementation answered — by design,
-    since the two are meant to be indistinguishable to a client — so the answer
-    comes from the image the container was built from.
-    """
-    try:
-        cid = (
-            subprocess.run(
-                ["docker", "compose", "ps", "-q", "warehouse-query"],
-                capture_output=True,
-                text=True,
-                check=False,
-                cwd=REPO,
-            )
-            .stdout.strip()
-            .splitlines()
-        )
-        if not cid:
-            return None
+def _labels_of(container_ids: list[str]) -> dict[str, str]:
+    """container id -> executor label, for every container given."""
+    out: dict[str, str] = {}
+    for cid in container_ids:
         image = subprocess.run(
-            ["docker", "inspect", "-f", "{{.Image}}", cid[0]],
+            ["docker", "inspect", "-f", "{{.Image}}", cid],
             capture_output=True,
             text=True,
             check=False,
         ).stdout.strip()
         if not image:
-            return None
+            continue
         label = subprocess.run(
             ["docker", "inspect", "-f", f'{{{{index .Config.Labels "{EXECUTOR_LABEL}"}}}}', image],
             capture_output=True,
             text=True,
             check=False,
         ).stdout.strip()
-        return label or None
+        if label:
+            out[cid] = label
+    return out
+
+
+def _service_containers() -> list[str]:
+    """Every container compose currently has for the service, newest first.
+
+    Newest first because the interesting moment is just after a swap: during
+    `--force-recreate` compose can still be tearing the outgoing container
+    down, and asking for one id can hand back the one on its way out.
+    """
+    listed = subprocess.run(
+        ["docker", "compose", "ps", "-q", "warehouse-query"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO,
+    ).stdout.split()
+    if not listed:
+        return []
+    dated = []
+    for cid in listed:
+        created = subprocess.run(
+            ["docker", "inspect", "-f", "{{.Created}}", cid],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        dated.append((created, cid))
+    return [cid for _, cid in sorted(dated, reverse=True)]
+
+
+def running_executor(settle_seconds: float = 15.0) -> str | None:
+    """Which implementation the stack is actually running, from the image label.
+
+    A comparison is only worth having if each half measured what it claims to.
+    Nothing in the HTTP surface says which implementation answered — by design,
+    since the two are meant to be indistinguishable to a client — so the answer
+    comes from the image the container was built from.
+
+    Reading one container is not enough. `docker compose up --wait` returns
+    once the NEW container is healthy, which is not the same as the old one
+    being gone: for a short window both exist and `ps -q` lists both. Taking
+    the first id then reports whichever compose happened to name first, and on
+    a slower machine that is the container being torn down — the swap looks
+    like it never happened. It passed on a laptop and failed in CI for exactly
+    that reason.
+
+    So: read every container compose has, and if they disagree, wait for the
+    old one to go rather than believe either. Disagreement is transient by
+    definition; a caller that cannot wait it out gets None and the guard
+    refuses, which is still the safe direction.
+    """
+    try:
+        deadline = time.time() + settle_seconds
+        newest: str | None = None
+        while True:
+            containers = _service_containers()
+            if not containers:
+                return None
+            labels = _labels_of(containers)
+            if not labels:
+                return None
+            newest = labels.get(containers[0])
+            if len(set(labels.values())) == 1:
+                return newest
+            if time.time() >= deadline:
+                # Say what was seen rather than picking one: a comparison that
+                # measured the wrong binary is the failure this exists to stop.
+                print(
+                    f"the stack has {len(labels)} warehouse-query containers and they "
+                    f"disagree ({sorted(set(labels.values()))}); "
+                    "a swap is still in progress."
+                )
+                return newest
+            time.sleep(0.5)
     except OSError:
         return None
 
