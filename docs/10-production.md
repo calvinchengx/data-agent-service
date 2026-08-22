@@ -155,6 +155,35 @@ only `seed.govern`, `seed.apim` and `seed.authz`.
 ```bash
 make test ENV=prod          # the witnesses
 make eval ENV=prod          # accuracy, including the catalog ablation
+```
+
+### How the harness signs in, and why there is no service principal
+
+The evals need two identities, and neither is an application secret.
+
+**The personas** are people. `DAS_HARNESS_AUTH` chooses how: `device` for an
+interactive run, `token` for CI where a token is supplied per persona. A
+production tenant refuses the password grant, so the local path is not
+available and the failure message says so.
+
+**The gold baseline** connects to each source itself, to run the reference SQL
+and re-run whatever the agent ran. In Azure it takes a **managed identity** —
+the same `IDENTITY_ENDPOINT` the executor uses — so it holds no credential at
+all. Grant that identity read access on the warehouse and nothing else.
+
+A dedicated service principal with a client secret would work and is
+deliberately not recommended. It is a standing credential that must be stored,
+rotated and audited, in a settings file that already says
+`DAS_SEED_CLIENT_SECRET=` empty for exactly that reason. A managed identity
+removes the secret rather than protecting it, which is the same argument the
+executor's own on-behalf-of path makes.
+
+Where no managed identity exists — a laptop against a real tenant — supply a
+token instead: `DAS_ACCESS_TOKEN_<AUDIENCE>`, minted however the tenant allows.
+The harness refuses with those three options named rather than posting an empty
+secret and reporting a 401 about something else.
+
+```
 make load ENV=prod          # k6, same scenarios and thresholds
 ```
 

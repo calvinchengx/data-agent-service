@@ -53,6 +53,9 @@ STATE = ROOT / "seed" / "state.json"
 # emulator's seeded daemon; in prod an app registration with the needed roles.
 CLIENT_ID = CFG.get("DAS_SEED_CLIENT_ID") or CFG["DAS_QUERY_SVC_CLIENT_ID"]
 CLIENT_SECRET = CFG.get("DAS_SEED_CLIENT_SECRET", "daemon-app-secret")
+# The platform injects this wherever a managed identity exists — the same
+# variable the executor reads, so the harness and the service agree.
+IDENTITY_ENDPOINT = os.environ.get("IDENTITY_ENDPOINT", "")
 
 FABRIC_AUD = CFG.get("DAS_FABRIC_AUDIENCE", "https://api.fabric.microsoft.com")
 SQL_AUD = CFG.get("DAS_SQL_AUDIENCE", "https://database.windows.net")
@@ -122,6 +125,37 @@ def token(audience: str) -> str:
     exp, t = _TOK.get(audience, (0.0, ""))
     if exp - 60 > time.time():
         return t
+
+    # A managed identity before a secret, wherever one is offered. The
+    # executor has always taken this path; the harness asking for a client
+    # secret instead is the reason `make eval ENV=prod` could not have worked:
+    # `.env.prod.example` leaves DAS_SEED_CLIENT_SECRET deliberately empty,
+    # because the alternative is a standing credential in a settings file, and
+    # client_credentials with an empty secret is a 401 that says nothing useful.
+    if IDENTITY_ENDPOINT:
+        st, _, body = http(
+            "GET",
+            f"{IDENTITY_ENDPOINT}?resource={urllib.parse.quote(audience)}&api-version=2019-08-01",
+            headers={"X-IDENTITY-HEADER": os.environ.get("IDENTITY_HEADER", "")},
+        )
+        if st == 200:
+            payload = json.loads(body)
+            _TOK[audience] = (time.time() + 3300, payload["access_token"])
+            return payload["access_token"]
+
+    if not CLIENT_SECRET:
+        raise SystemExit(
+            f"no way to obtain a token for {audience}.\n"
+            "  - in Azure: run where a managed identity is available "
+            "(IDENTITY_ENDPOINT), which needs no secret at all;\n"
+            "  - on a laptop: supply one with "
+            f"DAS_ACCESS_TOKEN_{re.sub(r'[^A-Z0-9]+', '_', audience.upper())}, "
+            "minted however your tenant allows;\n"
+            "  - locally: DAS_SEED_CLIENT_SECRET is set by the emulator seed.\n"
+            "A service principal with a checked-in secret is deliberately NOT "
+            "the answer -- see docs/10-production.md."
+        )
+
     st, _, body = http(
         "POST",
         f"{AUTHORITY}/oauth2/v2.0/token",
