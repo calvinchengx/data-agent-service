@@ -101,7 +101,7 @@ Agent workflow (prompt encodes the *workflow*, never a table name): find glossar
 | C13 | `e2e/` | Py stdlib | generic | Token chain, MCP via APIM, guard rejections, client matrix |
 | C14 | `docs/`, `parity.md`, `witnesses.json`, `members.json` entry, `adr/` | md/json | generic | Family-standard |
 | C15 | `agent/skills/` | SKILL.md folders (Agent SDK) | generic | Procedural skills only: `om-grounded-sql`, `dialect-<x>`, `result-presentation`, `dashboard-authoring`, `om-context-native`; selected by config; hashes pinned into eval reports |
-| C16 | `promoter/` | Py (sqlglot, embeddings) | generic | Canonicalise audited queries into parameterised templates; score by distinct users / runs / cadence; `list_dashboard_candidates` tool; inline suggestion; OM write-back; aggregate-only privacy |
+| C16 | `promoter/` | Py (sqlglot) | generic | Canonicalise audited SQL into literal-free templates; pseudonymous user counts; k-threshold + DP on release; catalog-derived titles; `list_dashboard_candidates`; OM write-back incl. catalog gaps; **no natural language stored** (§17) |
 | C17 | `publisher/` | Py | generic | Deterministic TMDL/TMSL + PBIR generators from a template; publish `SemanticModel` + `Report` via Fabric REST under OBO; OM `Dashboard` lineage; DAX-vs-SQL verification |
 
 ---
@@ -207,7 +207,7 @@ Emulator numbers are relative (laptop SQL Server sidecar), not Fabric capacity �
 | 11 Production | C12 + `docs/10-production.md` | `make test eval load ENV=prod` green; parity column filled | 7, 8, 10 |
 | 13 Sources | `SourceBackend` adapters `databricks`, `snowflake`, `postgres` (witnessed on sibling emulators / container); `docs/09-adding-a-source.md`; REST-variant eval metrics | each adapter passes conformance + its use-case evals | 11 |
 | 14 Skills | C15 | evals re-run with skill hashes pinned; no scorecard regression vs Phase 7 | 7 |
-| 15 Promotion | C16 + persona-replay eval | promoter fires on seeded recurring template, not on one-offs; candidates visible only to `DAS_PROMOTE_ROLES` | 8, 14 |
+| 15 Promotion | C16 + 15b catalog gaps + persona-replay eval | promoter fires on seeded recurring template, not on one-offs; no prose in store; title "Resolution Time by Team"; candidates visible only to `DAS_PROMOTE_ROLES` | 8, 14 |
 | 16 Dashboard publish | C17 | `SemanticModel` + `Report` items created in Fabric via OBO (emulator: definition persisted; rendering prod-only); OM `Dashboard` lineage present; DAX measure == SQL answer | 15 |
 | 12 Stretch | LLM via APIM (`llm-token-limit`); `DAS_OM_CONTEXT_MODE=native` | 429 after quota; native passes same evals | 11 |
 
@@ -285,13 +285,21 @@ Skill file hashes are recorded in every eval scorecard alongside model id and pr
 
 ## 17. Recurring-question promotion ("this should be a dashboard")
 
+**Privacy principle: the promoter stores no natural language, ever.** It reads the executor's audit log and works on the SQL that ran. By the time SQL exists the catalog has already collapsed phrasing into intent — "which team is fastest?", "rank teams by resolution time" and "who's slowest at closing tickets?" all run the same join on `resolution_minutes` grouped by team — so clustering SQL is both more exact than clustering prose and stores nothing a person typed. The promoted artefact (§18) is built from the SQL template; the question text contributes nothing to it. Hashing or embedding questions was considered and rejected: a hash of a short sentence is a dictionary-guessable fingerprint, and embeddings are invertible. The privacy argument is "it isn't there".
+
 | Step | Mechanism |
 |---|---|
-| Canonicalise | `sqlglot`: strip literals → parameters, normalise aliases/order → template hash; NL questions embedded and clustered to catch same-intent/different-SQL |
-| Score | per template over rolling window: distinct users `U`, runs `N`, cadence, parameter cardinality; candidate when `U ≥ DAS_PROMOTE_MIN_USERS ∧ N ≥ DAS_PROMOTE_MIN_RUNS` |
-| Surface | inline suggestion in the agent's answer; `list_dashboard_candidates` MCP tool (role-gated); OM write-back as Data Product / custom property on involved tables |
-| Privacy | aggregate counts only; never expose other users' questions; gated by APIM roles |
-| Runs | background job inside `data-agent-service` over its own audit store — no new service |
+| Ingest | read audit lines; `sqlglot` strips every literal to a typed placeholder, normalises aliases / whitespace / column order → **template** (catalog vocabulary only) + hash. Per literal slot keep the *column* and a cardinality bucket (1 / 2–10 / >10 distinct values seen) — never the values. Prose never enters the store |
+| Users | `HMAC(key, sub)` with a key per scoring window, rotated; distinct users can be counted without identities and windows cannot be joined. Key lives in Key Vault like every other secret |
+| Score | per template over rolling `DAS_PROMOTE_WINDOW_DAYS` (90): distinct users `U`, runs `N`, cadence; candidate when `U ≥ DAS_PROMOTE_MIN_USERS` (3) `∧ N ≥ DAS_PROMOTE_MIN_RUNS`. The user threshold is the k-anonymity floor — a one-user template is literally "what that person asks" |
+| Release | `list_dashboard_candidates` (role-gated by `DAS_PROMOTE_ROLES`) returns template, derived title, slot columns, and counts with Laplace noise (`DAS_PROMOTE_EPSILON`); inline suggestion in the agent's answer is computed against the asking user's *own* current question, in-request, and discarded |
+| Title | derived from the catalog, deterministically: measure columns → glossary term names, GROUP BY columns → display names → `"<Measure> by <Dimension>"` (e.g. **"Resolution Time by Team"**); filter slots append `, filtered by <Column>` with no default value. Same template ⇒ same title ⇒ candidates dedup. A column with no term or display name falls back to its raw name and the candidate is flagged `title-quality: degraded` naming the column — an under-described table that people query often is a catalog finding. The accepting human may rename on acceptance; that is the only human-typed text, attached to a published artefact |
+| Write-back | OM custom property / Data Product on the involved tables: template hash, title, noisy counts, title-quality flag |
+| Catalog gaps (15b) | questions that never became SQL. **Abstentions**: keep the agent's `search_metadata` terms (catalog-vocabulary attempts, not the sentence) + nearest glossary hits, pseudonymised and thresholded the same way; ≥k users ⇒ draft glossary term in OM tagged `Needs Definition` with the count — the steward's existing queue. **Blocks** are not aggregated: they are security events and stay in the audit log with identity attached. Accepted loss: a need phrased so far from catalog vocabulary that the search terms are noise |
+| Runs | background job inside `data-agent-service` over the audit store — no new service; the audit log itself (full SQL, `sub`, `upn`, by design) keeps its own retention and access rules in `docs/05-authorization.md`; the promoter widens nothing |
+| Witnesses | (a) after persona replay, no literal or phrase from any persona question appears in the promoter store or in `list_dashboard_candidates` output; (b) a template asked by one user never surfaces; (c) the fastest-team template titles exactly "Resolution Time by Team"; (d) a template over a column with no glossary term is flagged degraded; (e) the CSAT abstention becomes a `Needs Definition` draft term only once k users have asked |
+
+What the design gives up, knowingly: literal values. "APAC every Monday" surfaces as "region slot, 1 distinct value, 5 users" → a region slicer with no default. The user picks APAC once in the dashboard; the service never learned it.
 
 ---
 
