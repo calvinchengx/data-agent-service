@@ -10,6 +10,7 @@ on:
     paths:
       - 'site/**'
       - 'docs/**'
+      - 'scripts/badges.py'
       - 'website/**'
       - 'package.json'
       - 'pnpm-workspace.yaml'
@@ -51,6 +52,11 @@ jobs:
           mkdir -p _site
           cp site/index.html _site/index.html
           cp -R website/dist _site/docs
+      # Badge endpoints README.md reads back through shields.io. The number
+      # comes from docs/witnesses.json, which a real run writes and the stack
+      # job re-verifies -- so a stale badge fails CI rather than lying here.
+      - name: Badge endpoints
+        run: python3 scripts/badges.py --out _site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
