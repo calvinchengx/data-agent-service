@@ -23,41 +23,61 @@ sys.path.insert(0, ".")
 from seed import common as c
 
 
-def container_ip(service: str) -> str:
-    cid = (
-        subprocess.run(
-            ["docker", "compose", "ps", "-q", service],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        .stdout.strip()
-        .splitlines()
-    )
-    if not cid:
-        return ""
-    return subprocess.run(
+def resolve_in_network(hostname: str) -> str:
+    """The address a compose service answers on, resolved the way the network
+    resolves it.
+
+    Not by mapping service names to containers: a source can be reached
+    through a DNS ALIAS (the Fabric warehouse is
+    `contoso-analytics.datawarehouse.fabric.microsoft.com`, which is the
+    address Fabric advertises and which compose aliases onto the emulator).
+    Only the network knows what that resolves to, so it is asked.
+    """
+    out = subprocess.run(
         [
             "docker",
-            "inspect",
-            "-f",
-            "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
-            cid[0],
+            "compose",
+            "--profile",
+            "tools",
+            "run",
+            "--rm",
+            "-T",
+            "tools",
+            "python",
+            "-c",
+            f"import socket; print(socket.gethostbyname({hostname!r}))",
         ],
         capture_output=True,
         text=True,
         check=False,
-    ).stdout.strip()
+    )
+    for line in reversed(out.stdout.splitlines()):
+        if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", line.strip()):
+            return line.strip()
+    return ""
 
 
 def main() -> int:
     sources = json.loads(c.CFG.get("DAS_SOURCES", "[]"))
+    resolved: dict[str, str] = {}
+
+    def address_of(host: str) -> str:
+        if host not in resolved:
+            resolved[host] = resolve_in_network(host)
+        return resolved[host]
+
     for source in sources:
         dsn = source.get("dsn", "")
-        if dsn:
-            host = re.search(r"@([^:/]+)", dsn)
-            if host and (ip := container_ip(host.group(1))):
-                source["dsn"] = dsn.replace(f"@{host.group(1)}", f"@{ip}")
+        match = re.search(r"@([^:/]+)", dsn) if dsn else None
+        if match and (ip := address_of(match.group(1))):
+            source["dsn"] = dsn.replace(f"@{match.group(1)}", f"@{ip}")
+        # A TDS source names `host:port`; only the host is rewritten, because
+        # the port is the engine's, not the network's.
+        if server := source.get("tds_server", ""):
+            host, _, port = server.partition(":")
+            if ip := address_of(host):
+                source["tds_server"] = f"{ip}:{port}" if port else ip
+
     print(json.dumps(sources))
     return 0
 

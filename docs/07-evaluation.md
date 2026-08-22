@@ -98,10 +98,42 @@ the compose network, so `scripts/eval-cli.sh` arranges three crossings:
   can silently reach the wrong database. That failure reports a missing role,
   which reads as bad credentials rather than a wrong address.
 
+### What the CLI path can and cannot score
+
+Sources reachable from the host, which today means **PostgreSQL**. The Fabric
+use case cannot be scored this way: the scorer signs in to each source to run
+the reference SQL, and a TDS source signs in through the tenant, whose hostname
+only the compose network resolves. Container addresses solve addresses, not
+names — and the issuer URL is part of what the engine will accept, so it cannot
+simply be rewritten. `make eval-cli` checks this before asking the model
+anything and says which path to use instead.
+
+So: **`--usecase support` on a subscription; `--usecase contoso` needs the
+in-container path and an API key.** Both exercise the same claim, because the
+catalog question is the same in either dataset.
+
 ### What the two backends have shown
 
 Worth recording, because both are findings about *us* rather than about the
 model:
+
+**The catalog is the difference between an answer and an admission.** On the
+support L3 ablation, with the catalog: *"Billing is fastest, at a mean
+Resolution Time of 210.3 minutes"* — correct, using `resolution_minutes`.
+Without it: *"The answer flips depending on which clock you mean, and I can't
+reach the catalog to settle it."* Semantic fidelity 80% against 40%. The agent
+without a catalog does not answer wrongly; it reports that it cannot decide,
+which is the honest failure and still a failure.
+
+**A missing gateway credential can look exactly like a finding.** The first
+ablation run reported a delta of zero. The cause was `mcp_config` reading the
+catalog's gateway subscription key from `os.environ`, which is empty on the
+host because the setting lives in `.env`: APIM rejected the catalog route, the
+server never connected, and the *with-catalog* arm ran without a catalog. A
+zero delta is precisely what a sceptic expects to see, which is what makes this
+failure mode dangerous — it confirms the null result rather than announcing
+itself. Settings are now read through configuration, not the process
+environment.
 
 **Our own prompt can cause an abstention the catalog should have prevented.**
 Asked which support team resolves tickets fastest, Claude Code found both

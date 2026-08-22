@@ -44,5 +44,30 @@ echo "tokens minted: $(echo "$MINTED" | wc -l | tr -d ' ') personas"
 export DAS_SOURCES
 DAS_SOURCES=$(python3 scripts/host_sources.py)
 
+# The scorer signs in to each source to run the reference SQL. A source whose
+# sign-in goes through a name only the compose network resolves cannot be
+# scored from here, and saying so now is better than a traceback thirty lines
+# deep once the model has already been asked.
+if ! uv run python - <<'PREFLIGHT'
+import json, socket, sys, urllib.parse
+sys.path.insert(0, ".")
+from seed import common as c
+
+issuer = urllib.parse.urlsplit(c.CFG["DAS_ENTRA_ISSUER"]).hostname or ""
+try:
+    socket.gethostbyname(issuer)
+except OSError:
+    kinds = {s.get("kind", "fabric") for s in json.loads(c.CFG.get("DAS_SOURCES", "[]"))}
+    if kinds - {"postgres"}:
+        print(f"cannot score every source from the host: the tenant ({issuer}) is not")
+        print("resolvable here, and a TDS source signs in through it for the reference SQL.")
+        print("Reachable from here: PostgreSQL sources. Try:")
+        print("  make eval-cli ARGS=\"--usecase support --tier L3 --ablation\"")
+        print("For the Fabric use case, run the in-container path (needs ANTHROPIC_API_KEY):")
+        print("  make eval ARGS=\"--usecase contoso --tier L3 --ablation\"")
+        sys.exit(1)
+PREFLIGHT
+then exit 1; fi
+
 echo "evaluating as $USER_UPN through the claude CLI"
 exec uv run python -m evals.runner --agent claude-code "$@"
