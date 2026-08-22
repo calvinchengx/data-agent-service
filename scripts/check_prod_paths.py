@@ -67,6 +67,11 @@ ALLOWED = {
     "agent/identity.py::password grant": "one of three sign-in modes; DAS_HARNESS_AUTH selects device code or a "
     "supplied token where the tenant forbids this one, and the failure "
     "message says so",
+    "e2e/run.py::password grant": "signs a persona in through a NAMED second application, to witness that an "
+    "unapproved client is refused while the same person through an approved one is served. "
+    "The fixture application exists only in a development tenant; in production the same "
+    "assurance comes from admin consent and Conditional Access, which is what "
+    "docs/parity.md records rather than this witness",
     "load/k6/lib.js::password grant": "the generator cannot sign a person in; load/run.py hands it a token "
     "instead when DAS_HARNESS_AUTH is not `password`",
     "scripts/check-discipline.sh::emulator admin surface": "the sibling checker's own pattern for that surface, not a call to it",

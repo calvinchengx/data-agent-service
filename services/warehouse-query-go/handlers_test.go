@@ -89,6 +89,9 @@ func harness(t *testing.T) (*httptest.Server, *fakeBackend, *signer) {
 	cred = NewCredential()
 	roles = NewRoleResolver(func(string) (string, error) { return "", errors.New("no graph") })
 	verifier = s.verifier()
+	// Deployment configuration, not the subject of these tests: left ambient,
+	// whatever the environment says would decide whether they pass.
+	allowedClients = map[string]bool{}
 	backend = fake
 	maxRows = 500
 	audience = testAudience

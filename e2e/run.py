@@ -524,6 +524,96 @@ def phase6() -> None:
 
 
 # ---------------------------------------------------------------- phase 7 --
+def token_from_client(client_id: str, upn: str) -> str:
+    """A token for a persona, requested by a NAMED application.
+
+    The harness signs in through the agent's own client. Witnessing the client
+    allow-list needs a token from a DIFFERENT one, and it has to be a real
+    sign-in: the whole point is that such a token is genuine.
+    """
+    _st, _hd, body = c.http(
+        "POST",
+        f"{c.AUTHORITY}/oauth2/v2.0/token",
+        form={
+            "grant_type": "password",
+            "client_id": client_id,
+            "username": upn,
+            "password": c.CFG.get("DAS_TEST_PASSWORD", "Passw0rd!"),
+            "scope": f"{c.CFG.get('DAS_AGENT_AUDIENCE', 'api://data-agent-service')}/access_as_user",
+        },
+    )
+    payload = json.loads(body) if body.strip().startswith("{") else {}
+    return payload.get("access_token", "")
+
+
+def query_as(token: str) -> tuple[int, str]:
+    status, _hd, body = c.http(
+        "POST",
+        EXECUTOR + "/query",
+        headers={"Authorization": "Bearer " + token},
+        json_body={"sql": "SELECT TOP 1 fiscal_year_label FROM dbo.fct_revenue_summary"},
+    )
+    return status, body
+
+
+def phase6_clients() -> None:
+    """Which APPLICATION may act for a user, not only which user it is.
+
+    A person can sign in with their corporate account from a client the
+    organisation never approved. The token is genuine in every respect — same
+    tenant, same user, same scope — so this cannot be witnessed with a forged
+    one. It takes a second registered application and a real sign-in through
+    it, which is what a personal AI client becomes once someone consents to
+    it.
+    """
+    allowed = [x.strip() for x in c.CFG.get("DAS_ALLOWED_CLIENT_IDS", "").split(",") if x.strip()]
+    check(
+        "phase6",
+        "the deployment names the client applications it permits",
+        bool(allowed),
+        f"{len(allowed)} allowed",
+    )
+    check(
+        "phase6",
+        "the agent's own client is on that list, so the control is not vacuous",
+        c.CFG.get("DAS_AGENT_CLIENT_ID", "") in allowed,
+        c.CFG.get("DAS_AGENT_CLIENT_ID", ""),
+    )
+
+    unapproved = c.CFG.get("DAS_UNAPPROVED_CLIENT_ID", "")
+    check(
+        "phase6",
+        "a second application is registered in the tenant, and is NOT approved",
+        bool(unapproved) and unapproved not in allowed,
+        unapproved or "(none registered)",
+    )
+
+    token = token_from_client(unapproved, "carol@entraemulator.dev")
+    claimed = claims(token)
+    check(
+        "phase6",
+        "that application can obtain a GENUINE token for the same user and scope",
+        claimed.get("azp") == unapproved and "access_as_user" in (claimed.get("scp") or ""),
+        f"azp={claimed.get('azp')} scp={claimed.get('scp')}",
+    )
+
+    status, body = query_as(token)
+    check(
+        "phase6",
+        "and the executor refuses it — the sign-in is valid, the client is not",
+        status == 403 and "not permitted" in body,
+        f"{status}: {body[:90]}",
+    )
+
+    ok_status, _ = query_as(user_token("carol@entraemulator.dev"))
+    check(
+        "phase6",
+        "while the same person through an approved client is served",
+        ok_status == 200,
+        f"status {ok_status}",
+    )
+
+
 def phase7() -> None:
     """The eval harness, proved by the baseline that must score 100%.
 
@@ -1356,6 +1446,7 @@ def phase16() -> None:
     recorded, and one that does not is neither.
     """
     from agent import identity
+    from promoter import catalog as promoter_catalog
     from publisher import model, publish, report
     from seed.govern import om
 
@@ -1410,19 +1501,45 @@ def phase16() -> None:
         refused[:80] or "a viewer published a dashboard",
     )
 
-    report_path = pathlib.Path(__file__).resolve().parents[1] / "promoter" / "candidates.json"
-    released = (
-        json.loads(report_path.read_text()).get("released", []) if report_path.exists() else []
+    # The candidate is BUILT here rather than read from the promoter's output.
+    # An earlier version loaded promoter/candidates.json, which is generated
+    # and gitignored, so this phase passed on a machine that happened to have
+    # run the promoter and failed in CI, which never had. A witness that
+    # depends on an artefact nothing produces is a witness that reports the
+    # state of someone's laptop.
+    #
+    # It is still the promoter's own code that produces it: the same
+    # canonicaliser and the same title derivation, over a statement of the
+    # shape people actually ran. Only the recurrence -- which phase15 proves --
+    # is assumed.
+    from promoter.canonical import canonicalise
+    from promoter.title import derive as derive_title
+
+    template = canonicalise(
+        "SELECT r.country, SUM(r.revenue_usd) AS revenue "
+        "FROM dbo.fct_revenue_summary r "
+        "WHERE r.fiscal_year_label = 'FY2024' GROUP BY r.country",
+        "tsql",
     )
-    candidate = next((r for r in released if r["source"] == state.get("warehouse_name")), None)
-    if candidate is None:
-        check(
-            "phase16",
-            "a released candidate is available to publish",
-            False,
-            "run `python -m promoter.run` against a stack with recurring traffic",
-        )
-        return
+    names = promoter_catalog.column_names()
+    title = derive_title(template, names)
+    candidate = {
+        "title": title.text,
+        "source": state.get("warehouse_name", ""),
+        "template_sql": template.sql,
+        "dialect": "tsql",
+        "tables": list(template.tables),
+        "measures": list(template.measures),
+        "dimensions": list(template.dimensions),
+        "slot_columns": [s_.column for s_ in template.slots],
+    }
+    check(
+        "phase16",
+        "a candidate carries everything a dashboard needs, and no literal",
+        bool(candidate["measures"] and candidate["dimensions"])
+        and "FY2024" not in json.dumps(candidate),
+        f"{candidate['title']} · slots {candidate['slot_columns']}",
+    )
 
     publisher = identity.token_for("erin@entraemulator.dev")
     columns = {
@@ -1627,6 +1744,7 @@ PHASES = {
     "phase4": phase4,
     "phase5": phase5,
     "phase6": phase6,
+    "phase6-clients": phase6_clients,
     "phase7": phase7,
     "phase8": phase8,
     "phase9": phase9,

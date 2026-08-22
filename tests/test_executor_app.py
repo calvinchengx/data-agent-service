@@ -68,6 +68,11 @@ def _stub_jwks(signing_key, monkeypatch):
     _, jwks = signing_key
     monkeypatch.setattr(app_mod, "_JWKS", jwks)
     monkeypatch.setattr(app_mod, "_JWKS_AT", time.time())
+    # The client allow-list is deployment configuration, and these tests are
+    # not about it: left ambient, whatever `.env` happens to say would decide
+    # whether every other test here passes. The tests that ARE about it set it
+    # explicitly.
+    monkeypatch.setattr(app_mod, "ALLOWED_CLIENTS", frozenset())
 
 
 def token_for(signing_key, *, roles=("Data.Analyst",), scope="access_as_user", **overrides):
@@ -507,3 +512,56 @@ def test_no_configured_source_is_a_server_error(monkeypatch, client, signing_key
     monkeypatch.setattr(app_mod, "SOURCES", {})
     response = client.get("/tables", headers=auth(signing_key))
     assert response.status_code == 500
+
+
+# ------------------------------------------------- which client may act ---
+def test_an_unapproved_client_application_is_refused(client, signing_key, monkeypatch):
+    """A genuine sign-in held by software the organisation has not approved.
+
+    The token is valid in every respect — right tenant, right user, right
+    scope. What differs is the application holding it, which is the only part
+    of "a personal AI client is driving this" that is visible to a resource
+    server at all.
+    """
+    monkeypatch.setattr(app_mod, "ALLOWED_CLIENTS", frozenset({"approved-app"}))
+    response = client.get("/tables", headers=auth(signing_key, azp="some-other-app"))
+    assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert "some-other-app" in detail
+    # The message must not read as "your sign-in failed", which sends a person
+    # to reset a password that was never the problem.
+    assert "sign-in is valid" in detail
+
+
+def test_an_approved_client_application_is_allowed(client, signing_key, backend, monkeypatch):
+    monkeypatch.setattr(app_mod, "ALLOWED_CLIENTS", frozenset({"approved-app"}))
+    assert client.get("/tables", headers=auth(signing_key, azp="approved-app")).status_code == 200
+
+
+def test_the_v1_appid_claim_is_accepted_as_the_client(client, signing_key, backend, monkeypatch):
+    """`azp` in a v2.0 token, `appid` in a v1.0 one."""
+    monkeypatch.setattr(app_mod, "ALLOWED_CLIENTS", frozenset({"approved-app"}))
+    token = token_for(signing_key, appid="approved-app")
+    assert client.get("/tables", headers={"Authorization": "Bearer " + token}).status_code == 200
+
+
+def test_an_empty_allow_list_permits_any_client(client, signing_key, backend, monkeypatch):
+    """Unrestricted is the right default for a deployment whose tenant consent
+    settings are already the control; it must not fail closed by surprise."""
+    monkeypatch.setattr(app_mod, "ALLOWED_CLIENTS", frozenset())
+    assert client.get("/tables", headers=auth(signing_key, azp="anything")).status_code == 200
+
+
+def test_a_token_naming_no_client_is_refused_when_a_list_is_set(client, signing_key, monkeypatch):
+    monkeypatch.setattr(app_mod, "ALLOWED_CLIENTS", frozenset({"approved-app"}))
+    token = token_for(signing_key)
+    # Strip both client claims the way a minimal token would.
+    import jwt as jwt_mod
+
+    claims = jwt_mod.decode(token, options={"verify_signature": False})
+    claims.pop("azp", None)
+    claims.pop("appid", None)
+    pem, _ = signing_key
+    bare = jwt_mod.encode(claims, pem, algorithm="RS256", headers={"kid": "test-key"})
+    response = client.get("/tables", headers={"Authorization": "Bearer " + bare})
+    assert response.status_code == 403

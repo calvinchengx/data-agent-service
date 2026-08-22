@@ -101,3 +101,82 @@ access layer names the role and the column, and the source's refusal is passed
 through in its own words ("the principal has no role on the workspace"). The
 audit record carries the same distinction — `blocked`, `denied`, `error`, `ok`
 — with the caller, their roles, the tables touched and the elapsed time.
+
+## Which application may act for a user
+
+A valid token says **who** signed in. It does not say **what software** is
+holding it, and nothing in OAuth or MCP carries the identity of the AI vendor
+account driving a client — anything a client asserts about itself is
+self-asserted and unverifiable.
+
+This matters because of a specific scenario. A person signs in to their
+*personal* AI subscription, adds this service as a connector, and completes the
+sign-in with their *corporate* account. The token is genuine: right tenant,
+right user, right scope. Authorization is not bypassed — they get exactly their
+own permissions and nothing more. But corporate data now lands in a consumer
+subscription, processed under that person's terms rather than the
+organisation's.
+
+That is a **data-governance** problem, not an access-control one, and it is
+worth being precise about which is which.
+
+### What is actually enforceable
+
+The `azp` claim (`appid` in a v1.0 token) names the application the tenant
+issued the token to. `DAS_ALLOWED_CLIENT_IDS` refuses anything else:
+
+```
+403  the application <id> is not permitted to use this service.
+     Your sign-in is valid; the client holding it is not approved.
+```
+
+The wording is deliberate. A person who reads "unauthorized" goes and resets a
+password that was never the problem.
+
+This is enforceable rather than advisory because **Entra has no dynamic client
+registration**. MCP's auth specification expects clients to self-register
+(RFC 7591), and clients such as Claude support it; Entra deliberately does not,
+because DCR bypasses admin consent, produces credentials with no rotation
+policy or provenance, and creates client objects no Conditional Access policy
+is bound to. So no application can appear in the tenant without an
+administrator — which is exactly what makes a list of permitted ones
+meaningful.
+
+**Caveat:** the common workaround for that gap is an OAuth proxy that adds DCR
+in front of Entra. Where one is deployed, self-registration is effectively back
+and this control is only as strong as whatever that proxy admits.
+
+### What it does not do
+
+It stops **unapproved software**. It does not stop **approved software driven
+from a personal subscription**: if the organisation has registered a connector
+app for legitimate use, that client id can be configured into a personal
+subscription, and the `azp` will then be the approved one.
+
+Nothing readable in the token separates those two cases. What separates them:
+
+| Control | What it decides |
+|---|---|
+| `DAS_ALLOWED_CLIENT_IDS` | which application may hold a token |
+| Conditional Access + Intune | which **device** may obtain one — an unmanaged personal machine never does |
+| Admin consent; user consent disabled | which applications exist in the tenant at all |
+| Enterprise AI tenancy | makes the vendor account the corporate account, administered by the organisation |
+| Column denials, row ceilings (this service) | how much is on screen to leak in the first place |
+| `client` on every audit line | which application asked, not only who |
+
+### The honest limit
+
+There is no foolproof technical control against egress by an authorised user.
+If a person can see the data they can retype it, photograph it, or remember it.
+Every control above is friction and detection. The nearest thing to a real
+answer is architectural rather than a control: run the model inside the
+organisation's own trust boundary, so the destination is its tenant under its
+contract. Then the question stops being how to stop data leaving and becomes
+that it did not leave.
+
+### Witnessed, not asserted
+
+`make test --only phase6-clients` registers a second application in the tenant,
+signs the same person in through it, and shows the executor refusing that token
+while serving the same person through the approved client. A forged token would
+prove nothing here: the whole point is that this one is real.

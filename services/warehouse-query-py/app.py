@@ -47,6 +47,26 @@ logging.basicConfig(
 ISSUER = os.environ["DAS_ENTRA_ISSUER"].rstrip("/")
 AUDIENCE = os.environ["DAS_AGENT_AUDIENCE"]
 REQUIRED_SCOPE = os.environ.get("DAS_REQUIRED_SCOPE", "access_as_user")
+# WHICH APPLICATION may act for a user, as distinct from which user it is.
+#
+# A valid token says who signed in; it does not say what software is holding
+# it. A person can sign in with their corporate account from a personal AI
+# client and the token is genuine — authorization is not bypassed, but
+# corporate data then lands in a consumer subscription under that person's own
+# terms. The protocol carries nothing that identifies the vendor account
+# driving a client, and anything a client asserts about itself is unverifiable.
+#
+# What IS verifiable is the `azp` claim: the application the tenant issued the
+# token to. Because Entra has no dynamic client registration, every client id
+# is deliberately provisioned by an administrator, so an allow-list here is
+# enforceable rather than advisory.
+#
+# Empty means unrestricted, which is the right default for a single-tenant
+# deployment where the tenant's own consent settings are the control. A
+# deployment that publishes to desktop AI clients should set it.
+ALLOWED_CLIENTS = frozenset(
+    c.strip() for c in os.environ.get("DAS_ALLOWED_CLIENT_IDS", "").split(",") if c.strip()
+)
 JWKS_URL = os.environ.get("DAS_ENTRA_JWKS_URL") or (
     (ISSUER[: -len("/v2.0")] if ISSUER.endswith("/v2.0") else ISSUER) + "/discovery/v2.0/keys"
 )
@@ -89,6 +109,8 @@ class Principal:
         self.sub = claims.get("sub", "")
         self.oid = claims.get("oid", "")
         self.name = claims.get("preferred_username") or claims.get("upn") or claims.get("appid", "")
+        # `azp` in a v2.0 token, `appid` in a v1.0 one. Both name the client.
+        self.client = claims.get("azp") or claims.get("appid", "")
         # The directory decides the role: the claim when the token carries one,
         # a Graph lookup when it does not (see access.RoleResolver).
         self.roles = ROLES.roles_for(claims)
@@ -124,6 +146,24 @@ def principal(authorization: str | None) -> Principal:
     scopes = set((claims.get("scp") or "").split()) | set(claims.get("roles") or [])
     if REQUIRED_SCOPE and REQUIRED_SCOPE not in scopes:
         raise HTTPException(403, f"token lacks the {REQUIRED_SCOPE} scope")
+    client = claims.get("azp") or claims.get("appid", "")
+    if ALLOWED_CLIENTS and client not in ALLOWED_CLIENTS:
+        # Audited, because "which application asked" is the question an
+        # administrator will actually have, and a refusal nobody records is a
+        # signal thrown away.
+        audit(
+            op="authorize",
+            user=claims.get("preferred_username") or claims.get("upn", ""),
+            oid=claims.get("oid", ""),
+            client=client or "(none)",
+            verdict="denied",
+            reason="client application is not permitted",
+        )
+        raise HTTPException(
+            403,
+            f"the application {client or 'this client'} is not permitted to use this service. "
+            "Your sign-in is valid; the client holding it is not approved.",
+        )
     return Principal(claims, token)
 
 
@@ -393,6 +433,7 @@ def run_query(
         op="run_query",
         user=p.name,
         oid=p.oid,
+        client=p.client,
         source=src.name,
         verdict="ok",
         tables=list(verdict.tables),

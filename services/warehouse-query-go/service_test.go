@@ -15,6 +15,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // ------------------------------------------------------- configuration ----
@@ -480,5 +482,75 @@ func TestTextContentWrapsAPayload(t *testing.T) {
 	}
 	if textContent("nope", true)["isError"] != true {
 		t.Fatal("an error result was not marked")
+	}
+}
+
+// ------------------------------------------------ which client may act ----
+func TestAnUnapprovedClientApplicationIsRefused(t *testing.T) {
+	// A genuine sign-in held by software the organisation has not approved:
+	// right tenant, right user, right scope. The application holding the token
+	// is the only part of "a personal AI client is driving this" that a
+	// resource server can see at all.
+	server, _, s := harness(t)
+	allowedClients = map[string]bool{"approved-app": true}
+	t.Cleanup(func() { allowedClients = map[string]bool{} })
+
+	token := s.token(t, func(c jwt.MapClaims) { c["azp"] = "some-other-app" })
+	status, body := do(t, server, "GET", "/tables", token, nil)
+	if status != http.StatusForbidden {
+		t.Fatalf("status %d", status)
+	}
+	detail := fmt.Sprint(body["detail"])
+	if !strings.Contains(detail, "some-other-app") {
+		t.Fatalf("the refusal does not name the client: %q", detail)
+	}
+	// It must not read as "your sign-in failed", which sends a person to reset
+	// a password that was never the problem.
+	if !strings.Contains(detail, "sign-in is valid") {
+		t.Fatalf("the refusal blames the wrong thing: %q", detail)
+	}
+}
+
+func TestAnApprovedClientApplicationIsAllowed(t *testing.T) {
+	server, _, s := harness(t)
+	allowedClients = map[string]bool{"approved-app": true}
+	t.Cleanup(func() { allowedClients = map[string]bool{} })
+	token := s.token(t, func(c jwt.MapClaims) { c["azp"] = "approved-app" })
+	if status, _ := do(t, server, "GET", "/tables", token, nil); status != http.StatusOK {
+		t.Fatalf("status %d", status)
+	}
+}
+
+func TestTheV1AppIDClaimIsAcceptedAsTheClient(t *testing.T) {
+	server, _, s := harness(t)
+	allowedClients = map[string]bool{"approved-app": true}
+	t.Cleanup(func() { allowedClients = map[string]bool{} })
+	token := s.token(t, func(c jwt.MapClaims) {
+		delete(c, "azp")
+		c["appid"] = "approved-app"
+	})
+	if status, _ := do(t, server, "GET", "/tables", token, nil); status != http.StatusOK {
+		t.Fatalf("status %d", status)
+	}
+}
+
+func TestAnEmptyAllowListPermitsAnyClient(t *testing.T) {
+	// Unrestricted is the right default where the tenant's own consent
+	// settings are already the control; it must not fail closed by surprise.
+	server, _, s := harness(t)
+	allowedClients = map[string]bool{}
+	token := s.token(t, func(c jwt.MapClaims) { c["azp"] = "anything" })
+	if status, _ := do(t, server, "GET", "/tables", token, nil); status != http.StatusOK {
+		t.Fatalf("status %d", status)
+	}
+}
+
+func TestATokenNamingNoClientIsRefusedWhenAListIsSet(t *testing.T) {
+	server, _, s := harness(t)
+	allowedClients = map[string]bool{"approved-app": true}
+	t.Cleanup(func() { allowedClients = map[string]bool{} })
+	token := s.token(t, func(c jwt.MapClaims) { delete(c, "azp"); delete(c, "appid") })
+	if status, _ := do(t, server, "GET", "/tables", token, nil); status != http.StatusForbidden {
+		t.Fatalf("status %d", status)
 	}
 }

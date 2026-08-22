@@ -34,6 +34,15 @@ var (
 	audience string
 	scopeReq string
 
+	// WHICH APPLICATION may act for a user, as distinct from which user it is.
+	// A valid token says who signed in; it does not say what software holds
+	// it, and nothing in the protocol identifies the vendor account driving a
+	// client. The `azp` claim does name the application the tenant issued the
+	// token to, and because Entra has no dynamic client registration every
+	// client id is provisioned by an administrator -- so an allow-list here is
+	// enforceable rather than advisory. Empty means unrestricted.
+	allowedClients map[string]bool
+
 	// Which source a call is about when it does not say. The Python executor
 	// has always honoured this; without it the two implementations answer the
 	// same unqualified request differently, which is what ADR 0001 exists to
@@ -74,6 +83,12 @@ func configure() error {
 	audience = os.Getenv("DAS_AGENT_AUDIENCE")
 	scopeReq = envOr("DAS_REQUIRED_SCOPE", "access_as_user")
 	defaultSource = strings.TrimSpace(os.Getenv("DAS_DEFAULT_SOURCE"))
+	allowedClients = map[string]bool{}
+	for _, id := range strings.Split(os.Getenv("DAS_ALLOWED_CLIENT_IDS"), ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			allowedClients[id] = true
+		}
+	}
 	return nil
 }
 
@@ -119,6 +134,7 @@ type Principal struct {
 	Token  string
 	OID    string
 	Name   string
+	Client string
 	Roles  []string
 }
 
@@ -162,7 +178,28 @@ func principal(w http.ResponseWriter, r *http.Request) (*Principal, bool) {
 		writeError(w, http.StatusForbidden, "token lacks the "+scopeReq+" scope")
 		return nil, false
 	}
-	p := &Principal{Claims: claims, Token: raw}
+	// `azp` in a v2.0 token, `appid` in a v1.0 one. Both name the client.
+	client, _ := claims["azp"].(string)
+	if client == "" {
+		client, _ = claims["appid"].(string)
+	}
+	if len(allowedClients) > 0 && !allowedClients[client] {
+		named := client
+		if named == "" {
+			named = "(none)"
+		}
+		// Audited: "which application asked" is the question an administrator
+		// will have, and a refusal nobody records is a signal thrown away.
+		audit("op", "authorize", "user", claims["preferred_username"], "oid", claims["oid"],
+			"client", named, "verdict", "denied",
+			"reason", "client application is not permitted")
+		writeError(w, http.StatusForbidden, "the application "+named+
+			" is not permitted to use this service. Your sign-in is valid; "+
+			"the client holding it is not approved.")
+		return nil, false
+	}
+
+	p := &Principal{Claims: claims, Token: raw, Client: client}
 	p.OID, _ = claims["oid"].(string)
 	for _, key := range []string{"preferred_username", "upn", "appid"} {
 		if v, ok := claims[key].(string); ok && v != "" {
@@ -463,7 +500,7 @@ func runQuery(ctx context.Context, src Source, sqlText string, requested int,
 			"reason", truncate(err.Error(), 300), "sql", truncate(verdict.SQL, 500))
 		return nil, nil, status, errors.New(engineMessage(err))
 	}
-	audit("op", "run_query", "user", p.Name, "oid", p.OID, "roles", p.Roles, "source", src.Name,
+	audit("op", "run_query", "user", p.Name, "oid", p.OID, "client", p.Client, "roles", p.Roles, "source", src.Name,
 		"verdict", "ok", "tables", verdict.Tables, "rows", result.RowCount,
 		"ms", time.Since(started).Milliseconds(), "authz_tier", src.AuthzTier,
 		"sql", truncate(verdict.SQL, 1000))

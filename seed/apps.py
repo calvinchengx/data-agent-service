@@ -298,6 +298,47 @@ def _expose(scope: str) -> None:
     c.log(f"data-plane scope {scope} is exposed")
 
 
+UNAPPROVED_CLIENT_NAME = "unapproved AI client (fixture)"
+
+
+def ensure_unapproved_client() -> str:
+    """A second public client, registered and deliberately NOT approved.
+
+    The control this witnesses is `DAS_ALLOWED_CLIENT_IDS`: a person signing in
+    with their corporate account through a client the organisation has not
+    approved. The token in that case is entirely genuine — same tenant, same
+    user, same scope — so the refusal cannot be witnessed with a forged one. It
+    takes a real application a real user can really sign in through, which is
+    what a personal AI client becomes the moment someone consents to it.
+
+    Identified by DISPLAY NAME, not by a configured id: a directory assigns the
+    application id, it is not chosen by the caller. Asking for one and assuming
+    it was honoured registers a duplicate on the second run and leaves the
+    configuration naming an application that does not exist.
+    """
+    existing = next((a for a in apps() if a.get("displayName") == UNAPPROVED_CLIENT_NAME), None)
+    if existing:
+        app_id = existing["appId"]
+        c.log(f"unapproved-client fixture exists ({app_id})")
+    else:
+        _, _, r = c.must(
+            "POST",
+            f"{G}/applications",
+            headers=c.bearer(c.GRAPH_AUD),
+            json_body={
+                "displayName": UNAPPROVED_CLIENT_NAME,
+                "signInAudience": "AzureADMyOrg",
+                "isFallbackPublicClient": True,
+                "publicClient": {"redirectUris": ["http://localhost"]},
+            },
+        )
+        payload = r if isinstance(r, dict) else json.loads(r)
+        app_id = payload["appId"]
+        c.log(f"unapproved-client fixture: registered ({app_id})")
+    c.write_env(DAS_UNAPPROVED_CLIENT_ID=app_id)
+    return app_id
+
+
 def main() -> dict:
     ensure_data_plane_scope()
     api = ensure_api_app()
@@ -310,8 +351,11 @@ def main() -> dict:
     ensure_federated_credential(api_id, "executor-managed-identity", c.ISSUER, mi_client_id)
     ensure_secret(api_id, "das-executor-client-secret")
 
+    unapproved = ensure_unapproved_client()
+
     out = {
         "api_app": api_id,
+        "unapproved_client": unapproved,
         "audience": API_AUDIENCE,
         "scope": SCOPE,
         "public_client": agent_id,
