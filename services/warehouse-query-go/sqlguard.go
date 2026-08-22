@@ -451,15 +451,10 @@ var notAnAlias = map[string]bool{
 	"UNION": true, "EXCEPT": true, "INTERSECT": true, "AS": true, "WITH": true, "OPTION": true,
 }
 
-func aliasAfter(toks []token, at int) string {
-	alias, _ := aliasAt(toks, at)
-	return alias
-}
-
-// aliasAt is aliasAfter, plus where it stopped. The caller needs that to see
-// whether a comma follows -- `FROM a, b` lists a second table with no FROM or
-// JOIN in front of it, and a scan that only looks after those keywords does
-// not see it at all.
+// aliasAt reads an optional alias and reports where it stopped. The caller
+// needs that to see whether a comma follows -- `FROM a, b` lists a second
+// table with no FROM or JOIN in front of it, and a scan that only looks after
+// those keywords does not see it at all.
 func aliasAt(toks []token, at int) (string, int) {
 	if at < len(toks) && toks[at].up == "AS" {
 		at++
