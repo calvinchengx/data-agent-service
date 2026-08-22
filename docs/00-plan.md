@@ -1,4 +1,4 @@
-# data-agent-service — Architecture & Implementation Plan
+# Data Agent Service — Architecture & Implementation Plan
 
 Status: **DRAFT for review — no implementation started.** Last updated 2026-08-22.
 

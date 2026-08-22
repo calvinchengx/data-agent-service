@@ -1,4 +1,4 @@
-# data-agent-service
+# Data Agent Service
 
 [![CI](https://github.com/calvinchengx/data-agent-service/actions/workflows/ci.yml/badge.svg)](https://github.com/calvinchengx/data-agent-service/actions/workflows/ci.yml)
 [![Docs](https://github.com/calvinchengx/data-agent-service/actions/workflows/docs-site.yml/badge.svg)](https://calvinchengx.github.io/data-agent-service/docs/)
