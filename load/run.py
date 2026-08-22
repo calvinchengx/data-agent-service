@@ -222,6 +222,50 @@ def run_scenario(name: str, args) -> dict:
     return out
 
 
+EXECUTOR_LABEL = "com.calvinx.das.executor"
+
+
+def running_executor() -> str | None:
+    """Which implementation the stack is actually running, from the image label.
+
+    A comparison is only worth having if each half measured what it claims to.
+    Nothing in the HTTP surface says which implementation answered — by design,
+    since the two are meant to be indistinguishable to a client — so the answer
+    comes from the image the container was built from.
+    """
+    try:
+        cid = (
+            subprocess.run(
+                ["docker", "compose", "ps", "-q", "warehouse-query"],
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=REPO,
+            )
+            .stdout.strip()
+            .splitlines()
+        )
+        if not cid:
+            return None
+        image = subprocess.run(
+            ["docker", "inspect", "-f", "{{.Image}}", cid[0]],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        if not image:
+            return None
+        label = subprocess.run(
+            ["docker", "inspect", "-f", f'{{{{index .Config.Labels "{EXECUTOR_LABEL}"}}}}', image],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        return label or None
+    except OSError:
+        return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", action="append", choices=sorted(SCENARIOS))
@@ -230,9 +274,30 @@ def main() -> int:
     ap.add_argument("--p95", type=int, default=int(os.environ.get("DAS_LOAD_P95_MS", "1500")))
     ap.add_argument("--user", default=os.environ.get("DAS_LOAD_USER", "carol@entraemulator.dev"))
     ap.add_argument("--env", default=os.environ.get("DAS_ENV", "local"))
+    ap.add_argument(
+        "--expect-executor",
+        choices=("py", "go"),
+        help="refuse to measure unless the stack is running this implementation",
+    )
     args = ap.parse_args()
 
     REPORTS.mkdir(exist_ok=True)
+
+    # Refuse rather than measure the wrong binary. A py-vs-go comparison that
+    # silently measured one implementation twice once reported go as three
+    # times SLOWER than py, inverting the ADR's own finding, and the witness
+    # accepted it because it only asserted that a difference existed.
+    if args.expect_executor:
+        actual = running_executor()
+        if actual != args.expect_executor:
+            print(
+                f"refusing to run: expected the {args.expect_executor} executor, "
+                f"the stack is running {actual or 'an unlabelled image'}.\n"
+                f"Rebuild with DAS_EXECUTOR={args.expect_executor} before measuring."
+            )
+            return 2
+        print(f"executor: {actual} (verified from the image label)")
+
     names = args.only or list(SCENARIOS)
 
     # The gateway's allowance is part of the experiment rather than a fixed

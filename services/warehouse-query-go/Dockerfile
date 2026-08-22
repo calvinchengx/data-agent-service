@@ -11,6 +11,9 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/warehouse-query . 
  && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/healthcheck ./healthcheck
 
 FROM gcr.io/distroless/static-debian12:nonroot
+# Which implementation this image is, so a comparison harness can verify it
+# measured the executor it believes it measured.
+LABEL com.calvinx.das.executor="go"
 COPY --from=build /out/warehouse-query /usr/local/bin/warehouse-query
 COPY --from=build /out/healthcheck /usr/local/bin/healthcheck
 EXPOSE 8090

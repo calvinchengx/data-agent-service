@@ -76,6 +76,9 @@ seed: ## Seed warehouse data, OpenMetadata semantics, authz, and APIM resources 
 # moves the failure onto whoever clones. LINT_MODE=host is the escape hatch,
 # not the default.
 GOLANGCI  = golangci/golangci-lint:v2.13.1
+# Pinned like every other image here: a toolchain that floats is a build that
+# passes on a laptop and fails in CI for reasons nobody changed.
+GO_IMAGE  = golang:1.26
 # Terraform runs in a container like every other tool here, so a fresh clone
 # still needs Docker and nothing else. `init -backend=false` downloads the
 # providers and touches no state, which is what makes these checks offline.
@@ -114,6 +117,28 @@ typecheck: ## Python types only
 test: ## Unit + e2e witnesses (Phase 4+)
 	$(TOOLS) python -m e2e.run $(ARGS)
 
+# The floor is enforced, not reported. A coverage number nobody fails on drifts
+# down one merge at a time, and the badge then tells a story the repo stopped
+# living up to.
+COVERAGE_FLOOR = 90
+
+unit: ## Python unit tests alone (no stack required)
+	$(TOOLS) pytest -q $(ARGS)
+
+coverage-python: ## Python unit coverage, failing under the floor
+	$(TOOLS) pytest -q --cov=agent --cov=promoter --cov=services/warehouse-query-py \
+		--cov-report=term-missing --cov-fail-under=$(COVERAGE_FLOOR) $(ARGS)
+
+coverage-go: ## Go unit coverage, failing under the floor
+	docker run --rm -v "$(PWD):/src" -w /src/services/warehouse-query-go $(GO_IMAGE) \
+		sh -c 'go test ./... -coverprofile=/tmp/cover.out >/dev/null && \
+		go tool cover -func=/tmp/cover.out | tail -1 | \
+		awk -v floor=$(COVERAGE_FLOOR) "{gsub(/%/,\"\",\$$NF); \
+		printf \"go coverage: %s%%\\n\", \$$NF; \
+		if (\$$NF+0 < floor) { printf \"below the %s%% floor\\n\", floor; exit 1 }}"'
+
+coverage: coverage-python coverage-go ## Both suites, both floors
+
 witnesses-manifest: ## Record this run's witness counts into docs/witnesses.json
 	$(TOOLS) python -m e2e.run --write-manifest $(ARGS)
 
@@ -128,10 +153,11 @@ load: ## Load tests (Phase 8) — k6 in a container on the stack's network
 
 load-compare: ## Measure BOTH executors under the same load (Phase 9; writes load-py.json and load-go.json)
 	@echo "== python executor"
-	DAS_REPORT_STAMP=py $(PY) -m load.run --only query-direct $(ARGS)
+	$(COMPOSE) up -d --build --wait warehouse-query
+	DAS_REPORT_STAMP=py $(PY) -m load.run --only query-direct --expect-executor py $(ARGS)
 	@echo "== swapping in the go executor (DAS_EXECUTOR=go); nothing above it changes"
 	DAS_EXECUTOR=go $(COMPOSE) up -d --build --wait warehouse-query
-	DAS_REPORT_STAMP=go $(PY) -m load.run --only query-direct $(ARGS)
+	DAS_REPORT_STAMP=go $(PY) -m load.run --only query-direct --expect-executor go $(ARGS)
 	@echo "== restoring the python executor"
 	$(COMPOSE) up -d --build --wait warehouse-query
 
