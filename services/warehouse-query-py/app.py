@@ -241,6 +241,36 @@ def _principal_token(src, p: Principal) -> str:
         raise HTTPException(502, f"could not obtain a data-plane token for you: {e}") from None
 
 
+def _http_token(src, p: Principal) -> str:
+    """The credential an HTTP source is reached with.
+
+    Three cases, in the order they are tried:
+
+    * a stored credential (`credential: "keyvault:<name>"`) — for an API that
+      does not federate with Entra at all. It is only honoured for a
+      `service` tier source, because sending a shared credential while
+      claiming the caller's permissions apply would be a lie the audit line
+      would then repeat;
+    * otherwise the same token any other source gets — on-behalf-of for a
+      `user` tier source, the service's own for a `service` one.
+    """
+    if src.credential:
+        if src.authz_tier == "user":
+            raise HTTPException(
+                500,
+                f"source {src.name} has a stored credential but claims authz_tier=user; "
+                "a shared credential cannot carry the caller's permissions",
+            )
+        kind, _, name = src.credential.partition(":")
+        if kind != "keyvault":
+            raise HTTPException(500, f"source {src.name}: unknown credential kind {kind!r}")
+        value = CRED.secret(name)
+        if not value:
+            raise HTTPException(502, f"source {src.name}: credential {name} is not readable")
+        return value
+    return _principal_token(src, p)
+
+
 def audit(**kw) -> None:
     LOG.info("audit %s", json.dumps(kw, default=str, separators=(",", ":")))
 
@@ -256,24 +286,11 @@ def health():
 )
 def list_sources(authorization: str | None = Header(default=None)):
     principal(authorization)
-    return {
-        "sources": [
-            {
-                "name": s.name,
-                "kind": s.kind,
-                "dialect": s.dialect,
-                "authzTier": s.authz_tier,
-                "openMetadataService": s.om_service_fqn,
-                "surface": s.surface,
-                **(
-                    {"collections": list(s.collections)}
-                    if s.surface == "http"
-                    else {"schemas": list(s.schemas)}
-                ),
-            }
-            for s in SOURCES.values()
-        ]
-    }
+    # The SAME payload the MCP tool returns. It was two copies, and they had
+    # already drifted: the REST one reported each source's surface and the MCP
+    # one did not, so a client discovering sources over MCP could not tell a
+    # warehouse from an API.
+    return _sources_payload()
 
 
 @app.get(
@@ -286,7 +303,7 @@ def list_tables(
     authorization: str | None = Header(default=None),
 ):
     p = principal(authorization)
-    src = _source(source)
+    src = _sql_source(source)
     t0 = time.time()
     try:
         tables = backend_for(src).list_tables(src, _principal_token(src, p))
@@ -325,7 +342,7 @@ def describe_table(
     authorization: str | None = Header(default=None),
 ):
     p = principal(authorization)
-    src = _source(source)
+    src = _sql_source(source)
     t0 = time.time()
     try:
         out = backend_for(src).describe(src, qualified_name, _principal_token(src, p))
@@ -387,7 +404,7 @@ def run_query(
     authorization: str | None = Header(default=None),
 ):
     p = principal(authorization)
-    src = _source(body.get("source"))
+    src = _sql_source(body.get("source"))
     sql = body.get("sql") or ""
     max_rows = min(int(body.get("maxRows") or MAX_ROWS), MAX_ROWS)
     t0 = time.time()
@@ -472,6 +489,23 @@ def _http_source(name: str | None):
     return src
 
 
+def _sql_source(name: str | None):
+    """The mirror of `_http_source`.
+
+    Without it a SELECT against an HTTP source reaches the SQL guard and is
+    refused for a reason about SQL — "the query reads no table" — which tells
+    the agent nothing about what it actually did wrong.
+    """
+    src = _source(name)
+    if src.surface != "sql":
+        raise HTTPException(
+            400,
+            f"source {src.name} is an http source; use list_operations, "
+            "describe_operation and call_operation rather than SQL",
+        )
+    return src
+
+
 @app.get(
     "/operations",
     operation_id="list_operations",
@@ -481,9 +515,12 @@ def list_operations(
     source: str | None = Query(default=None),
     authorization: str | None = Header(default=None),
 ):
-    p = principal(authorization)
+    return _op_list(principal(authorization), source)
+
+
+def _op_list(p: Principal, source: str | None) -> dict:
     src = _http_source(source)
-    token = _principal_token(src, p)
+    token = _http_token(src, p)
     t0 = time.time()
     try:
         ops = http_backend_for(src).list_operations(src, token)
@@ -519,9 +556,12 @@ def describe_operation(
     source: str | None = Query(default=None),
     authorization: str | None = Header(default=None),
 ):
-    p = principal(authorization)
+    return _op_describe(principal(authorization), operation, source)
+
+
+def _op_describe(p: Principal, operation: str, source: str | None) -> dict:
     src = _http_source(source)
-    token = _principal_token(src, p)
+    token = _http_token(src, p)
     try:
         described = http_backend_for(src).describe_operation(src, operation, token)
     except PermissionError as e:
@@ -563,11 +603,14 @@ def call_operation(
     ),
     authorization: str | None = Header(default=None),
 ):
-    p = principal(authorization)
+    return _op_call(principal(authorization), body)
+
+
+def _op_call(p: Principal, body: dict) -> dict:
     src = _http_source(body.get("source"))
     operation = body.get("operation") or ""
     arguments = body.get("arguments") or {}
-    token = _principal_token(src, p)
+    token = _http_token(src, p)
     backend = http_backend_for(src)
     t0 = time.time()
 
@@ -585,27 +628,22 @@ def call_operation(
         )
         raise HTTPException(400, f"call refused: {e}") from None
 
-    # The same two-part authorization as a query: may this role reach the
-    # operation at all, and may it read the fields the response carries.
+    # The same two-part authorization as a query, and in that order: may this
+    # role reach the operation AT ALL, and then which of its fields may it
+    # read. Checking them together cannot tell the two apart, and a denied
+    # operation would be mistaken for a response full of denied fields.
+    qualified = f"{verdict.collection}.{verdict.operation}"
     try:
-        RULES.check(p.roles, (f"{verdict.collection}.{verdict.operation}",), verdict.fields)
-        denied_fields: set[str] = set()
-    except access.Denied:
-        denied_fields = set()
-        for dotted in verdict.fields:
-            try:
-                RULES.check(p.roles, (f"{verdict.collection}.{verdict.operation}",), (dotted,))
-            except access.Denied as e:
-                if dotted.count(".") < 2:
-                    audit(
-                        op="call_operation",
-                        user=p.name,
-                        source=src.name,
-                        verdict="denied",
-                        reason=str(e),
-                    )
-                    raise HTTPException(403, str(e)) from None
-                denied_fields.add(dotted.rsplit(".", 1)[-1])
+        RULES.check(p.roles, (qualified,), ())
+    except access.Denied as e:
+        audit(op="call_operation", user=p.name, source=src.name, verdict="denied", reason=str(e))
+        raise HTTPException(403, str(e)) from None
+    denied_fields: set[str] = set()
+    for dotted in verdict.fields:
+        try:
+            RULES.check(p.roles, (qualified,), (dotted,))
+        except access.Denied:
+            denied_fields.add(dotted.rsplit(".", 1)[-1])
 
     try:
         result = backend.call(src, verdict, token)
@@ -752,7 +790,12 @@ def _sources_payload() -> dict:
                 "dialect": s.dialect,
                 "authzTier": s.authz_tier,
                 "openMetadataService": s.om_service_fqn,
-                "schemas": list(s.schemas),
+                "surface": s.surface,
+                **(
+                    {"collections": list(s.collections)}
+                    if s.surface == "http"
+                    else {"schemas": list(s.schemas)}
+                ),
             }
             for s in SOURCES.values()
         ]
@@ -766,6 +809,26 @@ def _dispatch(p: Principal, name: str, args: dict) -> dict:
         if name == "list_sources":
             return mcpproto.text_content({**_sources_payload(), "yourRoles": list(p.roles)})
         src = _source(args.get("source"))
+        # Surface check on the MCP path too. Without it a SELECT against an
+        # http source reaches the SQL guard and is refused for a reason about
+        # SQL, which tells the model nothing about what it actually did wrong.
+        if name in ("list_tables", "describe_table", "run_query") and src.surface != "sql":
+            return mcpproto.text_content(
+                f"source {src.name} is an http source; use list_operations, "
+                "describe_operation and call_operation rather than SQL",
+                is_error=True,
+            )
+        # The SAME helpers the REST routes call. The Python executor once
+        # filtered withheld columns on its MCP path and not its REST one; two
+        # implementations of one rule is how that happened.
+        if name == "list_operations":
+            return mcpproto.text_content(_op_list(p, args.get("source")))
+        if name == "describe_operation":
+            return mcpproto.text_content(
+                _op_describe(p, args.get("operation") or "", args.get("source"))
+            )
+        if name == "call_operation":
+            return mcpproto.text_content(_op_call(p, args))
         if name == "list_tables":
             tables = backend_for(src).list_tables(src, _principal_token(src, p))
             audit(

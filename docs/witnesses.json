@@ -1,6 +1,6 @@
 {
-  "passed": 103,
-  "total": 103,
+  "passed": 115,
+  "total": 115,
   "phases": {
     "phase1": {
       "passed": 2,
@@ -19,8 +19,8 @@
       "total": 3
     },
     "phase13": {
-      "passed": 7,
-      "total": 7
+      "passed": 8,
+      "total": 8
     },
     "phase14": {
       "passed": 6,
@@ -33,6 +33,10 @@
     "phase16": {
       "passed": 9,
       "total": 9
+    },
+    "phase17": {
+      "passed": 10,
+      "total": 10
     },
     "phase2": {
       "passed": 5,
@@ -67,8 +71,8 @@
       "total": 5
     },
     "quality": {
-      "passed": 7,
-      "total": 7
+      "passed": 8,
+      "total": 8
     }
   }
 }

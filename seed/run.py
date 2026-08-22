@@ -16,6 +16,10 @@ PER_DATASET = [
     ("seed.govern", "OpenMetadata semantics"),
 ]
 ONCE = [
+    # HTTP sources register their API from its own OpenAPI document, so this
+    # is once-per-stack rather than per-dataset: the asset belongs to the API,
+    # not to any one dataset that happens to read it.
+    ("seed.apis", "API assets for http sources"),
     ("seed.apps", "app registrations"),
     ("seed.apim", "gateway APIs + policies"),
     ("seed.authz", "personas + access rules"),

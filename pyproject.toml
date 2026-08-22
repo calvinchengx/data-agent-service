@@ -65,8 +65,10 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Test doubles reach into the module under test on purpose.
-"tests/*" = ["BLE001", "B017", "SLF001"]
+# Test doubles reach into the module under test on purpose. F811: pytest
+# fixtures are shared between test modules by importing them, and every use in
+# a test signature then looks like a redefinition to a linter.
+"tests/*" = ["BLE001", "B017", "SLF001", "F811"]
 # Datasets generate deterministic fixtures: naive datetimes are the point (the
 # warehouse column has no timezone), and the row tuples are positional.
 "seed/datasets/*" = ["DTZ001", "DTZ005"]

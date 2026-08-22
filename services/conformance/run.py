@@ -196,10 +196,29 @@ def conform(base: str) -> None:
 
     st, payload = ex.rpc("tools/list", {}, carol)
     tools = [t["name"] for t in (payload.get("result") or {}).get("tools", [])] if st == 200 else []
+    # The SQL surface is the contract both implementations must satisfy. The
+    # HTTP surface is optional and all-or-nothing: an executor that publishes
+    # some of `list_operations`, `describe_operation` and `call_operation` but
+    # not the others would leave a client able to find an operation and unable
+    # to call it. Optional rather than required because the Go executor has no
+    # REST adapter — recorded in ADR 0001 and docs/parity.md, not implied here.
+    core = {"list_sources", "list_tables", "describe_table", "run_query"}
+    http_surface = {"list_operations", "describe_operation", "call_operation"}
+    published = set(tools)
     check(
-        "MCP publishes the four tools",
-        set(tools) == {"list_sources", "list_tables", "describe_table", "run_query"},
-        str(tools),
+        "MCP publishes the four core tools",
+        core <= published,
+        str(sorted(published)),
+    )
+    check(
+        "the http surface is published whole or not at all",
+        published & http_surface in (set(), http_surface),
+        f"{sorted(published & http_surface)} of {sorted(http_surface)}",
+    )
+    check(
+        "no tool outside the contract is published",
+        published <= core | http_surface,
+        str(sorted(published - core - http_surface)) or "none",
     )
 
     schema = next(

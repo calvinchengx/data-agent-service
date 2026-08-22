@@ -29,6 +29,7 @@ import fnmatch
 import json
 import re
 import urllib.parse
+from typing import Any
 
 from sqlguard import Denied
 
@@ -288,7 +289,7 @@ def guard(operation_id: str, arguments: dict, operations: dict[str, Operation], 
     )
 
 
-def filter_response(payload: object, denied: set[str], depth: int = 0) -> tuple[object, int]:
+def filter_response(payload: Any, denied: set[str], depth: int = 0) -> tuple[Any, int]:
     """Strip denied fields from a response, at any depth.
 
     JSON nests, so a field the caller may not read can appear inside an array
@@ -318,7 +319,7 @@ def filter_response(payload: object, denied: set[str], depth: int = 0) -> tuple[
     return payload, 0
 
 
-def truncate(raw: bytes, max_bytes: int) -> tuple[object, bool]:
+def truncate(raw: bytes, max_bytes: int) -> tuple[Any, bool]:
     """Parse a response, refusing one that exceeds the ceiling.
 
     Refused rather than truncated: half a JSON document is not a smaller

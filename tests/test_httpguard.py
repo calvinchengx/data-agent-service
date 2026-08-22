@@ -242,3 +242,87 @@ def test_a_non_json_response_is_refused():
 def test_a_json_response_within_the_ceiling_parses():
     body, _ = truncate(b'{"ok": true}', 1000)
     assert body == {"ok": True}
+
+
+# ------------------------------------------------- the untagged and odd --
+
+UNTAGGED = {
+    "openapi": "3.0.0",
+    "paths": {
+        "/reports/{id}/lines": {
+            "get": {
+                "operationId": "listLines",
+                "parameters": [
+                    {"name": "id", "in": "path", "required": True, "schema": {"type": "string"}},
+                    {"name": "X-Trace", "in": "header", "schema": {"type": "string"}},
+                    {"name": "flag", "in": "query", "schema": {"type": "boolean"}},
+                ],
+                "responses": {
+                    "200": {
+                        "content": {"application/json": {"schema": {"$ref": "#/nowhere/Missing"}}}
+                    }
+                },
+            }
+        }
+    },
+}
+
+
+def test_an_untagged_operation_takes_its_collection_from_the_path():
+    ops = load_spec(UNTAGGED)
+    assert ops["listLines"].collection == "reports"
+
+
+def test_a_header_parameter_cannot_be_set_by_a_question():
+    # Transport belongs to the executor, not to whoever is asking.
+    ops = load_spec(UNTAGGED)
+    assert [p.name for p in ops["listLines"].parameters] == ["id", "flag"]
+    with pytest.raises(Denied, match="unknown parameter"):
+        guard(
+            "listLines",
+            {"id": "1", "X-Trace": "abc"},
+            ops,
+            Policy(base_url="https://x", collections=()),
+        )
+
+
+def test_an_unresolvable_ref_yields_no_fields_rather_than_failing():
+    # Fail closed and keep going: a schema the guard cannot read means no
+    # fields are claimed, not that the operation is silently unguarded.
+    ops = load_spec(UNTAGGED)
+    assert ops["listLines"].fields == ()
+
+
+def test_a_boolean_parameter_is_checked():
+    ops = load_spec(UNTAGGED)
+    policy = Policy(base_url="https://x", collections=())
+    with pytest.raises(Denied, match="true or false"):
+        guard("listLines", {"id": "1", "flag": "maybe"}, ops, policy)
+    v = guard("listLines", {"id": "1", "flag": True}, ops, policy)
+    assert ("flag", "true") in v.params
+
+
+def test_an_operation_with_no_operation_id_still_gets_one():
+    spec = {"openapi": "3.0.0", "paths": {"/things": {"get": {"responses": {}}}}}
+    ops = load_spec(spec)
+    assert "get_things" in ops
+
+
+def test_a_page_size_parameter_named_by_the_spec_is_honoured():
+    spec = {
+        "openapi": "3.0.0",
+        "paths": {
+            "/things": {
+                "get": {
+                    "operationId": "listThings",
+                    "x-page-size-param": "pageSize",
+                    "parameters": [
+                        {"name": "pageSize", "in": "query", "schema": {"type": "integer"}}
+                    ],
+                    "responses": {},
+                }
+            }
+        },
+    }
+    v = guard("listThings", {}, load_spec(spec), Policy(base_url="https://x", max_items=7))
+    assert ("pageSize", "7") in v.params

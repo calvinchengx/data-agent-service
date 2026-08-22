@@ -35,6 +35,12 @@ const message = refused.content[0].text;
 console.log(`  guard reaches this client as a tool error: ${refused.isError === true}`);
 
 await client.close();
-const good = names.length === 4 && described.columns.length > 0 &&
+// The four core tools must be there. Not a COUNT: an executor that also
+// serves HTTP sources publishes list_operations, describe_operation and
+// call_operation, and a client that fails because a server offers more than it
+// expected is testing the server's inventory rather than its own compatibility.
+const core = ["describe_table", "list_sources", "list_tables", "run_query"];
+const hasCore = core.every((t) => names.includes(t));
+const good = hasCore && described.columns.length > 0 &&
   refused.isError === true && message.includes("one statement");
 process.exit(good ? 0 : 1);

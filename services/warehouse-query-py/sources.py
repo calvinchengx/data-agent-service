@@ -55,6 +55,9 @@ class Source:
     collections: tuple[str, ...] = ()
     max_items: int = 500
     max_bytes: int = 200_000
+    # How to authenticate when the API does not federate with Entra:
+    # "keyvault:<secret-name>". Only meaningful for authz_tier=service.
+    credential: str = ""
     # databricks
     host: str = ""
     warehouse_id: str = ""
@@ -600,6 +603,7 @@ def load_sources() -> dict[str, Source]:
             collections=tuple(r.get("collections") or ()),
             max_items=int(r.get("max_items") or 500),
             max_bytes=int(r.get("max_bytes") or 200_000),
+            credential=r.get("credential", ""),
         )
     for src in out.values():
         # A spec is the allow-list, not documentation. Refusing at start-up is

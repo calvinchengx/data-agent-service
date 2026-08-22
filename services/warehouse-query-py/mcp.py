@@ -45,6 +45,61 @@ def tool_definitions(default_source: str | None, dialect: str) -> list[dict]:
             "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
         },
         {
+            "name": "list_operations",
+            "description": (
+                "List the operations of an HTTP source — the equivalent of list_tables for a "
+                "source whose surface is an API rather than SQL. Only sources reported with "
+                "surface 'http' by list_sources have operations."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"source": _SOURCE_PROP},
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "describe_operation",
+            "description": (
+                "Parameters and response fields of one operation of an HTTP source. ALWAYS "
+                "describe an operation before calling it — never guess a parameter name, and "
+                "note that fields your role may not read are not listed."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "description": "The operationId, as reported by list_operations.",
+                    },
+                    "source": _SOURCE_PROP,
+                },
+                "required": ["operation"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "call_operation",
+            "description": (
+                "Call one read-only operation of an HTTP source and return its items. Only "
+                "operations the source's OpenAPI document describes can be called, only "
+                "parameters it declares are accepted, and the number of items is capped."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "operation": {"type": "string", "description": "The operationId to call."},
+                    "arguments": {
+                        "type": "object",
+                        "description": "Parameters for the operation, as describe_operation lists them.",
+                        "additionalProperties": True,
+                    },
+                    "source": _SOURCE_PROP,
+                },
+                "required": ["operation"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "list_tables",
             "description": (
                 "List the tables of a source, as the asking user is permitted to see them. "
