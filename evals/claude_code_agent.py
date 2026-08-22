@@ -239,9 +239,23 @@ def ask(
             # fails the file if it does not.
             env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
         t0 = time.time()
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=timeout, env=env
-        )
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, check=False, timeout=timeout, env=env
+            )
+        except subprocess.TimeoutExpired:
+            # A timeout is an ANSWER — the agent failed to produce one — not a
+            # reason to abandon the run. Letting it propagate cost three hours
+            # of completed arms on a paid run, because the report is written at
+            # the end and a single slow call took the whole thing with it.
+            return agent_mod.Answer(
+                f"(no answer: the agent exceeded {timeout}s)",
+                [],
+                0,
+                0,
+                int((time.time() - t0) * 1000),
+                "timeout",
+            )
     events, text, usage, stop = [], "", {}, ""
     for raw in (proc.stdout or "").splitlines():
         line = raw.strip()

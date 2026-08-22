@@ -268,7 +268,12 @@ class GoldAgent:
 
 
 def evaluate(
-    question: dict, answer: agent_mod.Answer, gold: list[list] | None, conn
+    question: dict,
+    answer: agent_mod.Answer,
+    gold: list[list] | None,
+    conn,
+    *,
+    catalog_had_definitions: bool = True,
 ) -> scoring.Score:
     expect = question.get("expect", "answer")
     s = scoring.Score()
@@ -312,6 +317,9 @@ def evaluate(
         actual is not None
         and gold is not None
         and scoring.rows_match(actual, gold, ordered=ordered)
+    )
+    s.attribution = scoring.attribution(
+        answer.text, catalog_had_definitions=catalog_had_definitions
     )
     s.grounding = scoring.grounding(set(answer.tables), question.get("gold_tables", []))
     if question.get("required_semantics") or question.get("forbidden_semantics"):
@@ -363,7 +371,15 @@ def run(
                 answer = agent_mod.ask(
                     question["question"], token, om=om, model=model, effort=effort
                 )
-            s = evaluate(question, answer, gold, conn)
+            # An arm holds definitions only when the catalog is present AND
+            # its descriptions were not emptied.
+            s = evaluate(
+                question,
+                answer,
+                gold,
+                conn,
+                catalog_had_definitions=om and catalog == "full",
+            )
             result = Result(
                 question,
                 answer.text,
@@ -429,6 +445,8 @@ def summarise(results: list[Result]) -> dict:
         if results
         else 0,
         "execution_accuracy": rate("execution"),
+        # Of the answers that CLAIMED a source, how many were entitled to.
+        "attribution_accuracy": rate("attribution"),
         "grounding": rate("grounding"),
         "semantic_fidelity": rate("semantics"),
         "behaviour": rate("behaviour"),
@@ -523,6 +541,24 @@ def main() -> int:
         ]
 
     report: dict[str, Any] = {"usecase": a.usecase, "agent": a.agent, "runs": {}}
+
+    def _report_path(args) -> pathlib.Path:
+        stamp = os.environ.get("DAS_REPORT_STAMP") or str(started_at)
+        return REPORTS / f"{args.usecase}-{args.agent}-{stamp}.json"
+
+    def _save(args) -> None:
+        """After every arm, not only at the end.
+
+        These runs take hours and cost real usage, and the arms already
+        finished are worth exactly as much whether or not the next one
+        survives. Writing once at the end means any failure discards all of
+        them — which is how three completed contoso arms became three lines of
+        console output.
+        """
+        REPORTS.mkdir(exist_ok=True)
+        _report_path(args).write_text(json.dumps(report, indent=1) + "\n")
+
+    started_at = int(time.time())
     for label, om, catalog, naive in runs:
         print(f"\n{label}")
         results = run(
@@ -557,10 +593,18 @@ def main() -> int:
                 for r in results
             ],
         }
+        # Banked before the next arm starts, so a failure there costs one arm
+        # rather than every arm that already finished.
+        _save(a)
         print(
             f"  {summary['passed']}/{summary['n']} passed "
             f"({summary['pass_rate']}%) · execution {summary['execution_accuracy']}% · "
             f"grounding {summary['grounding']}% · semantics {summary['semantic_fidelity']}%"
+            + (
+                f" · attribution {summary['attribution_accuracy']}%"
+                if summary.get("attribution_accuracy") is not None
+                else ""
+            )
         )
 
     if a.ablation and len(report["runs"]) >= 2:
@@ -616,8 +660,7 @@ def main() -> int:
         report["comparisons"] = comparisons
 
     REPORTS.mkdir(exist_ok=True)
-    stamp = os.environ.get("DAS_REPORT_STAMP") or str(int(time.time()))
-    out = REPORTS / f"{a.usecase}-{a.agent}-{stamp}.json"
+    out = _report_path(a)
     out.write_text(json.dumps(report, indent=1))
     print(f"\nreport: {out}")
 
