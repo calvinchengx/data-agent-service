@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
       - run: uv sync --all-groups --frozen
@@ -69,8 +69,8 @@ jobs:
       run:
         working-directory: services/warehouse-query-go
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: services/warehouse-query-go/go.mod
           cache-dependency-path: services/warehouse-query-go/go.sum
@@ -82,7 +82,7 @@ jobs:
           go tool cover -func=cover.out | tail -1
           pct=$(go tool cover -func=cover.out | tail -1 | awk '{gsub(/%/,"",$NF); print $NF}')
           awk -v p="$pct" 'BEGIN { if (p+0 < 90) { printf "go coverage %s%% is below the 90%% floor\n", p; exit 1 } }'
-      - uses: golangci/golangci-lint-action@v7
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.13.1
           working-directory: services/warehouse-query-go
@@ -92,12 +92,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # One definition covers the resources AND the app registration, which
       # ARM cannot express. All three steps are offline -- `init
       # -backend=false` only fetches providers, and nothing here contacts Azure
       # or touches state.
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.14.0
           terraform_wrapper: false
@@ -115,7 +115,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: free disk for the images
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
@@ -141,7 +141,7 @@ jobs:
       - name: the manifest this run would have written
         if: failure()
         run: make witnesses-manifest || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: witnesses-manifest
