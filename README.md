@@ -1,6 +1,13 @@
 # data-agent-service
 
+[![CI](https://github.com/calvinchengx/data-agent-service/actions/workflows/ci.yml/badge.svg)](https://github.com/calvinchengx/data-agent-service/actions/workflows/ci.yml)
+[![Docs](https://github.com/calvinchengx/data-agent-service/actions/workflows/docs-site.yml/badge.svg)](https://calvinchengx.github.io/data-agent-service/docs/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 **A governed Data Agent: natural-language questions over Fabric Warehouses (and other sources), grounded in the glossary, metrics and schema held in OpenMetadata, fronted by Azure API Management with Entra identity — runnable locally on the emulator family and unchanged against real Azure.**
+
+📖 **[Documentation site](https://calvinchengx.github.io/data-agent-service/docs/)** — the full
+reference, also browsable as Markdown in [`docs/`](docs/).
 
 Status: **Phases 0-14 landed** — see [docs/00-plan.md](docs/00-plan.md).
 
@@ -28,6 +35,7 @@ or `make stack` to do the whole bring-up from nothing, which is what CI runs.
 | `seed/` | Datasets, warehouse provisioning, OpenMetadata semantics, identity setup |
 | `infra/` | Bicep for real Azure; `docs/10-production.md` is the runbook |
 | `.github/workflows/ci.yml` | Four jobs; `docs/11-ci.md` says what each proves |
+| `website/` | The docs site — Astro + Starlight, generated from `docs/`, which stays the source of truth |
 | `scripts/` | `doctor.sh`, `status.sh`, `check-discipline.sh`, `preflight.py` |
 
 ## Discipline
