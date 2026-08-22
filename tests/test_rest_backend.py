@@ -57,7 +57,7 @@ SPEC = {
 ROWS = [{"id": str(i), "email": f"{i}@x"} for i in range(10)]
 
 
-def make(monkeypatch, *, collections=("invoices",), max_items=500, body=None):
+def make(monkeypatch, *, collections=("invoices",), max_items=500, payload=None):
     backend = sources_mod.RestBackend()
     src = sources_mod.Source(
         name="billing",
@@ -71,12 +71,12 @@ def make(monkeypatch, *, collections=("invoices",), max_items=500, body=None):
     )
     seen: dict[str, str] = {}
 
-    def fake_fetch(self, url, token, *, max_bytes):
+    def fake_fetch(self, url, token, *, max_bytes, method="GET", body=""):
         seen["url"] = url
         seen["token"] = token
         if url.endswith("openapi.json"):
             return json.dumps(SPEC).encode()
-        return json.dumps(body if body is not None else ROWS).encode()
+        return json.dumps(payload if payload is not None else ROWS).encode()
 
     monkeypatch.setattr(sources_mod.RestBackend, "_fetch", fake_fetch)
     return backend, src, seen
@@ -128,7 +128,7 @@ def test_the_item_ceiling_is_applied_to_the_result(monkeypatch):
 
 
 def test_a_single_object_response_is_still_a_list_of_items(monkeypatch):
-    backend, src, _ = make(monkeypatch, body={"id": "1", "email": "a@x"})
+    backend, src, _ = make(monkeypatch, payload={"id": "1", "email": "a@x"})
     ops = backend.operations(src, "tok")
     verdict = httpguard.guard("listInvoices", {}, ops, backend.policy(src))
     out = backend.call(src, verdict, "tok")
@@ -137,7 +137,7 @@ def test_a_single_object_response_is_still_a_list_of_items(monkeypatch):
 
 
 def test_a_response_over_the_byte_ceiling_is_refused(monkeypatch):
-    backend, src, _ = make(monkeypatch, body=[{"id": "x" * 500} for _ in range(50)])
+    backend, src, _ = make(monkeypatch, payload=[{"id": "x" * 500} for _ in range(50)])
     src = dataclasses_replace(src, max_bytes=100)
     ops = backend.operations(src, "tok")
     verdict = httpguard.guard("listInvoices", {}, ops, backend.policy(src))

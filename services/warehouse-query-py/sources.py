@@ -469,8 +469,19 @@ class RestBackend:
     def __init__(self) -> None:
         self._specs: dict[str, dict] = {}
 
-    def _fetch(self, url: str, token: str, *, max_bytes: int) -> bytes:
-        request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    def _fetch(
+        self, url: str, token: str, *, max_bytes: int, method: str = "GET", body: str = ""
+    ) -> bytes:
+        """One request. The method and body come from the Verdict, never from
+        the caller: a retrieval API takes its query as a JSON body because a
+        query does not fit in a URL, and that body has already been checked
+        against the operation's declared schema."""
+        data = body.encode() if body else None
+        request = urllib.request.Request(
+            url, data=data, method=method, headers={"Accept": "application/json"}
+        )
+        if data:
+            request.add_header("Content-Type", "application/json")
         if token:
             request.add_header("Authorization", "Bearer " + token)
         with urllib.request.urlopen(request, timeout=30, context=_SSL) as response:
@@ -549,7 +560,13 @@ class RestBackend:
         }
 
     def call(self, src: Source, verdict: httpguard.Verdict, principal_token: str) -> dict:
-        raw = self._fetch(verdict.url, principal_token, max_bytes=verdict.max_bytes)
+        raw = self._fetch(
+            verdict.url,
+            principal_token,
+            max_bytes=verdict.max_bytes,
+            method=verdict.method.upper(),
+            body=verdict.body,
+        )
         payload, _ = httpguard.truncate(raw, verdict.max_bytes)
         items = payload if isinstance(payload, list) else [payload]
         truncated = len(items) > verdict.item_limit

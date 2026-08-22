@@ -96,7 +96,7 @@ def _wire(monkeypatch):
     # test here depend on deployment configuration.
     rules(monkeypatch, [{"role": "*", "allow_tables": ["*"], "deny_columns": []}])
 
-    def fake_fetch(self, url, token, *, max_bytes):
+    def fake_fetch(self, url, token, *, max_bytes, method="GET", body=""):
         if url.endswith("openapi.json"):
             return json.dumps(SPEC).encode()
         return json.dumps(ROWS).encode()
@@ -261,7 +261,7 @@ def test_the_spec_is_fetched_once_and_kept(monkeypatch):
     backend = sources_mod.RestBackend()
     calls = []
 
-    def counting_fetch(self, url, token, *, max_bytes):
+    def counting_fetch(self, url, token, *, max_bytes, method="GET", body=""):
         calls.append(url)
         return json.dumps(SPEC).encode()
 
@@ -278,7 +278,7 @@ def test_the_base_url_falls_back_to_the_specs_own_server(monkeypatch):
     monkeypatch.setattr(
         sources_mod.RestBackend,
         "_fetch",
-        lambda self, url, token, *, max_bytes: json.dumps(
+        lambda self, url, token, *, max_bytes, method="GET", body="": json.dumps(
             {**SPEC, "servers": [{"url": "https://from-the-spec.example.com"}]}
         ).encode(),
     )
@@ -332,7 +332,7 @@ def test_a_non_json_response_is_refused_by_the_route(client, signing_key, monkey
     monkeypatch.setattr(
         sources_mod.RestBackend,
         "_fetch",
-        lambda self, url, token, *, max_bytes: (
+        lambda self, url, token, *, max_bytes, method="GET", body="": (
             json.dumps(SPEC).encode() if url.endswith("openapi.json") else b"<html>nope</html>"
         ),
     )
@@ -343,3 +343,144 @@ def test_a_non_json_response_is_refused_by_the_route(client, signing_key, monkey
     )
     assert r.status_code == 400
     assert "not JSON" in r.json()["detail"]
+
+
+# ------------------------------------------ a retrieval service as a source --
+
+KB_SPEC = {
+    "openapi": "3.0.0",
+    "paths": {
+        "/search": {
+            "post": {
+                "operationId": "searchDocuments",
+                "tags": ["search"],
+                "x-read-only": True,
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["query"],
+                                "properties": {
+                                    "query": {"type": "string"},
+                                    "top_k": {"type": "integer"},
+                                },
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "documentId": {"type": "string"},
+                                            "text": {"type": "string"},
+                                            "author": {"type": "string"},
+                                        },
+                                    },
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        }
+    },
+}
+
+KB_SOURCE = sources_mod.Source(
+    name="kb",
+    kind="rest",
+    surface="http",
+    authz_tier="user",
+    om_service_fqn="rest_kb",
+    spec="https://kb.example.com/openapi.json",
+    base_url="https://kb.example.com",
+    collections=("search",),
+    max_items=3,
+)
+
+
+@pytest.fixture
+def kb(monkeypatch):
+    """A retrieval service wired in as a source, recording what it received."""
+    seen: dict[str, str] = {}
+
+    def fake_fetch(self, url, token, *, max_bytes, method="GET", body=""):
+        seen.update(url=url, method=method, body=body, token=token)
+        if url.endswith("openapi.json"):
+            return json.dumps(KB_SPEC).encode()
+        return json.dumps(
+            [
+                {"documentId": "d1", "text": "Expenses over £50 need a receipt.", "author": "ap@x"},
+                {
+                    "documentId": "d2",
+                    "text": "Receipts are kept for seven years.",
+                    "author": "ap@x",
+                },
+            ]
+        ).encode()
+
+    monkeypatch.setattr(sources_mod.RestBackend, "_fetch", fake_fetch)
+    monkeypatch.setattr(app_mod, "SOURCES", {"kb": KB_SOURCE})
+    return seen
+
+
+def test_a_retrieval_service_is_reached_with_a_post_and_a_json_body(client, signing_key, kb):
+    body = client.post(
+        "/call",
+        headers=auth(signing_key),
+        json={"source": "kb", "operation": "searchDocuments", "arguments": {"query": "receipts"}},
+    ).json()
+    assert kb["method"] == "POST"
+    assert json.loads(kb["body"])["query"] == "receipts"
+    assert body["itemCount"] == 2
+    assert "Expenses over" in body["items"][0]["text"]
+
+
+def test_the_top_k_ceiling_reaches_the_retrieval_service(client, signing_key, kb):
+    client.post(
+        "/call",
+        headers=auth(signing_key),
+        json={
+            "source": "kb",
+            "operation": "searchDocuments",
+            "arguments": {"query": "receipts", "top_k": 500},
+        },
+    )
+    # An unbounded top_k is how a context window fills; the ceiling is the
+    # deployment's, not the model's.
+    assert json.loads(kb["body"])["top_k"] == 3
+
+
+def test_a_denied_field_is_stripped_from_retrieved_documents(client, signing_key, kb, monkeypatch):
+    # The hole in most enterprise retrieval: a field the asking user may not
+    # read arriving in their answer anyway.
+    rules(
+        monkeypatch,
+        [{"role": "*", "allow_tables": ["search.*"], "deny_columns": ["search.*.author"]}],
+    )
+    body = client.post(
+        "/call",
+        headers=auth(signing_key),
+        json={"source": "kb", "operation": "searchDocuments", "arguments": {"query": "receipts"}},
+    ).json()
+    assert body["withheldFields"] == 2
+    assert all("author" not in item for item in body["items"])
+    assert all("text" in item for item in body["items"])
+
+
+def test_the_callers_own_token_reaches_a_user_tier_retrieval_service(client, signing_key, kb):
+    # authz_tier=user: the KB applies the asking user's document permissions,
+    # rather than the service seeing one identity for everyone.
+    client.post(
+        "/call",
+        headers=auth(signing_key),
+        json={"source": "kb", "operation": "searchDocuments", "arguments": {"query": "x"}},
+    )
+    assert kb["token"] == "service-token"  # what _principal_token was stubbed to return

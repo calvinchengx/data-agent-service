@@ -41,7 +41,24 @@ SAFE_METHODS = ("get", "head")
 # Parameter names that mean "how many", across the conventions in the wild.
 # The ceiling is imposed by writing one of these, so an API that spells it
 # differently gets the ceiling from `x-page-size-param` in its spec instead.
-PAGE_SIZE_NAMES = ("limit", "size", "pagesize", "page_size", "per_page", "perpage", "count", "top")
+PAGE_SIZE_NAMES = (
+    "limit",
+    "size",
+    "pagesize",
+    "page_size",
+    "per_page",
+    "perpage",
+    "count",
+    "top",
+    # Retrieval services spell it differently, and the ceiling has to
+    # reach them too — an unbounded top_k is how a context window fills.
+    "top_k",
+    "topk",
+    "k",
+    "n_results",
+    "num_results",
+    "max_results",
+)
 
 _PATH_PARAM = re.compile(r"\{([^}]+)\}")
 
@@ -53,6 +70,10 @@ class Policy:
     collections: tuple[str, ...] = ()
     max_items: int = 500
     max_bytes: int = 200_000
+    # The request body's ceiling, the counterpart of sqlguard's `max_length`
+    # on a statement. Arguments come from a model; a body it can make
+    # arbitrarily large is a request this service should not relay.
+    max_request_bytes: int = 20_000
     base_url: str = ""
 
 
@@ -72,13 +93,17 @@ class Verdict:
     params: tuple[tuple[str, str], ...]
     item_limit: int
     max_bytes: int
+    # The JSON request body, already checked, empty when the call carries
+    # none. A string rather than a dict so a Verdict stays frozen and is the
+    # only thing the backend can send.
+    body: str
     fields: tuple[str, ...]  # collection.operation.field, for the access rules
 
 
 @dataclasses.dataclass(frozen=True)
 class Parameter:
     name: str
-    location: str  # path | query
+    location: str  # path | query | body
     required: bool
     kind: str  # string | integer | number | boolean
     enum: tuple[str, ...] = ()
@@ -164,6 +189,46 @@ def _parameters(raw: list, spec: dict) -> list[Parameter]:
     return out
 
 
+def _body_parameters(op: dict, spec: dict) -> list[Parameter]:
+    """The request body, flattened into the same Parameter shape as the rest.
+
+    A retrieval API is the reason this exists: `POST /search` with a JSON body
+    is how most of them take a query, because a query does not fit in a URL.
+    Treating body properties as parameters means one validation rule rather
+    than two, and one allow-list — a body property the spec does not describe
+    is refused exactly as an undeclared query parameter is.
+
+    Only the top level is declared. A nested object is not refused, it is
+    simply not something a caller may set: the guard can only vouch for what
+    it can name.
+    """
+    body = op.get("requestBody") or {}
+    if "$ref" in body:
+        body = _resolve(body["$ref"], spec)
+    schema = ((body.get("content") or {}).get("application/json") or {}).get("schema") or {}
+    if "$ref" in schema:
+        schema = _resolve(schema["$ref"], spec)
+    required = set(schema.get("required") or ())
+    out = []
+    for name, raw in (schema.get("properties") or {}).items():
+        sub = (
+            _resolve(raw["$ref"], spec) if isinstance(raw, dict) and "$ref" in raw else (raw or {})
+        )
+        kind = str(sub.get("type") or "string")
+        if kind in ("object", "array"):
+            continue  # nameable, but not something the guard can vouch for
+        out.append(
+            Parameter(
+                name=name,
+                location="body",
+                required=name in required,
+                kind=kind,
+                enum=tuple(str(v) for v in (sub.get("enum") or ())),
+            )
+        )
+    return out
+
+
 def load_spec(document: dict) -> dict[str, Operation]:
     """Index an OpenAPI document by operationId.
 
@@ -180,7 +245,11 @@ def load_spec(document: dict) -> dict[str, Operation]:
             if method.lower() == "post" and not op.get("x-read-only"):
                 continue
             operation_id = op.get("operationId") or f"{method.lower()}_{path.strip('/')}"
-            params = shared + _parameters(op.get("parameters") or [], document)
+            params = (
+                shared
+                + _parameters(op.get("parameters") or [], document)
+                + _body_parameters(op, document)
+            )
             ok = (op.get("responses") or {}).get("200") or {}
             content = (ok.get("content") or {}).get("application/json") or {}
             fields = _schema_fields(content.get("schema") or {}, document)
@@ -214,6 +283,22 @@ def _typed(value: object, parameter: Parameter) -> str:
         raise Denied(f"{parameter.name} must be true or false")
     if parameter.enum and text not in parameter.enum:
         raise Denied(f"{parameter.name} must be one of {', '.join(parameter.enum)}")
+    return text
+
+
+def _native(text: str, parameter: Parameter):
+    """The validated value in its JSON type.
+
+    A query string carries everything as text; a JSON body must not. Sending
+    `{"top_k": "5"}` to an API that declared an integer is the kind of thing
+    that works against one implementation and fails against the next.
+    """
+    if parameter.kind == "integer":
+        return int(float(text))
+    if parameter.kind == "number":
+        return float(text)
+    if parameter.kind == "boolean":
+        return text == "true"
     return text
 
 
@@ -267,13 +352,22 @@ def guard(operation_id: str, arguments: dict, operations: dict[str, Operation], 
 
     path = op.path
     query: list[tuple[str, str]] = []
+    body_values: dict[str, Any] = {}
     for name, parameter in declared.items():
         if name not in values:
             continue
         if parameter.location == "path":
             path = path.replace("{" + name + "}", urllib.parse.quote(values[name], safe=""))
+        elif parameter.location == "body":
+            body_values[name] = _native(values[name], parameter)
         else:
             query.append((name, values[name]))
+
+    body = json.dumps(body_values, separators=(",", ":"), sort_keys=True) if body_values else ""
+    if len(body) > policy.max_request_bytes:
+        raise Denied(
+            f"request body is {len(body)} bytes, over the {policy.max_request_bytes} ceiling"
+        )
 
     base = policy.base_url.rstrip("/")
     url = base + path + ("?" + urllib.parse.urlencode(query) if query else "")
@@ -285,6 +379,7 @@ def guard(operation_id: str, arguments: dict, operations: dict[str, Operation], 
         params=tuple(sorted(query)),
         item_limit=limit,
         max_bytes=policy.max_bytes,
+        body=body,
         fields=tuple(f"{op.collection}.{op.operation_id}.{f}" for f in op.fields),
     )
 

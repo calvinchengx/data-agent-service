@@ -7,6 +7,7 @@ to it. A guard that refuses everything passes half of these.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 
@@ -326,3 +327,130 @@ def test_a_page_size_parameter_named_by_the_spec_is_honoured():
     }
     v = guard("listThings", {}, load_spec(spec), Policy(base_url="https://x", max_items=7))
     assert ("pageSize", "7") in v.params
+
+
+# ------------------------------------------------ a retrieval-shaped API --
+
+# `POST /search` with a JSON body is how most retrieval services take a query,
+# because a query does not fit in a URL. This is the shape an enterprise
+# knowledge base plugs in as.
+SEARCH_SPEC = {
+    "openapi": "3.0.0",
+    "servers": [{"url": "https://kb.example.com"}],
+    "paths": {
+        "/search": {
+            "post": {
+                "operationId": "searchDocuments",
+                "tags": ["search"],
+                "x-read-only": True,
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["query"],
+                                "properties": {
+                                    "query": {"type": "string"},
+                                    "top_k": {"type": "integer"},
+                                    "rerank": {"type": "boolean"},
+                                    "scope": {"type": "string", "enum": ["policy", "incident"]},
+                                    "filters": {"type": "object"},
+                                },
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "documentId": {"type": "string"},
+                                            "text": {"type": "string"},
+                                            "author": {"type": "string"},
+                                        },
+                                    },
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        }
+    },
+}
+
+KB = load_spec(SEARCH_SPEC)
+KB_POLICY = Policy(collections=("search",), max_items=5, base_url="https://kb.example.com")
+
+
+def test_a_read_only_post_carries_its_query_in_the_body():
+    v = guard("searchDocuments", {"query": "expense policy"}, KB, KB_POLICY)
+    assert v.method == "post"
+    assert v.url == "https://kb.example.com/search"
+    assert json.loads(v.body)["query"] == "expense policy"
+
+
+def test_body_values_keep_their_json_types():
+    # `{"top_k": "5"}` against an API that declared an integer works with one
+    # implementation and fails against the next.
+    v = guard("searchDocuments", {"query": "x", "top_k": 3, "rerank": True}, KB, KB_POLICY)
+    sent = json.loads(v.body)
+    assert sent["top_k"] == 3 and isinstance(sent["top_k"], int)
+    assert sent["rerank"] is True
+
+
+def test_the_item_ceiling_is_written_into_the_body():
+    v = guard("searchDocuments", {"query": "x", "top_k": 1000}, KB, KB_POLICY)
+    assert json.loads(v.body)["top_k"] == 5
+    assert v.item_limit == 5
+
+
+def test_a_required_body_field_is_enforced():
+    with pytest.raises(Denied, match="query is required"):
+        guard("searchDocuments", {"top_k": 3}, KB, KB_POLICY)
+
+
+def test_an_undeclared_body_field_is_refused():
+    with pytest.raises(Denied, match="unknown parameter"):
+        guard("searchDocuments", {"query": "x", "collection": "secrets"}, KB, KB_POLICY)
+
+
+def test_a_body_enum_is_checked():
+    with pytest.raises(Denied, match="must be one of"):
+        guard("searchDocuments", {"query": "x", "scope": "everything"}, KB, KB_POLICY)
+
+
+def test_a_nested_object_is_not_something_a_caller_may_set():
+    # The guard can only vouch for what it can name, so `filters` is not
+    # offered rather than passed through unchecked.
+    assert "filters" not in {p.name for p in KB["searchDocuments"].parameters}
+    with pytest.raises(Denied, match="unknown parameter"):
+        guard("searchDocuments", {"query": "x", "filters": {"a": 1}}, KB, KB_POLICY)
+
+
+def test_an_oversized_body_is_refused():
+    with pytest.raises(Denied, match="over the"):
+        guard(
+            "searchDocuments",
+            {"query": "x" * 500},
+            KB,
+            Policy(
+                collections=("search",), base_url="https://kb.example.com", max_request_bytes=100
+            ),
+        )
+
+
+def test_retrieved_fields_are_named_for_the_access_rules():
+    v = guard("searchDocuments", {"query": "x"}, KB, KB_POLICY)
+    assert "search.searchDocuments.author" in v.fields
+
+
+def test_a_get_operation_still_carries_no_body():
+    v = guard("listInvoices", {}, OPS, POLICY)
+    assert v.body == ""
+    assert v.method == "get"

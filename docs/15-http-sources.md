@@ -343,6 +343,46 @@ the access rules are properties of the API, not of where it runs.
 `scripts/check-discipline.sh` already fails a build that writes an endpoint
 into code, and it will cover these the moment they exist.
 
+## 6. A retrieval service is a source
+
+An enterprise knowledge base plugs in the same way, and the shape matters:
+most retrieval APIs are `POST /search` with a JSON body, because a query does
+not fit in a URL.
+
+```json
+{ "name": "enterprise_kb", "kind": "rest", "surface": "http",
+  "om_service_fqn": "rest_knowledge_base", "authz_tier": "user",
+  "scope": "api://kb.contoso.com/user_impersonation",
+  "spec": "https://kb.contoso.com/openapi.json",
+  "collections": ["search"], "max_items": 20 }
+```
+
+The spec must mark the operation `x-read-only: true`. Nothing infers it: a
+`POST` that changes state and a `POST` that runs a search are indistinguishable
+to a guard, so the API has to say which it is.
+
+Body properties are validated exactly as query parameters are — undeclared is
+refused, types and enums are checked, required is enforced — and `max_items`
+is written into whichever field carries the page size, `top_k` included. An
+unbounded `top_k` is how a context window fills, and the ceiling belongs to the
+deployment rather than to the model. A nested object is deliberately **not**
+offered: the guard can only vouch for what it can name.
+
+`authz_tier` is doing its most useful work here. The usual hole in enterprise
+retrieval is that the vector store is queried with a service identity, so a
+chunk from a document the asking user may not read can land in their answer and
+nothing records that it happened. `user` means the knowledge base applies the
+caller's own document permissions; `service` means it cannot, and every audit
+line says so rather than leaving it to be assumed. Field rules apply on top:
+`search.searchDocuments.author` can be denied to a role and is then stripped
+from every retrieved item, at any depth.
+
+What does **not** carry over is the evaluation. Comparing result sets is
+meaningless for retrieved prose, so a knowledge-base source needs the
+operation-level metrics described above — did it call the right endpoint with
+the right parameters, and does the answer carry a gold fact — rather than
+`execution_accuracy`.
+
 ## 6. Worked example — OpenMetadata as a REST source
 
 The recommended first target, because it is real, already running, and already
