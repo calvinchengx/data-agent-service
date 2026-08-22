@@ -24,6 +24,10 @@ export default defineConfig({
         baseUrl: 'https://github.com/calvinchengx/data-agent-service/edit/main/docs/',
       },
       sidebar: [
+        // The docs live under /docs/, and the project's front door is the
+        // page above them. Starlight's title links to the docs root, so
+        // without this there is no way back out of the documentation.
+        { label: '\u2190 data-agent-service', link: '/data-agent-service/' },
         {
           label: 'Getting started',
           items: [{ slug: 'index' }, { slug: '01-quickstart' }, { slug: '03-architecture' }],
@@ -38,7 +42,12 @@ export default defineConfig({
         },
         {
           label: 'Proving it',
-          items: [{ slug: '07-evaluation' }, { slug: '08-load-testing' }, { slug: '11-ci' }],
+          items: [
+            { slug: '07-evaluation' },
+            { slug: '08-load-testing' },
+            { slug: '13-testing' },
+            { slug: '11-ci' },
+          ],
         },
         {
           label: 'Operating it',

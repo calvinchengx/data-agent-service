@@ -121,7 +121,7 @@ function writeIndex(): void {
     `- [Load testing](08-load-testing.md) — and what the gateway costs\n` +
     `- [Parity](parity.md) — what is witnessed, and what is not yet\n`;
   const frontmatter =
-    `---\ntitle: Data Agent Service\ndescription: A governed data agent — natural-language questions over Fabric, ` +
+    `---\ntitle: Overview\ndescription: A governed data agent — natural-language questions over Fabric, ` +
     `PostgreSQL and more, grounded in OpenMetadata and answered as the asking user.\neditUrl: false\n---\n\n`;
   writeFileSync(join(OUT, 'index.md'), frontmatter + rewriteLinks(body, 'index'));
 }
@@ -143,6 +143,30 @@ for (const name of adrs) {
 }
 
 writeIndex();
+
+// A page nobody can navigate to is a page nobody reads. The sidebar is
+// curated rather than generated -- reading order is an editorial decision --
+// so the risk is a doc being added and silently never appearing in it. That
+// happened once already: docs/13-testing.md was published, linked from the
+// README's coverage badges, and absent from every menu.
+const config = readFileSync(join(here, '..', 'astro.config.ts'), 'utf8');
+const listed = new Set(
+  [...config.matchAll(/slug: '([^']+)'/g)].map((m) => m[1]),
+);
+const generated = [
+  ...chapters.map((n) => n.replace(/\.md$/, '')),
+  ...adrs.map((n) => `${ADR_DIR}/${n.replace(/\.md$/, '')}`),
+];
+const unreachable = generated.filter((slug) => !listed.has(slug));
+if (unreachable.length) {
+  console.error(
+    `sync-docs: these documents are published but absent from the sidebar in ` +
+      `astro.config.ts, so nothing links to them: ${unreachable.join(', ')}`,
+  );
+  process.exit(1);
+}
+
 console.log(
-  `sync-docs: ${chapters.length} chapters, ${adrs.length} ADR(s), ${warnings} warning(s)`,
+  `sync-docs: ${chapters.length} chapters, ${adrs.length} ADR(s), ` +
+    `all reachable from the sidebar, ${warnings} warning(s)`,
 );

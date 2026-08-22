@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "docs" / "witnesses.json"
@@ -45,6 +46,10 @@ def badge(label: str, message: str, colour: str) -> dict[str, object]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, help="directory to write the badge JSON into")
+    ap.add_argument(
+        "--landing",
+        help="a landing page whose stated witness count must match the manifest",
+    )
     args = ap.parse_args()
 
     if not MANIFEST.exists():
@@ -59,6 +64,26 @@ def main() -> int:
     if total <= 0:
         print(f"FAIL: {MANIFEST} records {total} witnesses, so the badge would lie.")
         return 1
+
+    # The front page states the witness count in prose. A number on the most
+    # read page in the repository is exactly the kind of claim that goes quietly
+    # stale -- it said 77 while the suite witnessed 88 -- so it is checked here
+    # against the same manifest the badge is built from.
+    if args.landing:
+        page = pathlib.Path(args.landing)
+        if not page.exists():
+            print(f"FAIL: {page} does not exist.")
+            return 1
+        stated = re.search(r"<b>(\d+)</b><span>end-to-end witnesses", page.read_text())
+        if not stated:
+            print(f"FAIL: {page} no longer states a witness count where one was expected.")
+            return 1
+        if int(stated.group(1)) != total:
+            print(
+                f"FAIL: {page} claims {stated.group(1)} witnesses, the manifest records "
+                f"{total}. Update the page."
+            )
+            return 1
 
     out = pathlib.Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

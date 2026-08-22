@@ -97,9 +97,34 @@ svg .ar{stroke:var(--diagram-line);stroke-width:1.5;fill:none}
 .note p{margin:0;color:var(--muted);font-size:.94rem}
 footer{padding:44px 0 60px;border-top:1px solid var(--line);color:var(--muted);font-size:.88rem}
 footer a{text-decoration:none}
+
+/* The docs are a click away from every scroll position, not only the hero. */
+.topnav{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--bg) 88%,transparent);
+  backdrop-filter:saturate(1.4) blur(8px);border-bottom:1px solid var(--line)}
+.topnav .wrap{display:flex;align-items:center;gap:18px;height:56px}
+.topnav .brand{font-family:var(--mono);font-size:.82rem;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--ink);text-decoration:none;font-weight:600}
+.topnav .links{margin-left:auto;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.topnav .links a{color:var(--muted);text-decoration:none;font-size:.92rem}
+.topnav .links a:hover{color:var(--accent)}
+.topnav .links a.strong{color:var(--accent);font-weight:600}
+@media (max-width:640px){.topnav .links a:not(.strong){display:none}}
 </style>
 </head>
 <body>
+
+<nav class="topnav">
+  <div class="wrap">
+    <a class="brand" href="./">data-agent-service</a>
+    <div class="links">
+      <a href="./#start">Run it locally</a>
+      <a href="./#status">Status</a>
+      <a href="https://github.com/calvinchengx/data-agent-service">GitHub</a>
+      <a class="strong" href="docs/">Documentation &rarr;</a>
+    </div>
+  </div>
+</nav>
+
 
 <header class="hero">
   <div class="wrap">
@@ -118,7 +143,7 @@ footer a{text-decoration:none}
       <a class="btn ghost" href="#status">Honest status</a>
     </div>
     <div class="stats">
-      <div class="stat"><b>77</b><span>end-to-end witnesses</span></div>
+      <div class="stat"><b>88</b><span>end-to-end witnesses</span></div>
       <div class="stat"><b>27</b><span>contract checks, 2 implementations</span></div>
       <div class="stat"><b>31</b><span>eval questions, 5 tiers</span></div>
       <div class="stat"><b>3</b><span>source adapters shipped</span></div>
