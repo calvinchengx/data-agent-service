@@ -268,10 +268,12 @@ footer a{text-decoration:none}
       </div>
 
       <div class="card">
-        <h3>REST &amp; GraphQL sources <span class="tag t-plan">designed</span></h3>
-        <p>The same adapter interface is designed to cover REST and GraphQL services, with or without
-           their own MCP. The design is written down; the adapters are not built yet.</p>
-        <span class="ev">docs/00-plan.md §15</span>
+        <h3>REST &amp; GraphQL sources <span class="tag t-plan">not built</span></h3>
+        <p>A service that already speaks MCP needs no code and is <em>in use today</em> — the catalog
+           reaches the agent that way. A REST or GraphQL service of your own needs an adapter, and that
+           is the part nobody has written. Not because it is hard to reach: because the guard here
+           validates a SQL parse tree, and an HTTP operation has no parse tree to validate.</p>
+        <span class="ev">OpenMetadata registers API assets already · plan §15</span>
       </div>
 
       <div class="card">
@@ -393,7 +395,9 @@ footer a{text-decoration:none}
           <tr><td>Production parity (real Azure)</td><td><span class="tag t-wip">gated, unwitnessed</span></td><td>Terraform validates, runbook and preflight exist; not yet run against a tenant</td></tr>
           <tr><td>Dashboard promotion</td><td><span class="tag t-ship">shipped</span></td><td>Templates counted by pseudonymous user, k-threshold, catalog-derived titles; no question stored</td></tr>
           <tr><td>Power BI generation</td><td><span class="tag t-ship">shipped</span></td><td>Published under OBO and verified against its own SQL; rendering prod-only</td></tr>
-          <tr><td>REST / GraphQL adapters</td><td><span class="tag t-plan">designed</span></td><td>Plan §15 only</td></tr>
+          <tr><td>Existing MCP server as a source</td><td><span class="tag t-ship">shipped</span></td><td>APIM <code>mcpMode: passthrough</code>; OpenMetadata's own MCP server reaches the agent this way in every run</td></tr>
+          <tr><td>REST source, no adapter (APIM REST&rarr;MCP)</td><td><span class="tag t-wip">blocked upstream</span></td><td>The pinned gateway builds a fresh request and copies no inbound headers, so on-behalf-of sees an anonymous caller (<a href="docs/upstream-issues/">upstream #8</a>)</td></tr>
+          <tr><td>REST / GraphQL source adapter</td><td><span class="tag t-plan">not built</span></td><td>Nothing blocks it: OpenMetadata registers API assets already. It needs a guard for operations rather than SQL, and operation-level eval metrics</td></tr>
         </tbody>
       </table>
     </div>
