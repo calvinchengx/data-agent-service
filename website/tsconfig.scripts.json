@@ -1,0 +1,12 @@
+{
+  "// ": "The sync script is plain Node TypeScript, not Astro's browser-ish target.",
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["scripts/**/*.ts"]
+}

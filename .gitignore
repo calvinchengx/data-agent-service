@@ -16,3 +16,7 @@ seed/state.json
 
 # Go build output (the Dockerfile builds it; the tree should not carry it)
 services/warehouse-query-go/warehouse-query
+website/src/content/docs/
+website/.astro/
+_site/
+.pnpm-store/

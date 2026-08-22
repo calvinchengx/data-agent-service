@@ -1,0 +1,66 @@
+# The documentation site: /docs rendered by Astro + Starlight, the same shape
+# every emulator in this family uses. /docs stays the single source of truth --
+# website/scripts/sync-docs.ts generates the site's content from it, so nothing
+# is written twice and the Markdown keeps working on GitHub.
+name: Docs site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'docs/**'
+      - 'website/**'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/docs-site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one midway: a half-finished
+# deploy would leave the published site in whatever state it reached.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The sync script is type-checked before it runs: it rewrites every link
+      # on the site, and a silent failure there publishes 404s.
+      - run: pnpm --filter data-agent-service-docs typecheck
+      - run: pnpm run docs:build
+      # The published site is the landing page at the root with the rendered
+      # docs beneath it, so `/` stays the project's front door and every
+      # chapter lives under /docs/.
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp site/index.html _site/index.html
+          cp -R website/dist _site/docs
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

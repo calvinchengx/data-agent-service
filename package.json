@@ -1,0 +1,14 @@
+{
+  "name": "data-agent-service-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.29.3",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "preinstall": "npx only-allow pnpm",
+    "docs:dev": "pnpm --filter data-agent-service-docs dev",
+    "docs:build": "pnpm --filter data-agent-service-docs build"
+  }
+}
