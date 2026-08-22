@@ -168,7 +168,8 @@ load-compare: ## Measure BOTH executors under the same load (Phase 9; writes loa
 	$(COMPOSE) up -d --build --force-recreate --wait warehouse-query
 
 client-config: ## Paste-ready MCP client configuration (ARGS="--auth token")
-	$(TOOLS) python -m e2e.clients.configs $(ARGS)
+	$(COMPOSE) --profile tools run --rm -e DAS_HOST_REPO="$(PWD)" tools \
+		python -m e2e.clients.configs $(ARGS)
 
 ask: ## Ask the agent a question: make ask Q="..."
 	$(TOOLS) python -m agent.cli $(ARGS) "$(Q)"

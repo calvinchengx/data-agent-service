@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import pathlib
 import sys
 
 from seed import common as c
@@ -73,9 +75,72 @@ def json_block(auth: str, token: str, key: str = "mcpServers") -> str:
     return json.dumps({key: servers(auth, token)}, indent=2)
 
 
+def desktop_bridge(_auth: str, _token: str) -> str:
+    """Claude Desktop, via the stdio bridge.
+
+    Desktop talks to a REMOTE endpoint over TLS with a certificate its host
+    trusts, at a hostname its host resolves. The local stack offers neither: a
+    development certificate, a compose-internal hostname, and a published port
+    that differs from the one the gateway advertises. Rather than ask a person
+    to edit /etc/hosts and install a certificate authority to try a demo, the
+    bridge runs INSIDE the network where all three already hold and speaks
+    stdio, which Desktop launches directly.
+
+    Against a real deployment this entry is not needed: the endpoint is a
+    public HTTPS URL and Desktop connects to it as a remote MCP server.
+    """
+    # The path must be the HOST's, because Desktop runs on the host and this
+    # renders inside the tools container, where the repo is /app. The Makefile
+    # passes the real one; without it the output would be confidently wrong.
+    root = os.environ.get("DAS_HOST_REPO") or str(pathlib.Path(__file__).resolve().parents[2])
+    root = pathlib.Path(root)
+
+    def entry(server: str) -> dict:
+        return {
+            "command": "docker",
+            "args": [
+                "compose",
+                "--project-directory",
+                str(root),
+                "--env-file",
+                str(root / ".env"),
+                "--profile",
+                "tools",
+                "run",
+                "--rm",
+                "-T",
+                "tools",
+                "python",
+                "-m",
+                "e2e.clients.stdio_bridge",
+                "--server",
+                server,
+            ],
+        }
+
+    return json.dumps(
+        {
+            "mcpServers": {
+                "warehouse": entry("warehouse"),
+                "catalog": entry("catalog"),
+            }
+        },
+        indent=2,
+    )
+
+
 CLIENTS = {
     "claude-code": ("Claude Code (CLI)", "shell", claude_code),
-    "claude-desktop": ("Claude Desktop — claude_desktop_config.json", "json", json_block),
+    "claude-desktop": (
+        "Claude Desktop — claude_desktop_config.json (stdio bridge; see the note)",
+        "json",
+        desktop_bridge,
+    ),
+    "claude-desktop-remote": (
+        "Claude Desktop — direct, for a deployment with a trusted certificate",
+        "json",
+        json_block,
+    ),
     "cursor": ("Cursor — .cursor/mcp.json", "json", json_block),
     "vscode": ("VS Code — .vscode/mcp.json", "json", lambda a, t: json_block(a, t, "servers")),
     "sdk": (
