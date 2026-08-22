@@ -31,6 +31,12 @@ linters:
         # documented self-signed-certificate switch, which is off in
         # production and asserted off by scripts/preflight.py.
         - G402
+        # G704 (SSRF) flags the token, JWKS and Graph calls. Every URL they
+        # build comes from operator configuration — DAS_ENTRA_ISSUER,
+        # IDENTITY_ENDPOINT, the Graph base — never from a request. The one
+        # request-derived value that reaches a path, the oid claim, is
+        # url.PathEscape'd at the call site.
+        - G704
     revive:
       rules:
         - name: exported

@@ -72,7 +72,7 @@ jobs:
       - run: go test ./...
       - uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.6.1
+          version: v2.13.1
           working-directory: services/warehouse-query-go
 
   infra:

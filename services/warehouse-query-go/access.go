@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"log/slog"
+	"net/url"
 	"os"
 	"path"
 	"sort"
@@ -284,7 +285,7 @@ func (r *RoleResolver) lookup(oid string) ([]string, error) {
 		var membership struct {
 			Value []map[string]any `json:"value"`
 		}
-		if err := getJSON(r.graphURL+"/users/"+oid+"/memberOf", token, &membership); err != nil {
+		if err := getJSON(r.graphURL+"/users/"+url.PathEscape(oid)+"/memberOf", token, &membership); err != nil {
 			return nil, err
 		}
 		groups := make([]any, 0, len(membership.Value))
@@ -309,7 +310,7 @@ func (r *RoleResolver) lookup(oid string) ([]string, error) {
 				Value string `json:"value"`
 			} `json:"appRoles"`
 		}
-		if err := getJSON(r.graphURL+"/applications/"+r.appID+"?$select=appRoles", token, &app); err != nil {
+		if err := getJSON(r.graphURL+"/applications/"+url.PathEscape(r.appID)+"?$select=appRoles", token, &app); err != nil {
 			return nil, err
 		}
 		names := map[string]string{}
@@ -324,7 +325,7 @@ func (r *RoleResolver) lookup(oid string) ([]string, error) {
 			AppRoleID   string `json:"appRoleId"`
 		} `json:"value"`
 	}
-	if err := getJSON(r.graphURL+"/servicePrincipals/"+r.appID+"/appRoleAssignedTo",
+	if err := getJSON(r.graphURL+"/servicePrincipals/"+url.PathEscape(r.appID)+"/appRoleAssignedTo",
 		token, &assigned); err != nil {
 		return nil, err
 	}

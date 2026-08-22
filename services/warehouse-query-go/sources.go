@@ -93,6 +93,18 @@ type TdsBackend struct {
 	pools map[string]*sql.DB
 }
 
+// Backend is what a source is reached through. One implementation today
+// (TDS); the interface exists so the handlers can be tested without a
+// database, and so a second engine has somewhere to go — the Python executor
+// has had this seam since it grew a PostgreSQL source.
+type Backend interface {
+	ListTables(ctx context.Context, src Source, token string) ([]TableRef, error)
+	Describe(ctx context.Context, src Source, table, token string) (*Described, error)
+	Run(ctx context.Context, src Source, v *Verdict, token string) (*QueryResult, error)
+}
+
+var _ Backend = (*TdsBackend)(nil)
+
 func NewTdsBackend() *TdsBackend { return &TdsBackend{pools: map[string]*sql.DB{}} }
 
 // odbcServer: `host:port` (how Fabric advertises an endpoint) -> `host,port`.
@@ -297,7 +309,13 @@ func (b *TdsBackend) Run(ctx context.Context, src Source, v *Verdict, token stri
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, v.SQL)
+	// G701: this is the one place arbitrary SQL is meant to run, and it cannot
+	// be parameterised — an analytical query IS the input. `v` is a Verdict,
+	// which only the guard constructs: it has already parsed the statement and
+	// rejected anything that is not a single read against an allowed schema,
+	// and v.SQL is the rewritten tree, not the text the caller sent. The type
+	// is the control; taking a string here would remove it.
+	rows, err := db.QueryContext(ctx, v.SQL) //nolint:gosec // guarded: see above
 	if err != nil {
 		return nil, err
 	}

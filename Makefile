@@ -69,7 +69,7 @@ seed: ## Seed warehouse data, OpenMetadata semantics, authz, and APIM resources 
 # clone of this repo needs Docker and nothing else. A host-installed linter
 # moves the failure onto whoever clones. LINT_MODE=host is the escape hatch,
 # not the default.
-GOLANGCI  = golangci/golangci-lint:v2.6.1
+GOLANGCI  = golangci/golangci-lint:v2.13.1
 LINT_MODE ?= container
 ifeq ($(LINT_MODE),host)
   RUFF = uv run ruff
