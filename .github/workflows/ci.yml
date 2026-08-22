@@ -129,6 +129,19 @@ jobs:
       # drifting away from what the suite actually witnesses.
       - name: the witnesses badge matches this run
         run: make witnesses-check
+      # When the manifest IS stale, the useful thing is the correct one. This
+      # runs only on failure and uploads what this run actually witnessed, so
+      # refreshing the badge is downloading a file rather than reproducing a
+      # full stack locally.
+      - name: the manifest this run would have written
+        if: failure()
+        run: make witnesses-manifest || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: witnesses-manifest
+          path: docs/witnesses.json
+          if-no-files-found: warn
       - name: what failed
         if: failure()
         run: |
