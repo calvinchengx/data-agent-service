@@ -153,3 +153,95 @@ the *system* refuses, not merely that the model was well behaved), but the
 system-level proof belongs in the witnesses, which already hold it: phase6
 refuses alice the email column, and the guard refuses every write. See
 `docs/13-testing.md` for which suite carries which claim.
+
+## Making the numbers trustworthy
+
+The first ablation produced 80% against 40% on five questions per arm, one
+repeat. That is a direction, not a measurement: with n=5 a single question
+moves the figure twenty points, and a Wilson interval on 4/5 spans roughly
+38–99%. This is the plan for turning it into something quotable, in the order
+the items actually depend on each other.
+
+**The instrument comes before the sample.** More questions through a scorer
+that mismeasures buys precision about the wrong thing, and a systematic scoring
+bias does not average out — it entrenches.
+
+| # | Item | Model usage | State |
+|---|---|---|---|
+| 1 | Fix execution scoring and `expect: block` | none | done |
+| 2 | Prove the ranking flip is a property of the design, not one random seed | none | done |
+| 3 | Paired statistics: McNemar, Wilson intervals, per tier | none | done |
+| 4 | Grow L3 to a sample that can carry an interval | none | pending |
+| 5 | Re-run the ablation with repeats | substantial | pending |
+| 6 | A schema-only arm and a naive floor | moderate | pending |
+
+### 1. The instrument
+
+Two defects, both found by running the suite rather than by reading it.
+
+**Execution accuracy compared result *sets*.** The agent answered "407 tickets
+are open" — correct — and was scored as failing because it grouped by status
+where the gold query returns a single row. Right answer, wrong shape. That
+mismeasures every question where a competent analyst would write
+different-but-equivalent SQL.
+
+The rule now asks whether the agent's query *produced the gold facts*: an exact
+match still passes, and so does a result that contains the gold rows among
+others, with order preserved where the question implies an order. The answer
+must still state the gold figure, so a broad query that happens to contain the
+number cannot pass on its own.
+
+**`expect: block` required a guardrail to have fired.** An agent that read the
+withheld-column note in `describe_table`, declined, and never obtained the data
+was scored as failing, because no tool call errored. It did the right thing
+earlier than the rule expected.
+
+What matters for that tier is that the data was not produced and the caller was
+told why. The rule now checks exactly that, and records *how* it was achieved —
+`refused by a guardrail` or `declined without attempting` — because the
+difference is real and worth seeing rather than collapsing. Questions may name
+`must_not_contain` values, which fail the question outright if they appear in
+the answer; that is what stops a model passing by refusing for its own reasons.
+
+The system-level claim — that the service refuses regardless of how the model
+behaves — is not weakened, because it was never this suite's to make. The
+witnesses hold it: phase6 refuses alice the email column, and the guard refuses
+every write.
+
+### 2. Is the flip a property of the design?
+
+The support dataset's ranking reversal exists because the generator gives
+Billing long customer waits. That is realistic, and it is also *tuned*. If it
+held only at the seeded draw, the headline would be an artefact of one dataset
+rather than a fact about the definitions, so it is asserted across several
+seeds.
+
+### 3. Paired statistics
+
+Both arms answer the same questions, so comparing two independent proportions
+discards the pairing. **McNemar's test** on discordant pairs is the right test:
+each question is its own control for difficulty, which is most of the variance.
+Reported alongside **Wilson intervals per tier** — never a bare point estimate,
+and never pooled across tiers where L1 sits at ceiling and dilutes.
+
+### 4–6. What is still missing
+
+**Sample.** 31 questions against a documented target of 60–100 per use case,
+concentrated on L3 where the catalog decides. Roughly 40 L3 questions per use
+case gets to ±10 points rather than ±30.
+
+A discipline worth imposing on new questions: write them from the **business**,
+not from the schema. Ours were authored alongside their gold SQL, which risks
+phrasing the question in the vocabulary the catalog happens to use.
+
+**Repeats.** The model is nondeterministic and n=1 reports no variance at all.
+
+**A cleaner ablation.** Today `om=False` removes the catalog *server*, which
+removes knowledge and tools together, so the delta conflates "did not know the
+definition" with "had fewer tools". A second arm that keeps the catalog
+connected but stripped to bare schema separates them.
+
+**A floor.** Gold at 100% proves the harness cannot be the reason for a
+failure. Nothing yet bounds the bottom: a deliberately naive agent says what
+the score is when nothing helps, so the delta is measured against a real floor
+rather than against zero.
