@@ -337,12 +337,52 @@ func tableRefs(toks []token, ctes map[string]bool, p Policy) ([]string, map[stri
 		if t.kind != tokWord || (t.up != "FROM" && t.up != "JOIN") {
 			continue
 		}
-		parts, next := qualifiedName(toks, i+1)
+		// `FROM a, b, c` names three tables and only the first follows the
+		// FROM keyword. Until this loop existed the rest were invisible: the
+		// schema allow-list, the cross-database rule and the tables recorded
+		// for the access rules and the audit all saw the first one only.
+		at := i + 1
+		for {
+			var err error
+			at, err = scanTableRef(toks, at, ctes, p, allowed, seen, &tables, aliases)
+			if err != nil {
+				return nil, nil, err
+			}
+			if at < len(toks) && toks[at].kind == tokPunct && toks[at].text == "," {
+				at++
+				continue
+			}
+			break
+		}
+	}
+	sort.Strings(tables)
+	return tables, aliases, nil
+}
+
+// scanTableRef reads one table reference and returns where it stopped.
+func scanTableRef(
+	toks []token, at int, ctes map[string]bool, p Policy, allowed map[string]bool,
+	seen map[string]bool, tables *[]string, aliases map[string]string,
+) (int, error) {
+	{
+		parts, next := qualifiedName(toks, at)
 		if len(parts) == 0 {
-			continue // a derived table: `FROM (SELECT …)`, handled by its own tokens
+			return next, nil // a derived table: `FROM (SELECT …)`, its own tokens are scanned
 		}
 		if len(parts) == 1 && ctes[strings.ToUpper(parts[0])] {
-			continue
+			alias, after := aliasAt(toks, next)
+			_ = alias
+			return after, nil
+		}
+		// A TABLE FUNCTION is not a table. An engine that reads a file as a
+		// relation -- DuckDB's read_csv_auto, read_parquet, glob -- turns a
+		// SELECT into arbitrary file access, and a schema-qualified call
+		// (`dbo.read_csv_auto('/etc/passwd')`) satisfies every other rule
+		// here. The tell is a `(` where an alias or a comma should be.
+		if next < len(toks) && toks[next].kind == tokPunct && toks[next].text == "(" {
+			return 0, denied(
+				"%s is a table function, not a table; only tables in %s may be read",
+				strings.Join(parts, "."), strings.Join(p.AllowedSchemas, ", "))
 		}
 		var catalog, schema, name string
 		switch len(parts) {
@@ -353,34 +393,34 @@ func tableRefs(toks []token, ctes map[string]bool, p Policy) ([]string, map[stri
 		case 3:
 			catalog, schema, name = parts[0], parts[1], parts[2]
 		default:
-			return nil, nil, denied("four-part name %s is not allowed", strings.Join(parts, "."))
+			return 0, denied("four-part name %s is not allowed", strings.Join(parts, "."))
 		}
 		if catalog != "" {
 			if p.Database == "" || !strings.EqualFold(catalog, p.Database) {
-				return nil, nil, denied("cross-database reference %s.%s.%s is not allowed",
+				return 0, denied("cross-database reference %s.%s.%s is not allowed",
 					catalog, schema, name)
 			}
 		}
 		if schema == "" {
-			return nil, nil, denied("table %s must be schema-qualified (e.g. %s.%s)",
+			return 0, denied("table %s must be schema-qualified (e.g. %s.%s)",
 				name, strings.ToLower(firstSchema(p)), name)
 		}
 		if !allowed[strings.ToUpper(schema)] {
-			return nil, nil, denied("schema %s is not queryable; allowed: %s",
+			return 0, denied("schema %s is not queryable; allowed: %s",
 				schema, strings.Join(p.AllowedSchemas, ", "))
 		}
 		qualified := strings.ToLower(schema + "." + name)
 		if !seen[qualified] {
 			seen[qualified] = true
-			tables = append(tables, qualified)
+			*tables = append(*tables, qualified)
 		}
 		aliases[strings.ToUpper(name)] = qualified
-		if alias := aliasAfter(toks, next); alias != "" {
+		alias, after := aliasAt(toks, next)
+		if alias != "" {
 			aliases[strings.ToUpper(alias)] = qualified
 		}
+		return after, nil
 	}
-	sort.Strings(tables)
-	return tables, aliases, nil
 }
 
 func firstSchema(p Policy) string {
@@ -412,13 +452,22 @@ var notAnAlias = map[string]bool{
 }
 
 func aliasAfter(toks []token, at int) string {
+	alias, _ := aliasAt(toks, at)
+	return alias
+}
+
+// aliasAt is aliasAfter, plus where it stopped. The caller needs that to see
+// whether a comma follows -- `FROM a, b` lists a second table with no FROM or
+// JOIN in front of it, and a scan that only looks after those keywords does
+// not see it at all.
+func aliasAt(toks []token, at int) (string, int) {
 	if at < len(toks) && toks[at].up == "AS" {
 		at++
 	}
 	if at < len(toks) && toks[at].kind == tokWord && !notAnAlias[toks[at].up] {
-		return toks[at].text
+		return toks[at].text, at + 1
 	}
-	return ""
+	return "", at
 }
 
 var sqlKeywords = map[string]bool{

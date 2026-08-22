@@ -93,3 +93,83 @@ def test_columns_from_where_are_read_too():
 def test_ambiguous_column_fails_closed_to_every_table():
     v = guard("SELECT email FROM dbo.dim_customer c JOIN dbo.dim_party p ON p.email = c.email", P)
     assert "dbo.dim_customer.email" in v.columns and "dbo.dim_party.email" in v.columns
+
+
+# ---------------------------------------------------------------- duckdb --
+# An embedded engine has no per-user identity and therefore no database-side
+# permission to fall back on: for a DuckDB source this guard is the ONLY
+# authority. The refusal corpus is run again in its dialect for that reason,
+# rather than trusting that what holds for T-SQL holds here.
+
+D = Policy(dialect="duckdb", allowed_schemas=("main",), max_rows=500)
+
+DUCKDB_ALLOWED = [
+    "SELECT team, COUNT(*) AS n FROM main.tickets GROUP BY team",
+    "SELECT * FROM main.tickets ORDER BY minutes LIMIT 10",
+    "WITH x AS (SELECT * FROM main.tickets) SELECT COUNT(*) FROM x",
+    "SELECT t.team FROM main.tickets t JOIN main.agents a ON a.team = t.team",
+]
+
+DUCKDB_DENIED = [
+    ("DROP TABLE main.tickets", "read-only"),
+    ("DELETE FROM main.tickets", "read-only"),
+    ("UPDATE main.tickets SET minutes = 0", "read-only"),
+    ("INSERT INTO main.tickets VALUES (1)", "read-only"),
+    ("SELECT 1; DROP TABLE main.tickets", "one statement"),
+    ("SELECT * FROM secret.tickets", "not queryable"),
+    ("SELECT * FROM tickets", "schema-qualified"),
+    ("SELECT 1", "reads no table"),
+    ("", "empty"),
+]
+
+
+@pytest.mark.parametrize("sql", DUCKDB_ALLOWED)
+def test_duckdb_allowed(sql):
+    v = guard(sql, D)
+    assert v.tables and v.row_limit <= D.max_rows
+
+
+@pytest.mark.parametrize("sql,fragment", DUCKDB_DENIED)
+def test_duckdb_denied(sql, fragment):
+    with pytest.raises(Denied) as e:
+        guard(sql, D)
+    assert fragment.lower() in str(e.value).lower()
+
+
+def test_the_ceiling_is_written_in_the_dialects_own_construct():
+    # TOP for T-SQL, LIMIT here — and nobody chooses: the guard rewrites the
+    # parse tree and sqlglot renders it per dialect.
+    assert "TOP" in guard("SELECT * FROM dbo.fct_sales", P).sql.upper()
+    duck = guard("SELECT * FROM main.tickets", D).sql.upper()
+    assert "LIMIT 500" in duck and "TOP" not in duck
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # Unqualified: caught by the schema rule.
+        "SELECT * FROM read_csv_auto('/etc/passwd')",
+        # SCHEMA-QUALIFIED: these went through until the table-function check
+        # existed. `main.read_csv_auto('/etc/passwd')` names an allowed schema
+        # and reads a local file — arbitrary file read through a SELECT.
+        "SELECT * FROM main.read_csv_auto('/etc/passwd')",
+        "SELECT * FROM main.read_parquet('s3://other/secrets.parquet')",
+        "SELECT * FROM main.glob('/**')",
+        # And hidden beside a legitimate table, which is how it would arrive.
+        "SELECT * FROM main.tickets, main.read_csv_auto('/etc/passwd')",
+    ],
+)
+def test_a_file_reading_function_is_not_a_table(sql):
+    """DuckDB reads files as relations. That is a fine feature of the engine
+    and not something a question may reach — and for an embedded source this
+    guard is the only thing saying so, because there is no database-side
+    permission behind it."""
+    with pytest.raises(Denied, match="table function"):
+        guard(sql, D)
+
+
+def test_a_table_function_is_refused_in_every_dialect():
+    # Discriminated on the node type rather than a list of names, so an engine
+    # whose file reader nobody here has heard of is covered too.
+    with pytest.raises(Denied, match="table function"):
+        guard("SELECT * FROM dbo.OPENJSON('[]')", P)

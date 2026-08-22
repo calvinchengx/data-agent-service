@@ -60,8 +60,38 @@ stripped from retrieved documents exactly as it is from warehouse columns.
 | Token validation | executor (and APIM in production) | cannot be bypassed by reaching the service directly |
 | Read-only SQL, schema scope, row ceiling | `sqlguard.py`, in the executor process | a guard beside the cursor cannot be routed around |
 | Safe methods, declared parameters, item and body ceilings | `httpguard.py`, same process | the HTTP counterpart; an API call has no parse tree, so every property was translated rather than ported |
-| Who may see which rows | the data source itself, via the OBO token | the database is the authority, not our code |
+| Who may see which rows | the data source itself, via the OBO token — **except where the engine has no identity**, see below | the database is the authority, not our code, wherever it can be |
 | Catalog writes | OpenMetadata's own policy on the read-only bot | the catalog decides what its bot may do |
+
+## The engines that cannot be the authority
+
+The row above is the load-bearing one, and there is a class of source where it
+is false. `authz_tier` names which case a source is in, and it is recorded in
+every audit line rather than inferred:
+
+* **`user`** — the engine authorises the caller. A Fabric Warehouse or an Azure
+  Database for PostgreSQL takes the caller's on-behalf-of token, and its own
+  grants decide what comes back. Our access rules narrow that; they do not
+  replace it.
+* **`service`** — the engine cannot tell its callers apart. Every request
+  arrives as one principal, and per-user authorization then rests **entirely**
+  on the gateway's roles and `DAS_ACCESS_RULES`.
+
+For a PostgreSQL with no Entra trust, `service` is a property of that
+*deployment* — point it at Azure Database for PostgreSQL and it becomes `user`.
+
+**For an embedded engine it is a property of the engine.** DuckDB is a library
+reading a file: there is no session, no principal, no `GRANT` to a directory
+identity, and nothing to exchange a token for. A DuckDB source is `service`
+tier permanently, and the honest description is not "one of three layers of
+authorization" but "the gateway's roles and the access rules are the entire
+control". The executor refuses at start-up a DuckDB source that claims
+`authz_tier: user`, because that claim cannot be made true by configuration.
+
+That is the trade for what an embedded engine buys — a source with no server,
+no credential and no network, which is why it is the right shape for local
+work, for querying lake files directly, and for exercising this design against
+a fourth SQL dialect at almost no cost.
 
 ## Identity, hop by hop
 

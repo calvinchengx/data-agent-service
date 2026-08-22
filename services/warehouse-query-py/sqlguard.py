@@ -142,6 +142,21 @@ def guard(sql: str, policy: Policy) -> Verdict:
         # a CTE name is a Table node too; those are not real references
         if t.name.lower() in {c.alias_or_name.lower() for c in tree.find_all(exp.CTE)}:
             continue
+        # A TABLE FUNCTION is not a table. DuckDB will read a file as a
+        # relation -- `read_csv_auto('/etc/passwd')`, `read_parquet('s3://…')`,
+        # `glob('/**')` -- and so will other engines under other names. Those
+        # parse as a Table whose `this` is a function call rather than an
+        # identifier, and until this check they were refused only incidentally,
+        # by the schema-qualification rule: `main.read_csv_auto('/etc/passwd')`
+        # named a schema and went through. Discriminating on the node type
+        # rather than on a list of names covers the functions no one has
+        # thought of yet, which is the only kind that matters.
+        if not isinstance(t.this, exp.Identifier):
+            called = t.this.sql(dialect=policy.dialect)[:60] if t.this else "?"
+            raise Denied(
+                f"{called} is a table function, not a table; only tables in "
+                f"{sorted(allowed)} may be read"
+            )
         catalog, schema, name = _table_name(t)
         if catalog and policy.database and catalog.lower() != policy.database.lower():
             raise Denied(f"cross-database reference {catalog}.{schema}.{name} is not allowed")

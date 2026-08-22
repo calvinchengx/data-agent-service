@@ -92,6 +92,20 @@ REFUSED = {
     "SELECT 1; DROP TABLE dbo.fct_sales": "one statement",
     "SELECT * FROM master.dbo.sysdatabases": "cross-database",
     "SELECT * FROM OPENROWSET('a','b','c')": "not allowed",
+    # A table function is not a table. Both guards let a SCHEMA-QUALIFIED one
+    # through until this was pinned -- `dbo.read_csv_auto('/etc/passwd')`
+    # satisfies every other rule, and on an engine that reads files as
+    # relations that is arbitrary file access through a SELECT. Both had the
+    # hole, which is why the contract stayed green over it.
+    "SELECT * FROM dbo.read_csv_auto('/etc/passwd')": "table function",
+    "SELECT * FROM dbo.fct_sales, dbo.read_csv_auto('/etc/passwd')": "table function",
+    # `FROM a, b` names two tables and only the first follows the FROM
+    # keyword. The Go recogniser scanned only after FROM/JOIN, so the second
+    # was invisible to the schema allow-list, to the cross-database rule, and
+    # to the table list the access rules and the audit are built from.
+    "SELECT * FROM dbo.fct_sales, other.secrets": "not queryable",
+    "SELECT * FROM dbo.fct_sales, master.dbo.sysdatabases": "cross-database",
+    "SELECT * FROM dbo.fct_sales, unqualified": "schema-qualified",
     "SELECT * FROM other_schema.secrets": "not queryable",
     "SELECT * FROM fct_sales": "schema-qualified",
     "SELECT 1": "reads no table",

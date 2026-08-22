@@ -58,6 +58,8 @@ class Source:
     # How to authenticate when the API does not federate with Entra:
     # "keyvault:<secret-name>". Only meaningful for authz_tier=service.
     credential: str = ""
+    # duckdb — the database file, or ":memory:"
+    path: str = ""
     # databricks
     host: str = ""
     warehouse_id: str = ""
@@ -435,6 +437,116 @@ class DatabricksBackend:
         }
 
 
+# ------------------------------------------------------------------ DuckDB --
+class DuckDBBackend:
+    """DuckDB — a library reading a file, not a server.
+
+    The guard needed no changes for this engine, which is the dialect
+    parameterisation earning its keep: `sqlglot` reads `duckdb`, and the row
+    ceiling is applied by rewriting the parse tree, so it comes out as `LIMIT`
+    without anyone choosing.
+
+    What does NOT transfer is the identity model, and it is the important half.
+    There is no session, no principal and no `GRANT` to a directory identity,
+    so a DuckDB source is `authz_tier=service` permanently — the gateway's
+    roles and `DAS_ACCESS_RULES` are the entire per-user control, rather than
+    one of three layers. `load_sources` refuses a DuckDB source that claims
+    otherwise; see docs/03-architecture.md.
+
+    Opened READ-ONLY. The guard already refuses anything but a single SELECT,
+    so this changes no behaviour — it means a bug in the guard cannot write to
+    the file either, which is worth having for a control this central.
+    """
+
+    def __init__(self) -> None:
+        self.mu = threading.Lock()
+        self._connections: dict[str, Any] = {}
+
+    def _connect(self, src: Source):
+        """One connection per source, reused.
+
+        Shared rather than per-caller because there is no caller to
+        distinguish: every request reaches this engine as the same principal,
+        which is what `authz_tier=service` means made concrete.
+        """
+        import duckdb
+
+        with self.mu:
+            existing = self._connections.get(src.name)
+            if existing is not None:
+                return existing
+            if not src.path:
+                raise LookupError(f"source {src.name} has no `path` to a database file")
+            connection = duckdb.connect(src.path, read_only=True)
+            self._connections[src.name] = connection
+            return connection
+
+    def list_tables(self, src: Source, principal_token: str) -> list[dict]:
+        del principal_token  # embedded: there is no identity to act under
+        rows = (
+            self._connect(src)
+            .execute(
+                "SELECT table_schema, table_name, table_type FROM information_schema.tables "
+                "WHERE table_schema = ANY(?) ORDER BY 1, 2",
+                [list(src.schemas)],
+            )
+            .fetchall()
+        )
+        return [
+            {"schema": r[0], "name": r[1], "type": r[2], "qualifiedName": f"{r[0]}.{r[1]}"}
+            for r in rows
+        ]
+
+    def describe(self, src: Source, table: str, principal_token: str) -> dict:
+        del principal_token
+        schema, _, name = table.rpartition(".")
+        schema = schema or src.schemas[0]
+        if schema.lower() not in {s.lower() for s in src.schemas}:
+            raise PermissionError(f"schema {schema} is not queryable")
+        connection = self._connect(src)
+        cols = connection.execute(
+            "SELECT column_name, data_type, character_maximum_length, numeric_precision, "
+            "numeric_scale, is_nullable FROM information_schema.columns "
+            "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+            [schema, name],
+        ).fetchall()
+        if not cols:
+            raise LookupError(f"table {schema}.{name} not found")
+        keys = connection.execute(
+            "SELECT k.column_name, c.constraint_type "
+            "FROM information_schema.key_column_usage k "
+            "JOIN information_schema.table_constraints c "
+            "  ON c.constraint_name = k.constraint_name AND c.table_schema = k.table_schema "
+            "WHERE k.table_schema = ? AND k.table_name = ?",
+            [schema, name],
+        ).fetchall()
+        key_of = {k[0]: k[1] for k in keys}
+        return {
+            "qualifiedName": f"{schema}.{name}",
+            "columns": [
+                {
+                    "name": c_[0],
+                    "type": _display_type(c_[1], c_[2], c_[3], c_[4]),
+                    "nullable": c_[5] == "YES",
+                    "key": key_of.get(c_[0]),
+                }
+                for c_ in cols
+            ],
+        }
+
+    def run(self, src: Source, verdict: Verdict, principal_token: str) -> dict:
+        del principal_token
+        cursor = self._connect(src).execute(verdict.sql)
+        columns = [d[0] for d in (cursor.description or [])]
+        rows = cursor.fetchmany(verdict.row_limit)
+        return {
+            "columns": columns,
+            "rows": [[_jsonable(v) for v in row] for row in rows],
+            "rowCount": len(rows),
+            "truncated": len(rows) >= verdict.row_limit,
+        }
+
+
 class HttpBackend(Protocol):
     """What an HTTP adapter provides.
 
@@ -579,6 +691,11 @@ class RestBackend:
         }
 
 
+# Engines that run in this process rather than answering over a network.
+# They cannot authorise a caller, which is a property of the engine rather
+# than of any deployment of it.
+EMBEDDED_KINDS = ("duckdb",)
+
 HTTP_KINDS = ("rest",)
 
 BACKENDS: dict[str, Any] = {
@@ -587,6 +704,7 @@ BACKENDS: dict[str, Any] = {
     "synapse": TdsBackend(),
     "postgres": PostgresBackend(),
     "databricks": DatabricksBackend(),
+    "duckdb": DuckDBBackend(),
     "rest": RestBackend(),
 }
 
@@ -621,6 +739,7 @@ def load_sources() -> dict[str, Source]:
             max_items=int(r.get("max_items") or 500),
             max_bytes=int(r.get("max_bytes") or 200_000),
             credential=r.get("credential", ""),
+            path=r.get("path", ""),
         )
     for src in out.values():
         # A spec is the allow-list, not documentation. Refusing at start-up is
@@ -628,6 +747,19 @@ def load_sources() -> dict[str, Source]:
         # calls the guard could not have checked.
         if src.surface == "http" and not src.spec:
             raise ValueError(f"source {src.name} is an http source with no `spec` to guard against")
+        # An embedded engine has no session, no principal and nothing to
+        # exchange a token for, so `user` is a claim configuration cannot make
+        # true. Refused here rather than at the first query, where it would
+        # read as an outage instead of a misconfiguration — and rather than
+        # honoured quietly, which would put a per-user guarantee in the audit
+        # line that nothing behind it is making.
+        if src.kind in EMBEDDED_KINDS and src.authz_tier == "user":
+            raise ValueError(
+                f"source {src.name} is {src.kind}, which has no per-user identity; "
+                "it must be authz_tier=service (docs/03-architecture.md)"
+            )
+        if src.kind in EMBEDDED_KINDS and not src.path:
+            raise ValueError(f"source {src.name} is {src.kind} but names no `path`")
     return out
 
 
