@@ -29,6 +29,7 @@ from typing import Any
 
 from agent import agent as agent_mod
 from agent import identity
+from agent import skills as skills_mod
 from evals import score as scoring
 from seed import common as c
 
@@ -281,15 +282,23 @@ def summarise(results: list[Result]) -> dict:
     }
 
 
-def fingerprint(usecase: str, model: str, effort: str, om: bool) -> dict:
+def fingerprint(usecase: str, model: str, effort: str, om: bool, agent_kind: str) -> dict:
     prompt = (pathlib.Path(agent_mod.HERE) / "prompt.md").read_bytes()
     questions = (ROOT / "usecases" / usecase / "questions.jsonl").read_bytes()
+    # Skills change the agent's behaviour, so a scorecard that does not name
+    # them cannot be compared with another one. Hashes, not names: a skill
+    # edited in place is a different agent. The gold baseline runs reference
+    # SQL and loads no prompt at all, so it records an empty set — which is
+    # different from not recording, and has to stay distinguishable.
+    loaded = [] if agent_kind == "gold" else skills_mod.select()
     return {
+        "agent": agent_kind,
         "model": model,
         "effort": effort,
         "catalog": om,
         "prompt_sha256": hashlib.sha256(prompt).hexdigest()[:12],
         "questions_sha256": hashlib.sha256(questions).hexdigest()[:12],
+        "skills": skills_mod.fingerprint(loaded),
     }
 
 
@@ -332,7 +341,7 @@ def main() -> int:
         )
         summary = summarise(results)
         report["runs"][label] = {
-            "fingerprint": fingerprint(a.usecase, a.model, a.effort, om),
+            "fingerprint": fingerprint(a.usecase, a.model, a.effort, om, a.agent),
             "summary": summary,
             "results": [
                 {

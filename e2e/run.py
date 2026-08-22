@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
+import importlib
 import json
 import os
 import pathlib
+import re
 import sys
 
 from seed import common as c
@@ -1030,6 +1033,123 @@ def phase13() -> None:
     )
 
 
+def phase14() -> None:
+    """Skills: loaded by configuration, and carrying method rather than meaning.
+
+    The last two checks are the ones with teeth. A skill that names a table or
+    a business term would make the agent un-re-pointable — the property every
+    other part of this design is built to keep — and it would do so silently,
+    because a prompt that mentions the right table still answers the seeded
+    questions correctly.
+    """
+    from agent import agent as agent_mod
+    from agent import skills as skills_mod
+
+    loaded = skills_mod.select()
+    names = [s.name for s in loaded]
+    check(
+        "phase14",
+        "the configured skills load",
+        {"om-grounded-sql", "result-presentation"} <= set(names),
+        ", ".join(names),
+    )
+
+    dialects = skills_mod.configured_dialects()
+    expected = {f"dialect-{d}" for d in dialects}
+    unconfigured = {
+        s.name
+        for s in skills_mod.available().values()
+        if s.when.startswith("dialect=") and s.name not in expected
+    }
+    check(
+        "phase14",
+        "every configured dialect loads its skill, and no other dialect does",
+        expected <= set(names) and not (unconfigured & set(names)),
+        f"dialects {sorted(dialects)} → {sorted(expected)}",
+    )
+
+    prompt = agent_mod.system_prompt()
+    base = (pathlib.Path(agent_mod.HERE) / "prompt.md").read_text()
+    check(
+        "phase14",
+        "the system prompt carries the method and the loaded skills",
+        prompt.startswith(base) and "# Skills" in prompt and len(prompt) > len(base),
+        f"{len(base)} → {len(prompt)} chars",
+    )
+
+    # Business vocabulary from the two seeded datasets. Sourced from the
+    # datasets themselves rather than typed here, so a new table added to a
+    # dataset is covered without anyone remembering to extend this list.
+    vocabulary: set[str] = set()
+    for module in ("contoso", "support"):
+        mod = importlib.import_module(f"seed.datasets.{module}")
+        schema = getattr(mod, "SCHEMA", "")
+        for table, columns in mod.COLUMNS.items():
+            vocabulary.add(table.lower())
+            if schema:
+                vocabulary.add(f"{schema}.{table}".lower())
+            # Column names too: a column name in a skill would be the same
+            # leak as a table name, and less obvious on review. The two
+            # datasets describe columns differently (dicts, tuples), so take
+            # the first field either way rather than assuming one shape.
+            for col in columns:
+                name = col["name"] if isinstance(col, dict) else col[0]
+                if len(name) > 4:
+                    vocabulary.add(name.lower())
+    # Whole words only, and compound names only. "translate" contains the
+    # table name "sla", and "units" is both a seeded column and an ordinary
+    # English word that procedural prose is entitled to use — matching those
+    # would make the witness fire on correct skills, and a witness that cries
+    # wolf gets switched off. Compound names (resolution_minutes, fct_sales)
+    # are the ones that could only have come from this business.
+    compound = {t for t in vocabulary if "_" in t or "." in t}
+    offenders = [
+        f"{skill.name}:{term}"
+        for skill in skills_mod.available().values()
+        for term in compound
+        if re.search(rf"\b{re.escape(term)}\b", skill.body.lower())
+    ]
+    check(
+        "phase14",
+        "no skill names a table or column from any seeded dataset",
+        bool(compound) and not offenders,
+        f"{len(compound)} names checked" if not offenders else ", ".join(sorted(offenders)[:3]),
+    )
+
+    # What a scorecard records, without needing a model: the gold baseline
+    # loads no skills and must say so explicitly, and an agent run pins the
+    # loaded set by hash. Asserting the function rather than waiting for a
+    # live run keeps this provable without an API key.
+    from evals import runner as runner_mod
+
+    gold = runner_mod.fingerprint("contoso", "m", "high", True, "gold")
+    claude = runner_mod.fingerprint("contoso", "m", "high", True, "claude")
+    check(
+        "phase14",
+        "the scorecard pins every loaded skill by hash, and records gold's empty set",
+        claude["skills"] == skills_mod.fingerprint(loaded)
+        and claude["skills"]
+        and gold["skills"] == {}
+        and "skills" in gold,
+        f"agent pins {len(claude['skills'])}, gold pins 0",
+    )
+
+    reports = sorted(
+        pathlib.Path("evals/reports").glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+    )
+    recorded = None
+    if reports:
+        with contextlib.suppress(Exception):
+            runs = json.loads(reports[0].read_text()).get("runs", {})
+            recorded = next(iter(runs.values()), {}).get("fingerprint", {})
+    check(
+        "phase14",
+        "the most recent scorecard on disk carries a skills field",
+        recorded is not None and "skills" in recorded,
+        f"{reports[0].name}" if reports else "no report yet",
+    )
+
+
 # ---------------------------------------------------------------- quality --
 def quality() -> None:
     """The lint and type gates, asserted by RUNNING them.
@@ -1078,6 +1198,7 @@ PHASES = {
     "phase11": phase11,
     "phase12": phase12,
     "phase13": phase13,
+    "phase14": phase14,
 }
 
 if __name__ == "__main__":

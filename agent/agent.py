@@ -23,6 +23,7 @@ from typing import Any
 
 import anthropic
 
+from agent import skills as skills_mod
 from agent.mcp_client import McpServer, Toolbox
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -75,8 +76,15 @@ class Answer:
         return any(c.is_error for c in self.tool_calls)
 
 
-def system_prompt() -> str:
-    return (HERE / "prompt.md").read_text()
+def system_prompt(loaded: list[skills_mod.Skill] | None = None) -> str:
+    """The method prompt, plus whatever skills this configuration loads.
+
+    The prompt describes the method; skills add procedure for the dialects and
+    modes actually configured. Neither carries business meaning — that arrives
+    from the catalog at runtime.
+    """
+    chosen = skills_mod.select() if loaded is None else loaded
+    return (HERE / "prompt.md").read_text() + skills_mod.render(chosen)
 
 
 def build_toolbox(token: str, *, om: bool = True) -> Toolbox:
@@ -137,6 +145,7 @@ def ask(
 ) -> Answer:
     toolbox = build_toolbox(token, om=om)
     tools = toolbox.connect()
+    system = system_prompt()
     client = client or model_client()
     messages: list[dict] = [{"role": "user", "content": question}]
     calls: list[ToolCall] = []
@@ -148,7 +157,7 @@ def ask(
         response = client.beta.messages.create(
             model=model,
             max_tokens=16000,
-            system=system_prompt(),
+            system=system,
             output_config={"effort": effort},
             tools=tools,
             messages=messages,

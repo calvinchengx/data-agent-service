@@ -11,6 +11,7 @@ import sys
 
 from agent import agent as agent_mod
 from agent import identity
+from agent import skills as skills_mod
 
 
 def main() -> int:
@@ -23,7 +24,15 @@ def main() -> int:
     )
     ap.add_argument("--model", default=agent_mod.DEFAULT_MODEL)
     ap.add_argument("--effort", default=agent_mod.DEFAULT_EFFORT)
+    ap.add_argument(
+        "--skills", action="store_true", help="list the skills this configuration loads, and exit"
+    )
     a = ap.parse_args()
+
+    if a.skills:
+        for skill in skills_mod.select():
+            print(f"{skill.name:<22} {skill.short_hash}  when={skill.when:<18} {skill.description}")
+        return 0
 
     question = " ".join(a.question).strip()
     if not question:
