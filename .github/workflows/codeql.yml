@@ -53,12 +53,12 @@ jobs:
           - language: actions
             build-mode: none
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # The Go module lives beside its source rather than at the repository
       # root, which autobuild does not find. A manual build in the right
       # directory is deterministic; autobuild here would be a guess.
       - if: matrix.language == 'go'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: services/warehouse-query-go/go.mod
           cache-dependency-path: services/warehouse-query-go/go.sum
