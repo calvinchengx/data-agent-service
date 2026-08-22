@@ -49,7 +49,7 @@ def resolver_with(module, responses: dict, calls: list | None = None):
                 return payload
         raise LookupError(path)
 
-    r._get = fake_get  # noqa: SLF001 — the transport is what we are standing in for
+    r._get = fake_get
     return r
 
 
@@ -115,7 +115,7 @@ def test_a_directory_that_will_not_answer_grants_nothing(access):
     def explode(path):
         raise ConnectionError("graph is down")
 
-    r._get = explode  # noqa: SLF001
+    r._get = explode
     assert r.roles_for({"oid": ALICE}) == (), "authorization must fail closed"
 
 

@@ -71,8 +71,8 @@ def json_block(auth: str, token: str, key: str = "mcpServers") -> str:
 CLIENTS = {
     "claude-code": ("Claude Code (CLI)", "shell", claude_code),
     "claude-desktop": ("Claude Desktop — claude_desktop_config.json",
-                       "json", lambda a, t: json_block(a, t)),
-    "cursor": ("Cursor — .cursor/mcp.json", "json", lambda a, t: json_block(a, t)),
+                       "json", json_block),
+    "cursor": ("Cursor — .cursor/mcp.json", "json", json_block),
     "vscode": ("VS Code — .vscode/mcp.json", "json", lambda a, t: json_block(a, t, "servers")),
     "sdk": ("Any client built on an MCP SDK", "python", lambda a, t: f'''\
 from mcp import ClientSession

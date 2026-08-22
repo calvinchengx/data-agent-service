@@ -11,12 +11,14 @@ prompt (agent/prompt.md) describes the *method*, never the data.
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import os
 import pathlib
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import anthropic
 
@@ -53,10 +55,8 @@ class Answer:
         for call in self.tool_calls:
             if not call.name.endswith("run_query") or call.is_error:
                 continue
-            try:
+            with contextlib.suppress(json.JSONDecodeError, KeyError):
                 out.append(json.loads(call.result)["sql"])
-            except (json.JSONDecodeError, KeyError):
-                pass
         return out
 
     @property
@@ -65,10 +65,8 @@ class Answer:
         for call in self.tool_calls:
             if not call.name.endswith("run_query") or call.is_error:
                 continue
-            try:
+            with contextlib.suppress(json.JSONDecodeError, AttributeError):
                 out.update(json.loads(call.result).get("tables", []))
-            except (json.JSONDecodeError, AttributeError):
-                pass
         return out
 
     @property

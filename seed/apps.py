@@ -35,7 +35,7 @@ EXCHANGE_AUDIENCE = "api://AzureADTokenExchange"
 
 
 def apps() -> list[dict]:
-    st, _, b = c.must("GET", f"{G}/applications?$select=appId,displayName,identifierUris,api",
+    _st, _, b = c.must("GET", f"{G}/applications?$select=appId,displayName,identifierUris,api",
                       headers=c.bearer(c.GRAPH_AUD))
     return b["value"] if isinstance(b, dict) else json.loads(b)["value"]
 

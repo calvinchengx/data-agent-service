@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net/http"
 	"os"
@@ -21,11 +22,11 @@ import (
 )
 
 type TokenVerifier struct {
-	Issuer   string
-	JWKSURL  string
-	mu       sync.RWMutex
-	keys     map[string]any
-	fetched  time.Time
+	Issuer  string
+	JWKSURL string
+	mu      sync.RWMutex
+	keys    map[string]any
+	fetched time.Time
 }
 
 func NewTokenVerifier() *TokenVerifier {
@@ -118,7 +119,6 @@ func (v *TokenVerifier) Verify(raw, audience string) (map[string]any, error) {
 	return map[string]any(claims), nil
 }
 
-
 // rsaKeyFromJWK rebuilds a public key from a JWK's base64url modulus and
 // exponent. golang-jwt parses PEM, not JWK, and a key server speaks JWK.
 func rsaKeyFromJWK(modulus, exponent string) (*rsa.PublicKey, error) {
@@ -135,6 +135,12 @@ func rsaKeyFromJWK(modulus, exponent string) (*rsa.PublicKey, error) {
 	}
 	padded := make([]byte, 8)
 	copy(padded[8-len(e):], e)
-	return &rsa.PublicKey{N: new(big.Int).SetBytes(n),
-		E: int(binary.BigEndian.Uint64(padded))}, nil
+	// A published exponent that does not fit in an int is not a key we can
+	// use, and silently wrapping it to a negative number would make signature
+	// verification meaningless rather than failed.
+	value := binary.BigEndian.Uint64(padded)
+	if value > math.MaxInt32 {
+		return nil, fmt.Errorf("jwks: exponent %d is out of range", value)
+	}
+	return &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: int(value)}, nil
 }

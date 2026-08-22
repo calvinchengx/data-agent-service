@@ -85,7 +85,7 @@ def _parse(raw: str):
     """A Streamable HTTP response is JSON, or one or more SSE frames carrying
     JSON. Accept both rather than assume the server's choice."""
     raw = raw.strip()
-    if raw.startswith("{") or raw.startswith("["):
+    if raw.startswith(("{", "[")):
         return json.loads(raw)
     for line in raw.splitlines():
         if line.startswith("data:"):
@@ -104,16 +104,13 @@ class Toolbox:
         self.servers = {s.name: s for s in servers}
 
     def connect(self) -> list[dict]:
-        specs: list[dict] = []
-        for server in self.servers.values():
-            for tool in server.connect():
-                specs.append({
-                    "name": f"{server.name}{self.SEP}{tool['name']}",
-                    "description": tool.get("description", ""),
-                    "input_schema": tool.get("inputSchema")
-                    or {"type": "object", "properties": {}},
-                })
-        return specs
+        return [
+            {"name": f"{server.name}{self.SEP}{tool['name']}",
+             "description": tool.get("description", ""),
+             "input_schema": tool.get("inputSchema") or {"type": "object", "properties": {}}}
+            for server in self.servers.values()
+            for tool in server.connect()
+        ]
 
     def call(self, namespaced: str, arguments: dict) -> tuple[str, bool]:
         server_name, _, tool = namespaced.partition(self.SEP)

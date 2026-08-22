@@ -27,8 +27,8 @@ def load_env(env: str = "local") -> dict[str, str]:
     if not f.exists() and env == "local":
         f = ROOT / ".env.example"
     cfg: dict[str, str] = {}
-    for line in f.read_text().splitlines():
-        line = line.strip()
+    for raw in f.read_text().splitlines():
+        line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, _, v = line.partition("=")
@@ -258,7 +258,9 @@ def connect_source(src: dict):
         if not server:
             state = load_state()
             server, database = state.get("sql_server", ""), state.get("sql_database", "")
-        return tds_connect(server, database)
+        # A source advertises `host:port`; the driver wants `host,port`. The
+        # conversion lives in one place so a second caller cannot forget it.
+        return tds_connect(odbc_server(server), database)
     if kind == "postgres":
         import psycopg
 

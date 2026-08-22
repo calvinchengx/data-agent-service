@@ -19,7 +19,7 @@ endif
 
 PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
-.PHONY: help doctor up down restart clean status logs ps pull tools-build seed test eval load client-config ask
+.PHONY: help doctor up down restart clean status logs ps pull tools-build seed test eval load lint format typecheck client-config ask
 
 help: ## Show the available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -57,6 +57,35 @@ tools-build: ## Build the tools image (seeds/harnesses runtime)
 
 seed: ## Seed warehouse data, OpenMetadata semantics, authz, and APIM resources (Phases 1-6)
 	$(TOOLS) python -m seed.run $(ARGS)
+
+# Linting runs in containers for the same reason everything else does: a fresh
+# clone of this repo needs Docker and nothing else. A host-installed linter
+# moves the failure onto whoever clones. LINT_MODE=host is the escape hatch,
+# not the default.
+GOLANGCI  = golangci/golangci-lint:v2.6.1
+LINT_MODE ?= container
+ifeq ($(LINT_MODE),host)
+  RUFF = uv run ruff
+  TY   = uv run ty
+  GOLINT = golangci-lint run ./...
+else
+  RUFF = $(TOOLS) ruff
+  TY   = $(TOOLS) ty
+  GOLINT = docker run --rm -v "$(PWD):/src" -w /src/services/warehouse-query-go $(GOLANGCI) golangci-lint run ./...
+endif
+
+lint: ## Lint and type-check everything (never edits; use `make format` for that)
+	@echo "== ruff (python lint)";      $(RUFF) check .
+	@echo "== ty (python types)";       $(TY) check
+	@echo "== golangci-lint (go)";      $(GOLINT)
+
+format: ## Apply formatting and safe fixes — the only target that edits files
+	$(RUFF) check . --fix
+	$(RUFF) format .
+	docker run --rm -v "$(PWD):/src" -w /src/services/warehouse-query-go $(GOLANGCI) golangci-lint fmt ./...
+
+typecheck: ## Python types only
+	$(TY) check
 
 test: ## Unit + e2e witnesses (Phase 4+)
 	$(TOOLS) python -m e2e.run $(ARGS)

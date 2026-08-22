@@ -43,12 +43,12 @@ _TYPE = {"varchar": "VARCHAR", "nvarchar": "VARCHAR", "char": "CHAR", "int": "IN
 
 
 def om_login() -> str:
-    global _TOKEN
+    global _TOKEN  # noqa: PLW0603 — one session token for the run
     if _TOKEN:
         return _TOKEN
     user = c.CFG.get("DAS_OM_ADMIN_EMAIL", "admin@open-metadata.org")
     pw = c.CFG.get("DAS_OM_ADMIN_PASSWORD", "admin")
-    st, _, body = c.must("POST", f"{OM}/api/v1/users/login", json_body={
+    _st, _, body = c.must("POST", f"{OM}/api/v1/users/login", json_body={
         "email": user, "password": base64.b64encode(pw.encode()).decode()})
     _TOKEN = body["accessToken"]
     return _TOKEN
@@ -58,9 +58,9 @@ def om(method: str, path: str, body=None, ok=(200, 201, 204), ctype="application
     h = {"Authorization": "Bearer " + om_login(), "Content-Type": ctype}
     url = f"{OM}/api/v1{path}"
     if ctype == "application/json":
-        st, hd, txt = c.http(method, url, headers=h, json_body=body)
+        st, _hd, txt = c.http(method, url, headers=h, json_body=body)
     else:
-        st, hd, txt = c.http(method, url, headers=h, raw=json.dumps(body).encode())
+        st, _hd, txt = c.http(method, url, headers=h, raw=json.dumps(body).encode())
     if st not in ok:
         raise c.HttpError(st, txt, url)
     return json.loads(txt) if txt.strip().startswith(("{", "[")) else txt
@@ -122,7 +122,7 @@ def live_columns(conn, schema: str) -> dict[str, list[dict]]:
         "NUMERIC_SCALE, ORDINAL_POSITION, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS "
         "WHERE TABLE_SCHEMA=? ORDER BY TABLE_NAME, ORDINAL_POSITION", schema).fetchall()
     out: dict[str, list[dict]] = {}
-    for t, name, dtype, clen, prec, scale, _pos, nullable in rows:
+    for t, name, dtype, clen, prec, scale, _pos, _nullable in rows:
         col = {"name": name, "dataType": _TYPE.get(dtype.lower(), "UNKNOWN"), "dataTypeDisplay": dtype}
         if col["dataType"] in ("VARCHAR", "CHAR", "BINARY", "VARBINARY"):
             col["dataLength"] = int(clen) if clen and clen > 0 else 4000
@@ -211,7 +211,7 @@ def govern(dataset: str) -> dict:
     for table, cols in live.items():
         keys = sem.KEYS.get(table, {})
         pk = set(keys.get("pk", []))
-        fks = {c_: ref for c_, ref in keys.get("fk", [])}
+        fks = dict(keys.get("fk", []))
         for col in cols:
             desc = sem.COLUMNS.get(f"{table}.{col['name']}")
             if desc:

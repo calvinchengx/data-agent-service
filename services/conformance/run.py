@@ -125,7 +125,7 @@ def conform(base: str) -> None:
     # ---- REST surface ------------------------------------------------
     st, body = ex.rest("GET", "/sources", carol)
     names = [s["name"] for s in body["sources"]] if st == 200 else []
-    check("GET /sources lists the configured sources", st == 200 and names, str(names))
+    check("GET /sources lists the configured sources", st == 200 and bool(names), str(names))
 
     st, body = ex.rest("GET", "/tables", carol)
     tables = [t["qualifiedName"] for t in body.get("tables", [])] if st == 200 else []
@@ -266,8 +266,8 @@ def conform(base: str) -> None:
     # because it was found missing from one implementation and present in the
     # other, which is exactly the drift this file exists to catch.
     check("the metadata states the scope and that registration is not available",
-          meta.get("scopes_supported") == [f"{c.CFG['DAS_AGENT_AUDIENCE']}/"
-                                           f"{c.CFG.get('DAS_REQUIRED_SCOPE', 'access_as_user')}"]
+          meta.get("scopes_supported") == [(f"{c.CFG['DAS_AGENT_AUDIENCE']}/"
+                                           f"{c.CFG.get('DAS_REQUIRED_SCOPE', 'access_as_user')}")]
           and meta.get("client_registration_required") is False,
           f"{meta.get('scopes_supported')} registration={meta.get('client_registration_required')}")
     st, _, raw = c.http("GET", ex.base + "/.well-known/oauth-authorization-server")

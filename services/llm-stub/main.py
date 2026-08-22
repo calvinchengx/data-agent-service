@@ -33,8 +33,8 @@ ANSWER = os.environ.get("STUB_ANSWER", "Net revenue for FY2025 was 1,905,417.10 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def log_message(self, fmt, *args):  # noqa: A003 — quieter than the default
-        pass
+    def log_message(self, format: str, *args: object) -> None:
+        """Silence the default per-request line; the driver reports what matters."""
 
     def _send(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode()
@@ -44,13 +44,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         if self.path == "/health":
             self._send(200, {"status": "ok"})
             return
         self._send(404, {"error": "not found"})
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b"{}"
         try:

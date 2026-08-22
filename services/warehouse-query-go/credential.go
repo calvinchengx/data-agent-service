@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -55,7 +56,9 @@ func NewCredential() *Credential {
 	authority := strings.TrimSuffix(issuer, "/v2.0")
 	secretName := os.Getenv("DAS_EXECUTOR_SECRET_NAME")
 	if secretName == "" {
-		secretName = "das-executor-client-secret"
+		// The NAME of a secret in Key Vault, not a secret. gosec cannot tell
+		// the difference, and a name is exactly what belongs in code.
+		secretName = "das-executor-client-secret" //nolint:gosec // G101: vault key name
 	}
 	return &Credential{
 		authority:  authority,
@@ -67,6 +70,11 @@ func NewCredential() *Credential {
 		tokens:     map[string]cachedToken{},
 	}
 }
+
+// How long any single identity call may take. Short on purpose: a token
+// endpoint that has stopped answering should surface as a failed request, not
+// as a request that never returns.
+const tokenCallTimeout = 30 * time.Second
 
 func (c *Credential) cached(key string) (string, bool) {
 	c.mu.Lock()
@@ -94,7 +102,12 @@ func (c *Credential) ManagedIdentityToken(resource string) (string, error) {
 		return "", fmt.Errorf("no managed identity endpoint (IDENTITY_ENDPOINT unset)")
 	}
 	target := c.miEndpoint + "?resource=" + url.QueryEscape(resource) + "&api-version=2019-08-01"
-	req, err := http.NewRequest(http.MethodGet, target, nil)
+	// Every outbound call carries a deadline it can be cancelled by. A client
+	// timeout alone stops a hung response; it does not stop a caller that has
+	// already given up from holding the connection.
+	ctx, cancel := context.WithTimeout(context.Background(), tokenCallTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return "", err
 	}
@@ -124,7 +137,9 @@ func (c *Credential) clientSecret() string {
 	value := ""
 	if c.keyVault != "" {
 		if token, err := c.ManagedIdentityToken("https://vault.azure.net"); err == nil {
-			req, _ := http.NewRequest(http.MethodGet,
+			ctx, cancel := context.WithTimeout(context.Background(), tokenCallTimeout)
+			defer cancel()
+			req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 				c.keyVault+"/secrets/"+c.secretName+"?api-version=7.5", nil)
 			req.Header.Set("Authorization", "Bearer "+token)
 			var payload struct {
@@ -149,11 +164,11 @@ func (c *Credential) OnBehalfOf(userAssertion, scope, cacheKey string) (string, 
 		return token, nil
 	}
 	form := url.Values{
-		"grant_type":           {"urn:ietf:params:oauth:grant-type:jwt-bearer"},
-		"client_id":            {c.clientID},
-		"assertion":            {userAssertion},
-		"scope":                {scope},
-		"requested_token_use":  {"on_behalf_of"},
+		"grant_type":          {"urn:ietf:params:oauth:grant-type:jwt-bearer"},
+		"client_id":           {c.clientID},
+		"assertion":           {userAssertion},
+		"scope":               {scope},
+		"requested_token_use": {"on_behalf_of"},
 	}
 	var problems []string
 
@@ -194,7 +209,9 @@ func cloneValues(in url.Values) url.Values {
 }
 
 func (c *Credential) tokenRequest(form url.Values) (string, time.Time, error) {
-	req, err := http.NewRequest(http.MethodPost, c.authority+"/oauth2/v2.0/token",
+	ctx, cancel := context.WithTimeout(context.Background(), tokenCallTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.authority+"/oauth2/v2.0/token",
 		strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", time.Time{}, err
@@ -219,7 +236,7 @@ func doJSON(req *http.Request, out any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
@@ -231,7 +248,9 @@ func doJSON(req *http.Request, out any) error {
 }
 
 func getJSON(target, token string, out any) error {
-	req, err := http.NewRequest(http.MethodGet, target, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), tokenCallTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return err
 	}

@@ -27,13 +27,14 @@ import time
 import urllib.parse
 import urllib.request
 
-import access
-import mcp as mcpproto
-from credential import Credential, Settings, TokenError
 from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from jose import jwt
-from sources import SQL_SCOPE, backend_for, guard, load_sources
+
+import access
+import mcp as mcpproto
+from credential import Credential, Settings, TokenError
+from sources import backend_for, guard, load_sources
 from sqlguard import Denied
 
 LOG = logging.getLogger("warehouse-query")
@@ -60,7 +61,7 @@ _JWKS_AT = 0.0
 
 
 def _jwks() -> dict:
-    global _JWKS, _JWKS_AT
+    global _JWKS, _JWKS_AT  # noqa: PLW0603 — one key set per process, refreshed in place
     if _JWKS and time.time() - _JWKS_AT < 3600:
         return _JWKS
     import ssl
@@ -247,7 +248,7 @@ def describe_table(qualified_name: str,
 
 @app.post("/query", operation_id="run_query",
           summary="Run one read-only SELECT and return rows")
-def run_query(body: dict = Body(..., examples=[{"sql": "SELECT TOP 10 * FROM dbo.fct_revenue_summary",
+def run_query(body: dict = Body(..., examples=[{"sql": "SELECT TOP 10 * FROM dbo.fct_revenue_summary",  # noqa: B008 — FastAPI dependency declaration
                                                "source": "contoso_warehouse", "maxRows": 100}]),
               authorization: str | None = Header(default=None)):
     p = principal(authorization)

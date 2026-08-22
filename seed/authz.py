@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from typing import NamedTuple
 
 from seed import common as c
 
@@ -96,9 +97,16 @@ ACCESS_RULES = [
 
 # OpenMetadata: one read-only bot per role. The analyst bot cannot read assets
 # tagged as personal data; the finance bot can.
+class CatalogBot(NamedTuple):
+    """A read-only catalog identity and what it may not see."""
+
+    bot: str
+    deny_tags: tuple[str, ...]
+
+
 OM_ROLE_BOTS = {
-    "Data.Analyst": {"bot": "das-analyst", "deny_tags": ["PII.Sensitive"]},
-    "Data.Finance": {"bot": "das-finance", "deny_tags": []},
+    "Data.Analyst": CatalogBot(bot="das-analyst", deny_tags=("PII.Sensitive",)),
+    "Data.Finance": CatalogBot(bot="das-finance", deny_tags=()),
 }
 
 
@@ -132,7 +140,7 @@ def ensure_app_roles(app_id: str) -> dict[str, str]:
     for role in APP_ROLES:
         if role["value"] in have:
             continue
-        st, _, _ = c.http("PATCH", f"{G}/applications/{app_id}", headers=c.bearer(c.GRAPH_AUD),
+        _st, _, _ = c.http("PATCH", f"{G}/applications/{app_id}", headers=c.bearer(c.GRAPH_AUD),
                           json_body={"appRoles": [{**role, "allowedMemberTypes": ["User"],
                                                    "isEnabled": True}]})
         after = {r["value"]: r["id"]
@@ -178,12 +186,12 @@ def om_role_bots() -> dict[str, str]:
 
     out: dict[str, str] = {}
     for role, spec in OM_ROLE_BOTS.items():
-        name, deny_tags = spec["bot"], spec["deny_tags"]
+        name, deny_tags = spec.bot, spec.deny_tags
         rules = [{"name": "view", "resources": ["all"], "operations": ["ViewAll"], "effect": "allow"},
                  {"name": "no-edit", "resources": ["all"],
                   "operations": ["Create", "Delete", "EditAll"], "effect": "deny"}]
         for tag in deny_tags:
-            rules.append({"name": f"deny-{tag.replace('.', '-').lower()}",
+            rules.append({"name": f"deny-{tag.replace('.', '-').lower()}",  # noqa: PERF401 — a filtered append is clearer here
                           "resources": ["all"], "operations": ["ViewAll"], "effect": "deny",
                           "condition": f"matchAnyTag('{tag}')"})
         policy_name = f"Das{role.split('.')[-1]}Policy"
@@ -275,7 +283,7 @@ def main() -> dict:
 
     assigned = {}
     for p in PERSONAS:
-        oid = ensure_user(p["upn"], p["displayName"])
+        oid = ensure_user(str(p["upn"]), str(p["displayName"]))
         if p["role"] and p["role"] in roles:
             assign_role(app_id, oid, roles[p["role"]])
         if p["role"] and p["role"] in groups:

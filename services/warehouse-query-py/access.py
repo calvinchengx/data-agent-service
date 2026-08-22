@@ -40,6 +40,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 
 GRAPH_AUDIENCE = "https://graph.microsoft.com"
 LOG = logging.getLogger("warehouse-query.access")
@@ -111,7 +112,7 @@ class RoleResolver:
     """Caller roles, from the token when it says, from the directory when it
     does not — and from whichever part of the directory holds them."""
 
-    def __init__(self, graph_token: callable, ttl: int = 300):
+    def __init__(self, graph_token: Callable[[], str], ttl: int = 300):
         self._graph_token = graph_token
         self._ttl = ttl
         self._lock = threading.Lock()

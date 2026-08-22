@@ -387,5 +387,13 @@ def backend_for(src: Source) -> SourceBackend:
             f"Available: {', '.join(sorted(BACKENDS))}") from None
 
 
-__all__ = ["Source", "SourceBackend", "load_sources", "backend_for", "guard", "Policy",
-           "SQL_AUDIENCE", "SQL_SCOPE"]
+__all__ = [
+    "SQL_AUDIENCE",
+    "SQL_SCOPE",
+    "Policy",
+    "Source",
+    "SourceBackend",
+    "backend_for",
+    "guard",
+    "load_sources",
+]

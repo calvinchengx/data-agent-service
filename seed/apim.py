@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import urllib.parse
 
 from seed import common as c
 
@@ -58,7 +57,7 @@ VALIDATE_JWT = c.CFG.get("DAS_APIM_VALIDATE_JWT", "true").lower() in ("1", "true
 
 def arm(method: str, path: str, body=None, ok=(200, 201, 202, 204)):
     url = f"{APIM}{path}{'&' if '?' in path else '?'}api-version={API_VERSION}"
-    st, hd, txt = c.http(method, url, headers={"Host": "management.azure.localhost",
+    st, _hd, txt = c.http(method, url, headers={"Host": "management.azure.localhost",
                                               **c.bearer("https://management.azure.com")},
                          json_body=body)
     if st not in ok:
@@ -180,7 +179,7 @@ def set_rate_limit(calls: int) -> None:
     repo's own gateway configuration, so the driver owns them rather than
     asking the reader to remember to change a file.
     """
-    global RATE_CALLS
+    global RATE_CALLS  # noqa: PLW0603 — one process-wide gateway setting
     RATE_CALLS = str(calls)
     put_policy("apis/warehouse", jwt_policy())
     put_policy("apis/warehouse-rest", jwt_policy())

@@ -37,17 +37,17 @@ func stubGraph(t *testing.T, asked *int) *httptest.Server {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*asked++
 		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/applications/app-1":
+		switch r.URL.Path {
+		case "/applications/app-1":
 			_ = json.NewEncoder(w).Encode(map[string]any{"appRoles": []map[string]any{
 				{"id": "role-analyst", "value": "Data.Analyst"},
 				{"id": "role-finance", "value": "Data.Finance"},
 			}})
-		case r.URL.Path == "/servicePrincipals/app-1/appRoleAssignedTo":
+		case "/servicePrincipals/app-1/appRoleAssignedTo":
 			_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{
 				{"principalId": "alice", "appRoleId": "role-analyst"},
 			}})
-		case r.URL.Path == "/users/alice/memberOf":
+		case "/users/alice/memberOf":
 			_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{
 				{"@odata.type": "#microsoft.graph.group", "id": "g-analyst",
 					"displayName": "DAS-Analysts"},
@@ -66,10 +66,10 @@ func resolver(t *testing.T, source string, asked *int) *RoleResolver {
 	t.Helper()
 	server := stubGraph(t, asked)
 	withEnv(t, map[string]string{
-		"DAS_ROLE_SOURCE":     source,
-		"DAS_GRAPH_URL":       server.URL,
+		"DAS_ROLE_SOURCE":           source,
+		"DAS_GRAPH_URL":             server.URL,
 		"DAS_MIDDLE_TIER_CLIENT_ID": "app-1",
-		"DAS_GROUP_ROLE_MAP":  `{"g-analyst":"Data.Analyst","DAS-Finance":"Data.Finance"}`,
+		"DAS_GROUP_ROLE_MAP":        `{"g-analyst":"Data.Analyst","DAS-Finance":"Data.Finance"}`,
 	})
 	return NewRoleResolver(func(string) (string, error) { return "token", nil })
 }

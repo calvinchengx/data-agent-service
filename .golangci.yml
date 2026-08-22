@@ -1,0 +1,51 @@
+# Go linting for services/warehouse-query-go.
+#
+# Runs in a container (see `make lint`), because a fresh clone of this repo is
+# promised to need Docker and nothing else — the same promise `make doctor`,
+# `make up` and `make test` already make. A host-installed golangci-lint would
+# move the failure onto whoever clones.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard          # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose              # an unclosed response body leaks a connection per call
+    - errorlint              # %w, and errors.Is/As over ==, so wrapping keeps working
+    - gosec                  # this service holds tokens and builds SQL
+    - misspell
+    - nilerr                 # returning nil after checking an error is rarely meant
+    - noctx                  # an HTTP call with no context cannot be cancelled
+    - revive
+    - unconvert
+    - unparam
+    - whitespace
+
+  settings:
+    gosec:
+      excludes:
+        # G402 (InsecureSkipVerify) is reached only through the family's
+        # documented self-signed-certificate switch, which is off in
+        # production and asserted off by scripts/preflight.py.
+        - G402
+    revive:
+      rules:
+        - name: exported
+          disabled: true     # this is a binary, not a library; doc comments are prose here
+    staticcheck:
+      checks: ["all"]
+
+  exclusions:
+    rules:
+      # Table-driven tests repeat themselves by design, and a fixture that
+      # names an unreachable address is stating the scenario.
+      - path: _test\.go
+        linters: [gosec, unparam, noctx]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

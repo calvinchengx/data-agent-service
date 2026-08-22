@@ -11,6 +11,7 @@ the question asked for an ordering.
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import decimal
 import math
@@ -61,10 +62,10 @@ def rows_match(actual: list[list], gold: list[list], *, ordered: bool, tol=0.02)
     a, g = normalise(actual), normalise(gold)
     if not ordered:
         a, g = sorted(a), sorted(g)
-    for row_a, row_g in zip(a, g):
+    for row_a, row_g in zip(a, g, strict=False):
         if len(row_a) != len(row_g):
             return False
-        for x, y in zip(row_a, row_g):
+        for x, y in zip(row_a, row_g, strict=False):
             if x.startswith("~") and y.startswith("~"):
                 fx, fy = float(x[1:]), float(y[1:])
                 if not math.isclose(fx, fy, rel_tol=tol, abs_tol=tol):
@@ -77,10 +78,8 @@ def rows_match(actual: list[list], gold: list[list], *, ordered: bool, tol=0.02)
 def numbers_in(text: str) -> list[float]:
     out = []
     for token in re.findall(r"-?\d[\d,]*\.?\d*", text or ""):
-        try:
+        with contextlib.suppress(ValueError):
             out.append(float(token.replace(",", "")))
-        except ValueError:
-            pass
     return out
 
 
@@ -128,10 +127,7 @@ def semantics(sql_statements: list[str], required: list[str], forbidden: list[st
     for token in required or []:
         if token.lower() not in blob:
             return False
-    for token in forbidden or []:
-        if token.lower() in blob:
-            return False
-    return True
+    return all(token.lower() not in blob for token in forbidden or [])
 
 
 ABSTENTION_MARKERS = (
@@ -152,7 +148,7 @@ def behaved(expect: str, text: str, answer) -> tuple[bool, str]:
             return False, "answered without running a query"
         return True, ""
     if expect == "abstain":
-        if answer.sql and any(numbers_in(text)):
+        if answer.sql and any(numbers_in(text)):  # noqa: SIM102 — the nested condition carries its own reason
             # Running a query while exploring is fine; presenting a figure as
             # the answer to an unanswerable question is not.
             if not any(m in lowered for m in ABSTENTION_MARKERS):

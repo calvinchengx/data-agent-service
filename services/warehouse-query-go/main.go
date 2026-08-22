@@ -487,4 +487,3 @@ func handleProtectedResource(w http.ResponseWriter, r *http.Request) {
 		"client_registration_required": false,
 	})
 }
-

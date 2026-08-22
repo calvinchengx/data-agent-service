@@ -29,8 +29,8 @@ SKIP_PARTS = ("__pycache__", ".venv", "node_modules", "reports")
 FORBIDDEN = {
     "emulator admin surface": (
         re.compile(r"/admin/api/"),
-        "the tenant's administrative surface exists only on the emulator; a real "
-        "tenant is administered through Graph or the portal"),
+        ("the tenant's administrative surface exists only on the emulator; a real "
+        "tenant is administered through Graph or the portal")),
     "emulator hostname": (
         re.compile(r"\b(entra|apim|arm|keyvault|fabric)-emulator\b"),
         "a hostname that only resolves inside the local compose network"),
@@ -39,8 +39,8 @@ FORBIDDEN = {
         "a switch that turns off token validation"),
     "password grant": (
         re.compile(r"grant_type[\"']?\s*[:=]\s*[\"']password[\"']"),
-        "the resource-owner password grant; production tenants disable it and "
-        "Conditional Access blocks it"),
+        ("the resource-owner password grant; production tenants disable it and "
+        "Conditional Access blocks it")),
     "token forge": (
         re.compile(r"/admin/api/tokens"),
         "minting a token without a flow"),

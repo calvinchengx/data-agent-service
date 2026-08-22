@@ -78,7 +78,7 @@ def guard(sql: str, policy: Policy) -> Verdict:
 
     try:
         statements = [s for s in sqlglot.parse(sql, read=policy.dialect) if s is not None]
-    except Exception as e:  # sqlglot raises ParseError and friends
+    except Exception as e:  # noqa: BLE001 — sqlglot raises several unrelated types
         raise Denied(f"could not parse as {policy.dialect}: {e}") from None
     if len(statements) != 1:
         raise Denied(f"exactly one statement is allowed; got {len(statements)}")

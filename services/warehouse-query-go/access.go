@@ -4,7 +4,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"path"
@@ -347,5 +346,3 @@ func sortedKeys(set map[string]bool) []string {
 	sort.Strings(out)
 	return out
 }
-
-func deniedAccess(format string, args ...any) error { return fmt.Errorf(format, args...) }

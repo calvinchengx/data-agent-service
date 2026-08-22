@@ -179,13 +179,16 @@ func (b *TdsBackend) ListTables(ctx context.Context, src Source, token string) (
 		placeholders[i] = "@p" + strconv.Itoa(i+1)
 		args[i] = s
 	}
-	query := "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES " +
+	// The concatenated part is a list of PLACEHOLDERS; every value travels as
+	// an argument below. gosec sees string-building near SQL and cannot tell
+	// which, so the reason is recorded rather than the rule disabled globally.
+	query := "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES " + //nolint:gosec // G202: placeholders, not values
 		"WHERE TABLE_SCHEMA IN (" + strings.Join(placeholders, ",") + ") ORDER BY 1,2"
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []TableRef
 	for rows.Next() {
 		var t TableRef
@@ -206,10 +209,10 @@ type ColumnRef struct {
 }
 
 type Described struct {
-	QualifiedName    string      `json:"qualifiedName"`
-	Columns          []ColumnRef `json:"columns"`
-	WithheldColumns  int         `json:"withheldColumns,omitempty"`
-	Note             string      `json:"note,omitempty"`
+	QualifiedName   string      `json:"qualifiedName"`
+	Columns         []ColumnRef `json:"columns"`
+	WithheldColumns int         `json:"withheldColumns,omitempty"`
+	Note            string      `json:"note,omitempty"`
 }
 
 func (b *TdsBackend) Describe(ctx context.Context, src Source, table, token string) (*Described, error) {
@@ -228,7 +231,7 @@ func (b *TdsBackend) Describe(ctx context.Context, src Source, table, token stri
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var columns []ColumnRef
 	for rows.Next() {
 		var (
@@ -270,7 +273,7 @@ func (b *TdsBackend) keys(ctx context.Context, db *sql.DB, schema, name string) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[string]string{}
 	for rows.Next() {
 		var column, kind string
@@ -298,7 +301,7 @@ func (b *TdsBackend) Run(ctx context.Context, src Source, v *Verdict, token stri
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	names, err := rows.Columns()
 	if err != nil {
 		return nil, err

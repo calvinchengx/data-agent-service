@@ -16,7 +16,8 @@ ceiling is applied for you") instead of being derived from HTTP verbs.
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 SERVER_INFO = {"name": "data-agent-service.warehouse-query", "version": "0.1.0"}
@@ -130,7 +131,7 @@ def handle(message: dict, *, tools: list[dict],
         name = params.get("name")
         args = params.get("arguments") or {}
         known = {t["name"] for t in tools}
-        if name not in known:
+        if not isinstance(name, str) or name not in known:
             return _error(rid, -32602, f"unknown tool {name}; available: {', '.join(sorted(known))}")
         try:
             return _result(rid, call(name, args))

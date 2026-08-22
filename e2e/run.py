@@ -236,7 +236,7 @@ def phase5() -> None:
     st, b = rpc("tools/call", {"name": "search_metadata",
                                "arguments": {"query": "revenue", "entity_type": "table"}},
                 alice, path="/om/mcp", extra=extra)
-    err, text = tool_result(b) if st == 200 else (True, b[:120])
+    _err, text = tool_result(b) if st == 200 else (True, b[:120])
     check("phase5", "the catalog answers a search through the gateway",
           st == 200 and "fct_revenue_summary" in text, text[:70])
     if key:
@@ -319,7 +319,7 @@ def phase6() -> None:
           described and "dim_customer.email" in analyst, analyst[:80])
 
     members = {}
-    for role, name in authz.ROLE_GROUPS.items():
+    for name in authz.ROLE_GROUPS.values():
         if name not in groups:
             continue
         _, _, mb = c.http("GET", f"{graph}/groups/{groups[name]['id']}/members",
@@ -350,7 +350,7 @@ def phase7() -> None:
     import subprocess
 
     out = subprocess.run([sys.executable, "-m", "evals.runner", "--agent", "gold"],
-                         capture_output=True, text=True, env={**os.environ, "DAS_ENV": "local"})
+                         capture_output=True, text=True, env={**os.environ, "DAS_ENV": "local"}, check=False)
     tail = (out.stdout or out.stderr).strip().splitlines()
     summary = next((line for line in reversed(tail) if "passed (" in line), "")
     check("phase7", "the eval harness scores the reference answers 100%",
@@ -433,7 +433,7 @@ def phase9() -> None:
     import subprocess
 
     out = subprocess.run([sys.executable, "-m", "services.conformance.run"],
-                         capture_output=True, text=True, env={**os.environ})
+                         capture_output=True, text=True, env={**os.environ}, check=False)
     tail = (out.stdout or out.stderr).strip().splitlines()
     summary = next((line for line in reversed(tail) if "contract checks" in line), "")
     check("phase9", "the running executor satisfies the contract",
@@ -480,7 +480,7 @@ def phase10() -> None:
     import subprocess
 
     out = subprocess.run([sys.executable, "-m", "e2e.clients.run"],
-                         capture_output=True, text=True, env={**os.environ})
+                         capture_output=True, text=True, env={**os.environ}, check=False)
     tail = (out.stdout or out.stderr).strip().splitlines()
     summary = next((line for line in reversed(tail) if "client checks passed" in line), "")
     check("phase10", "every client-compatibility check passes",
@@ -494,7 +494,7 @@ def phase10() -> None:
     # The configuration a person pastes into a client is generated from the
     # running stack, so it cannot name a URL that stopped being true.
     gen = subprocess.run([sys.executable, "-m", "e2e.clients.configs", "--client", "vscode"],
-                         capture_output=True, text=True, env={**os.environ})
+                         capture_output=True, text=True, env={**os.environ}, check=False)
     check("phase10", "client configuration is generated from the running stack",
           gen.returncode == 0 and c.CFG.get("DAS_WAREHOUSE_MCP_PATH", "/warehouse/mcp") in gen.stdout,
           "vscode, claude-code, claude-desktop, cursor, sdk")
@@ -513,7 +513,7 @@ def phase11() -> None:
     import subprocess
 
     audit = subprocess.run([sys.executable, "scripts/check_prod_paths.py", "--strict", "--quiet"],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, check=False)
     offenders = [line.strip() for line in audit.stdout.splitlines() if line.strip().startswith("✗")]
     check("phase11", "no development-only path without a stated reason",
           audit.returncode == 0, offenders[0][:100] if offenders else "")
@@ -655,7 +655,7 @@ def phase13() -> None:
     # ranking, not merely in the magnitude.
     out = subprocess.run([sys.executable, "-m", "evals.runner", "--agent", "gold",
                           "--usecase", "support"], capture_output=True, text=True,
-                         env={**os.environ})
+                         env={**os.environ}, check=False)
     summary = next((line for line in reversed((out.stdout or "").splitlines())
                     if "passed (" in line), "")
     check("phase13", "the second use-case's reference answers score 100%",
@@ -676,9 +676,40 @@ def phase13() -> None:
           f"naive says {ranking['elapsed_minutes'][0]}")
 
 
+# ---------------------------------------------------------------- quality --
+def quality() -> None:
+    """The lint and type gates, asserted by RUNNING them.
+
+    A witness that only proves a config file exists is decoration —
+    `check_prod_paths` and `check-discipline.sh` set that precedent. These run
+    the same commands `make lint` runs, so a witness cannot pass while the gate
+    would fail.
+    """
+    import subprocess
+
+    def gate(name: str, argv: list[str], cwd: str | None = None) -> None:
+        out = subprocess.run(argv, capture_output=True, text=True, check=False, cwd=cwd)
+        tail = ((out.stdout or "") + (out.stderr or "")).strip().splitlines()
+        check("quality", name, out.returncode == 0,
+              (tail[-1] if tail else "")[:90])
+
+    gate("python lints clean (ruff)", [sys.executable, "-m", "ruff", "check", "."])
+    gate("python type-checks clean (ty)", [sys.executable, "-m", "ty", "check"])
+
+    # The Go toolchain is not in this container; the gate that owns it is
+    # `make lint`. What can be asserted here is that its configuration is
+    # present and names the checks the repo relies on — and phase9 already
+    # proves the Go tests run.
+    config = pathlib.Path(".golangci.yml")
+    text = config.read_text() if config.exists() else ""
+    check("quality", "go lint configuration is present and enables the checks that matter",
+          all(linter in text for linter in ("errcheck", "gosec", "noctx", "errorlint")),
+          f"{len(text.splitlines())} lines" if text else "missing")
+
+
 PHASES = {"phase1": phase1, "phase2": phase2, "phase3": phase3, "phase4": phase4,
           "phase5": phase5, "phase6": phase6, "phase7": phase7, "phase8": phase8,
-          "phase9": phase9, "phase10": phase10, "phase11": phase11, "phase12": phase12, "phase13": phase13}
+          "phase9": phase9, "phase10": phase10, "quality": quality, "phase11": phase11, "phase12": phase12, "phase13": phase13}
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()

@@ -105,7 +105,7 @@ func handleMCP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	body, err := io_ReadAll(r)
+	body, err := readLimitedBody(r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, rpcResponse{JSONRPC: "2.0",
 			Error: &rpcError{Code: -32700, Message: "invalid JSON"}})

@@ -24,6 +24,7 @@ import pathlib
 import statistics
 import sys
 import time
+from typing import Any
 
 from agent import agent as agent_mod
 from agent import identity
@@ -60,7 +61,7 @@ class GoldConnections:
 
     def __init__(self, default_source: str = ""):
         self._default = default_source or os.environ.get("DAS_DEFAULT_SOURCE", "")
-        self._open: dict[str, object] = {}
+        self._open: dict[str, Any] = {}
 
     def for_question(self, question: dict):
         name = question.get("source") or self._default
@@ -75,7 +76,7 @@ class GoldConnections:
 
     def close(self) -> None:
         for conn in self._open.values():
-            try:
+            try:  # noqa: SIM105 — the except body is documented in place
                 conn.close()
             except Exception:  # noqa: BLE001 — closing is best effort
                 pass

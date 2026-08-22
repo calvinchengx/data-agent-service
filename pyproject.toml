@@ -20,12 +20,61 @@ dependencies = [
 dev = [
     "mcp>=2.0.0",
     "pytest>=8",
-    "ruff>=0.6",
+    # Pinned to a floor rather than a version: the ruleset below is what makes
+    # runs reproducible, and an older ruff would not understand it.
+    "ruff>=0.16",
+    "ty>=0.0.73",
 ]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# The executor's modules are imported by name (`import sources`), not as a
+# package, because that is how they are laid out in its container.
+src = [".", "services/warehouse-query-py"]
+
+[tool.ruff.lint]
+# Chosen, not inherited: each family earns its place, and anything that would
+# fire constantly on deliberate style is left out rather than suppressed
+# line-by-line later.
+select = [
+    "E", "W", "F",      # pycodestyle + pyflakes: the baseline
+    "I",                # import order — mechanical, so let a tool own it
+    "UP",               # stop writing 3.8 in a 3.12 codebase
+    "B",                # bugbear: the mistakes that still run
+    "SIM", "C4", "PIE", # simplifications that make intent clearer
+    "RUF",              # ruff's own, incl. unused-noqa
+    "DTZ",              # naive datetimes — a real source of wrong answers
+    "ISC",              # implicit string concatenation, which hides typos
+    "PERF",             # loops that should not be loops
+    "BLE",              # blind excepts, which this codebase uses deliberately
+    "PLW",              # the pylint warnings worth having
+]
+ignore = [
+    "E501",    # line length is the formatter's job, and it disagrees at edges
+    "SIM108",  # a ternary is not always clearer than an if/else
+    # This codebase's prose uses en dashes and curly quotes on purpose. The
+    # ambiguous-character rules exist to catch homoglyphs in identifiers, and
+    # firing them on documentation would trade readable writing for nothing.
+    "RUF001", "RUF002", "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test doubles reach into the module under test on purpose.
+"tests/*" = ["BLE001", "B017", "SLF001"]
+# Datasets generate deterministic fixtures: naive datetimes are the point (the
+# warehouse column has no timezone), and the row tuples are positional.
+"seed/datasets/*" = ["DTZ001", "DTZ005"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent", "evals", "e2e", "load", "seed", "scripts"]
+
+[tool.ty.environment]
+# `sources`, `sqlguard`, `access` and friends live beside the executor rather
+# than in a package, so the checker needs to be told where to look — otherwise
+# every import of them reads as unresolved and the real diagnostics are buried.
+extra-paths = ["services/warehouse-query-py"]
+python-version = "3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

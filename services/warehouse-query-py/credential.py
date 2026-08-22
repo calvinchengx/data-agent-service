@@ -27,6 +27,7 @@ import os
 import ssl
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -83,7 +84,7 @@ class Settings:
     identity_header: str = ""
 
     @staticmethod
-    def from_env() -> "Settings":
+    def from_env() -> Settings:
         issuer = os.environ["DAS_ENTRA_ISSUER"].rstrip("/")
         authority = issuer[:-len("/v2.0")] if issuer.endswith("/v2.0") else issuer
         return Settings(

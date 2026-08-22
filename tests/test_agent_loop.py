@@ -8,7 +8,6 @@ SQL and tables the evals score are recovered from what the executor reported.
 from __future__ import annotations
 
 import json
-import sys
 import types
 
 import pytest

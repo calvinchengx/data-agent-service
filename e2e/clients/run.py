@@ -120,7 +120,7 @@ def protocol(tok: str) -> None:
 
     st, r = rpc("tools/list", {}, tok)
     r2 = r
-    st2, _, b2 = post([{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+    _st2, _, b2 = post([{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
                        {"jsonrpc": "2.0", "id": 2, "method": "ping", "params": {}}], tok)
     try:
         batch = json.loads(b2)
@@ -147,8 +147,8 @@ def protocol(tok: str) -> None:
         if "properties" not in schema:
             schema_problems.append(f"{tool.get('name')}: no properties")
         for key in tool:
-            if key.startswith("_") or key.startswith("x-"):
-                vendor_fields.append(f"{tool['name']}.{key}")
+            if key.startswith(("_", "x-")):
+                vendor_fields.append(f"{tool['name']}.{key}")  # noqa: PERF401 — a filtered append is clearer here
         if not (tool.get("description") or "").strip():
             schema_problems.append(f"{tool.get('name')}: no description")
     check("every tool schema is a plain JSON Schema object", not schema_problems,
@@ -242,33 +242,36 @@ def discovery(tok: str) -> None:
 # ------------------------------------------------------- reference client --
 async def _drive_reference_client(tok: str) -> dict:
     import httpx2
-    from mcp import ClientSession
-    from mcp.client.streamable_http import streamable_http_client
+    from mcp.client.streamable_http import streamable_http_client  # ty: ignore
+
+    # The SDK re-exports these at runtime in a way a checker cannot follow. The
+    # witness below is the stronger evidence: it drives a real session through
+    # them, so a broken import fails the check rather than a stub.
+    from mcp import ClientSession  # ty: ignore
 
     out: dict = {}
     # The SDK builds its own HTTP client; the bearer rides on it, which is
     # exactly how a real client carries a token it obtained interactively.
     http_client = httpx2.AsyncClient(headers={"Authorization": f"Bearer {tok}"},
                                      verify=False, timeout=60)
-    async with http_client:
-        async with streamable_http_client(URL, http_client=http_client) as streams:
-            read, write = streams[0], streams[1]
-            async with ClientSession(read, write) as session:
-                init = await session.initialize()
-                out["server"] = init.server_info.name
-                out["version"] = init.protocol_version
-                listed = await session.list_tools()
-                out["tools"] = [t.name for t in listed.tools]
-                result = await session.call_tool(
-                    "run_query",
-                    {"sql": "SELECT COUNT(*) AS n FROM dbo.fct_revenue_summary"})
-                out["is_error"] = bool(result.is_error)
-                out["text"] = "".join(getattr(b, "text", "") for b in result.content)[:200]
-                refused = await session.call_tool("run_query",
-                                                  {"sql": "DROP TABLE dbo.fct_sales"})
-                out["refused"] = bool(refused.is_error)
-                out["refusal_text"] = "".join(getattr(b, "text", "")
-                                              for b in refused.content)[:120]
+    async with http_client, streamable_http_client(URL, http_client=http_client) as streams:
+        read, write = streams[0], streams[1]
+        async with ClientSession(read, write) as session:
+            init = await session.initialize()
+            out["server"] = init.server_info.name
+            out["version"] = init.protocol_version
+            listed = await session.list_tools()
+            out["tools"] = [t.name for t in listed.tools]
+            result = await session.call_tool(
+                "run_query",
+                {"sql": "SELECT COUNT(*) AS n FROM dbo.fct_revenue_summary"})
+            out["is_error"] = bool(result.is_error)
+            out["text"] = "".join(getattr(b, "text", "") for b in result.content)[:200]
+            refused = await session.call_tool("run_query",
+                                              {"sql": "DROP TABLE dbo.fct_sales"})
+            out["refused"] = bool(refused.is_error)
+            out["refusal_text"] = "".join(getattr(b, "text", "")
+                                          for b in refused.content)[:120]
     return out
 
 
@@ -314,7 +317,7 @@ def reference_client_typescript(tok: str) -> None:
             # Off in production, where the gateway presents a real certificate.
             env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
         proc = subprocess.run(["node", staged.name, URL, tok], cwd=JS_HOME,
-                              capture_output=True, text=True, timeout=180, env=env)
+                              capture_output=True, text=True, timeout=180, env=env, check=False)
     except Exception as e:  # noqa: BLE001
         check("the TypeScript SDK completes a session", False, f"{type(e).__name__}: {e}"[:160])
         return

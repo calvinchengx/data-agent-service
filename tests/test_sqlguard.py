@@ -1,8 +1,11 @@
 """The guard's contract. Both executor implementations must satisfy it."""
-import sys, pathlib
+import pathlib
+import sys
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "services" / "warehouse-query-py"))
 import pytest
-from sqlguard import Policy, Denied, guard
+
+from sqlguard import Denied, Policy, guard
 
 P = Policy(dialect="tsql", allowed_schemas=("dbo",), max_rows=500, database="contoso_warehouse")
 

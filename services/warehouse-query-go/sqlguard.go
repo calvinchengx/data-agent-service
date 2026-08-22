@@ -281,7 +281,7 @@ func danglingQualifiedName(toks []token) string {
 
 func hasMore(toks []token, at int) bool {
 	for _, t := range toks[at+1:] {
-		if !(t.kind == tokPunct && t.text == ";") {
+		if t.kind != tokPunct || t.text != ";" {
 			return true
 		}
 	}

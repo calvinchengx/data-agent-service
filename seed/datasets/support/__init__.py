@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import datetime as dt
 import random
+from typing import NamedTuple
 
 ENGINE = "postgres"
 SCHEMA = "support"
@@ -75,13 +76,27 @@ KEYS = {
                        ("priority", "sla.priority")]},
 }
 
-# How each team's work behaves. `elapsed` scales wall-clock, `waits` is the
-# chance a ticket ever waits on the customer, `share` the fraction of elapsed
-# time it waits for. Billing is slow on the clock and fast on the work.
+class TeamProfile(NamedTuple):
+    """How a team's work behaves.
+
+    A named tuple rather than a dict because the three fields have three
+    different types — a scale, a probability and a range — and a dict of mixed
+    values makes every use of them unprovable.
+    """
+
+    elapsed: float          # scales wall-clock duration
+    waits: float            # chance a ticket ever waits on the customer
+    share: tuple[float, float]   # fraction of elapsed time it waits for
+
+
+# Billing is slow on the clock and fast on the work: its tickets sit waiting on
+# the customer far more (invoice number, PO, authorised signatory), so it looks
+# worst on elapsed time and best on resolution time. That reversal is what makes
+# the catalog's definition observable rather than merely arithmetic.
 TEAM_DELAY = {
-    "Frontline": {"elapsed": 1.00, "waits": 0.20, "share": (0.05, 0.20)},
-    "Technical": {"elapsed": 1.25, "waits": 0.45, "share": (0.15, 0.40)},
-    "Billing":   {"elapsed": 1.90, "waits": 0.85, "share": (0.55, 0.80)},
+    "Frontline": TeamProfile(elapsed=1.00, waits=0.20, share=(0.05, 0.20)),
+    "Technical": TeamProfile(elapsed=1.25, waits=0.45, share=(0.15, 0.40)),
+    "Billing": TeamProfile(elapsed=1.90, waits=0.85, share=(0.55, 0.80)),
 }
 
 PRIORITIES = [("P1", 60), ("P2", 240), ("P3", 1440)]
@@ -138,9 +153,9 @@ def generate(n_customers=120, n_agents=18, n_tickets=3000, seed=20260822) -> dic
         # bigger number — and a wrong ranking is far harder to wave away than a
         # wrong magnitude.
         profile = TEAM_DELAY[agent[2]]
-        elapsed = max(5, int(rnd.lognormvariate(5.2, 0.9) * profile["elapsed"]))
-        waiting = 0 if rnd.random() > profile["waits"] else min(
-            elapsed - 1, int(elapsed * rnd.uniform(*profile["share"])))
+        elapsed = max(5, int(rnd.lognormvariate(5.2, 0.9) * profile.elapsed))
+        waiting = 0 if rnd.random() > profile.waits else min(
+            elapsed - 1, int(elapsed * rnd.uniform(*profile.share)))
         status = rnd.choices(["resolved", "resolved", "resolved", "open"], [6, 3, 3, 2])[0]
         resolved = opened + dt.timedelta(minutes=elapsed) if status == "resolved" else None
         tickets.append((

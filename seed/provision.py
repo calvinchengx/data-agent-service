@@ -48,7 +48,7 @@ def provision(dataset: str, reset: bool) -> dict:
 
     # The warehouse database comes online asynchronously; retry the first connect.
     last = None
-    for attempt in range(12):
+    for _attempt in range(12):
         try:
             conn = c.tds_connect(server, database)
             break
@@ -91,28 +91,37 @@ def provision_postgres(dataset: str, ds, reset: bool) -> dict:
     Fabric and the reason the source entry carries a DSN instead of an item id.
     """
     import psycopg
+    from psycopg import sql
 
     src = c.source_by_name(ds.SOURCE_NAME)
     if not src.get("dsn"):
         raise SystemExit(f"source {ds.SOURCE_NAME} has no dsn; add one to DAS_SOURCES")
     data = ds.generate()
     with psycopg.connect(src["dsn"], connect_timeout=20) as conn, conn.cursor() as cur:
-        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {ds.SCHEMA}")
+        # Identifiers are composed rather than interpolated: the names come from
+        # a dataset module rather than from input, but composing costs nothing
+        # and keeps the shape that would be safe if that ever changed.
+        cur.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(ds.SCHEMA)))
         cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = %s",
                     (ds.SCHEMA,))
         existing = {r[0] for r in cur.fetchall()}
         for table in ds.COLUMNS:
             if table in existing and reset:
-                cur.execute(f"DROP TABLE {ds.SCHEMA}.{table} CASCADE")
+                cur.execute(sql.SQL("DROP TABLE {} CASCADE").format(
+                    sql.Identifier(ds.SCHEMA, table)))
                 existing.discard(table)
             if table in existing:
-                cur.execute(f"SELECT COUNT(*) FROM {ds.SCHEMA}.{table}")
-                c.log(f"{table}: exists with {cur.fetchone()[0]} rows (use --reset to reload)")
+                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(
+                    sql.Identifier(ds.SCHEMA, table)))
+                row = cur.fetchone()
+                count = row[0] if row else 0
+                c.log(f"{table}: exists with {count} rows (use --reset to reload)")
                 continue
-            cur.execute(ds.ddl(table))
+            cur.execute(sql.SQL(ds.ddl(table)))
             rows = data[table]
-            placeholders = ",".join(["%s"] * len(ds.COLUMNS[table]))
-            with cur.copy(f"COPY {ds.SCHEMA}.{table} FROM STDIN") as copy:
+            ",".join(["%s"] * len(ds.COLUMNS[table]))
+            with cur.copy(sql.SQL("COPY {} FROM STDIN").format(
+                    sql.Identifier(ds.SCHEMA, table))) as copy:
                 for row in rows:
                     copy.write_row(row)
             c.log(f"{table}: created, {len(rows)} rows")

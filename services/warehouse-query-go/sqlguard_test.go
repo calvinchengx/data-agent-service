@@ -27,20 +27,20 @@ func TestAllowed(t *testing.T) {
 
 func TestRefused(t *testing.T) {
 	cases := map[string]string{
-		"DROP TABLE dbo.fct_sales":                    "read-only",
-		"SELECT 1; DROP TABLE dbo.fct_sales":          "one statement",
-		"DELETE FROM dbo.fct_sales":                   "read-only",
-		"UPDATE dbo.fct_sales SET amount_usd = 0":     "read-only",
-		"INSERT INTO dbo.fct_sales VALUES (1)":        "read-only",
-		"SELECT * INTO dbo.copy FROM dbo.fct_sales":   "read-only",
-		"TRUNCATE TABLE dbo.fct_sales":                "read-only",
-		"EXEC xp_cmdshell 'dir'":                      "read-only",
-		"SELECT * FROM OPENROWSET('a','b','c')":       "not allowed",
-		"SELECT * FROM other.fct_sales":               "not queryable",
-		"SELECT * FROM otherdb.dbo.fct_sales":         "cross-database",
-		"SELECT * FROM fct_sales":                     "schema-qualified",
-		"SELECT 1":                                    "reads no table",
-		"":                                            "empty",
+		"DROP TABLE dbo.fct_sales":                  "read-only",
+		"SELECT 1; DROP TABLE dbo.fct_sales":        "one statement",
+		"DELETE FROM dbo.fct_sales":                 "read-only",
+		"UPDATE dbo.fct_sales SET amount_usd = 0":   "read-only",
+		"INSERT INTO dbo.fct_sales VALUES (1)":      "read-only",
+		"SELECT * INTO dbo.copy FROM dbo.fct_sales": "read-only",
+		"TRUNCATE TABLE dbo.fct_sales":              "read-only",
+		"EXEC xp_cmdshell 'dir'":                    "read-only",
+		"SELECT * FROM OPENROWSET('a','b','c')":     "not allowed",
+		"SELECT * FROM other.fct_sales":             "not queryable",
+		"SELECT * FROM otherdb.dbo.fct_sales":       "cross-database",
+		"SELECT * FROM fct_sales":                   "schema-qualified",
+		"SELECT 1":                                  "reads no table",
+		"":                                          "empty",
 	}
 	for sql, want := range cases {
 		_, err := Guard(sql, policy)

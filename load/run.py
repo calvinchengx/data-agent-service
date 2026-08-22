@@ -71,7 +71,7 @@ def compose(*args: str, quiet: bool = True) -> subprocess.CompletedProcess:
     envfile = os.environ.get("ENVFILE", ".env")
     cmd = ["docker", "compose", "--env-file", envfile, "--profile", "tools",
            "run", "--rm", "-T", "tools", *args]
-    proc = subprocess.run(cmd, cwd=REPO, capture_output=quiet, text=True)
+    proc = subprocess.run(cmd, cwd=REPO, capture_output=quiet, text=True, check=False)
     if proc.returncode != 0 and quiet:
         print((proc.stdout or "") + (proc.stderr or ""))
     return proc
@@ -101,6 +101,12 @@ def env_for(scenario: dict, args) -> dict[str, str]:
     return env
 
 
+def _int(value) -> int:
+    """A metric k6 did not emit is absent, not zero-shaped: treat a missing
+    or non-numeric counter as zero rather than adding it to a string."""
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
 def run_scenario(name: str, args) -> dict:
     scenario = SCENARIOS[name]
     env = env_for(scenario, args)
@@ -114,7 +120,7 @@ def run_scenario(name: str, args) -> dict:
 
     print(f"\n{name}: {scenario['what']}", flush=True)
     started = time.time()
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     took = time.time() - started
     if not summary.exists():
         print(proc.stdout[-2000:] or proc.stderr[-2000:])
@@ -152,7 +158,7 @@ def run_scenario(name: str, args) -> dict:
     mark = "\033[32mok\033[0m" if out["passed"] else "\033[31mFAIL\033[0m"
     print(f"  {mark}  {out['requests']} requests at {out['rps']}/s · "
           f"p50 {out['p50_ms']}ms · p95 {out['p95_ms']}ms · p99 {out['p99_ms']}ms"
-          + (f" · throttled {out.get('throttled')}/{out.get('served', 0) + (out.get('throttled') or 0)}"
+          + (f" · throttled {out.get('throttled')}/{_int(out.get('served')) + _int(out.get('throttled'))}"
              if "throttled" in out else ""), flush=True)
     if not out["passed"]:
         for line in (proc.stdout or "").splitlines():

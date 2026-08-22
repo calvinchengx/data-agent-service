@@ -25,7 +25,6 @@ import argparse
 import json
 import os
 import sys
-import urllib.parse
 
 REQUIRED = [
     ("DAS_ENTRA_ISSUER", "the tenant that issues tokens"),

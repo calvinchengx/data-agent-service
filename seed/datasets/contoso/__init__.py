@@ -119,7 +119,7 @@ def generate(n_customers=400, n_products=40, n_orders=6000, seed=20260822) -> di
         parties.append((f"PK-{c[0]}", c[2], c[0] if in_pos else None, in_pos, in_web,
                         c[3], c[4], c[5]))
     out["dim_party"] = parties
-    party_by_customer = {c[0]: p for c, p in zip(customers, parties)}
+    party_by_customer = {c[0]: p for c, p in zip(customers, parties, strict=False)}
 
     orders, sales = [], []
     for i in range(n_orders):
