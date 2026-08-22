@@ -258,8 +258,10 @@ data-agent-service/
 | Target | `kind` | New code | Per-user identity | Effort |
 |---|---|---|---|---|
 | Fabric Warehouse / Azure SQL / Synapse | `fabric` | MVP | Entra OBO → `database.windows.net` | done |
-| Azure Databricks SQL | `databricks` | ~150 lines adapter | Entra OBO → Databricks resource; Unity Catalog enforces | small |
+| Azure Databricks SQL | `databricks` | **done** — Statement Execution API | Entra OBO → Databricks resource; Unity Catalog enforces | done, **never run against a real workspace** |
 | Snowflake | `snowflake` | ~150 lines | Snowflake External OAuth trusting Entra (OBO) | small–medium |
+| Fabric Lakehouse | `fabric` | **none** — its SQL analytics endpoint is the same TDS surface | as Fabric Warehouse | untested here |
+| DuckDB / other engines | new `kind` | adapter + a `sqlglot` dialect the guard already reads | none — embedded, so `authz_tier=service` | small, weaker authz |
 | Azure DB for PostgreSQL | `postgres` | ~120 lines | Entra OBO → `ossrdbms-aad.database.windows.net` | small |
 | Non-Azure DB | same adapters | — | ❌ service credential from KV; `authz_tier=service` (APIM roles + OM scope only) | small, weaker authz |
 | REST API (OpenAPI) | `rest` | **done** — `httpguard` + `RestBackend` | Entra OBO → the API's resource, or a `keyvault:` credential at `authz_tier=service` | done (Python only) |

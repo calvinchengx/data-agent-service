@@ -11,9 +11,9 @@
 
 **Ask your data warehouse a question in English. Get an answer you can defend.**
 
-Natural-language questions over Fabric, PostgreSQL, Databricks and REST APIs — including
-retrieval services and enterprise knowledge bases — grounded in the glossary, metrics and
-schema held in OpenMetadata. Each query is authorized twice: role rules in the service,
+Natural-language questions over the warehouses, databases and APIs you already have —
+Fabric and Azure SQL, PostgreSQL, Databricks, and any REST service including a retrieval
+one — grounded in the glossary, metrics and schema held in OpenMetadata. Each query is authorized twice: role rules in the service,
 then the source itself under the caller's own identity. Any MCP client, unchanged against
 real Azure.
 
