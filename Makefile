@@ -151,15 +151,18 @@ eval: ## Accuracy evals per use case (Phase 7)
 load: ## Load tests (Phase 8) — k6 in a container on the stack's network
 	$(PY) -m load.run $(ARGS)
 
+# --force-recreate on every swap: `--build` alone rebuilds the image and then
+# leaves the OLD container running, so the swap silently does not happen and
+# the comparison measures one implementation twice.
 load-compare: ## Measure BOTH executors under the same load (Phase 9; writes load-py.json and load-go.json)
 	@echo "== python executor"
-	$(COMPOSE) up -d --build --wait warehouse-query
+	$(COMPOSE) up -d --build --force-recreate --wait warehouse-query
 	DAS_REPORT_STAMP=py $(PY) -m load.run --only query-direct --expect-executor py $(ARGS)
 	@echo "== swapping in the go executor (DAS_EXECUTOR=go); nothing above it changes"
-	DAS_EXECUTOR=go $(COMPOSE) up -d --build --wait warehouse-query
+	DAS_EXECUTOR=go $(COMPOSE) up -d --build --force-recreate --wait warehouse-query
 	DAS_REPORT_STAMP=go $(PY) -m load.run --only query-direct --expect-executor go $(ARGS)
 	@echo "== restoring the python executor"
-	$(COMPOSE) up -d --build --wait warehouse-query
+	$(COMPOSE) up -d --build --force-recreate --wait warehouse-query
 
 client-config: ## Paste-ready MCP client configuration (ARGS="--auth token")
 	$(TOOLS) python -m e2e.clients.configs $(ARGS)
