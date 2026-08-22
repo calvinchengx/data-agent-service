@@ -170,6 +170,23 @@ def test_a_file_reading_function_is_not_a_table(sql):
 
 @pytest.mark.parametrize(
     "sql",
+    ["SELECT TOP 100 PERCENT * FROM dbo.fct_sales", "SELECT TOP 50 PERCENT * FROM dbo.fct_sales"],
+)
+def test_a_percentage_is_not_a_row_ceiling(sql):
+    """`TOP 100 PERCENT` returns EVERY row. Reading its literal as a count had
+    the guard reporting a statement as capped at 100 while the engine returned
+    the whole table."""
+    with pytest.raises(Denied, match="proportion"):
+        guard(sql, P)
+
+
+def test_a_real_top_is_still_honoured_and_still_clamped():
+    assert guard("SELECT TOP 10 * FROM dbo.fct_sales", P).row_limit == 10
+    assert guard("SELECT TOP 100000 * FROM dbo.fct_sales", P).row_limit == P.max_rows
+
+
+@pytest.mark.parametrize(
+    "sql",
     [
         # APPLY over a FUNCTION produces a relation the schema check never
         # sees: there is no Table node in it at all.

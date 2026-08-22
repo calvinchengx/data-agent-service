@@ -253,6 +253,18 @@ def _apply_limit(root: exp.Expression, policy: Policy) -> tuple[exp.Expression, 
 
 
 def _int_of(limit_node) -> int | None:
+    """The caller's row limit, or None if there isn't one.
+
+    A PERCENTAGE is refused rather than read: `TOP 100 PERCENT` returns every
+    row, and taking its literal as a count made the guard believe a statement
+    was capped at 100 while the engine returned the whole table. Refused
+    rather than silently replaced, because a caller who asked for a proportion
+    and received 500 rows was answered a different question than they asked —
+    and the message tells the agent what to write instead.
+    """
+    options = limit_node.args.get("limit_options")
+    if options is not None and options.args.get("percent"):
+        raise Denied("TOP … PERCENT is a proportion, not a row ceiling; use TOP n")
     try:
         return int(limit_node.expression.name)
     except Exception:  # noqa: BLE001 — a non-literal limit is treated as absent

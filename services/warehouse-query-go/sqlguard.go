@@ -207,6 +207,18 @@ func Guard(sql string, p Policy) (*Verdict, error) {
 		return nil, denied("only SELECT is allowed; this endpoint is read-only (got %s)", first)
 	}
 
+	// 2b. TOP … PERCENT is a proportion, not a row ceiling: it returns every
+	//     row, and reading its literal as a count made this guard report a
+	//     statement as capped at 100 while the engine returned the whole
+	//     table. Refused rather than rewritten, because a caller who asked
+	//     for a proportion and got 500 rows was answered a different question
+	//     -- and the message says what to write instead.
+	for i, t := range toks {
+		if t.up == "TOP" && i+2 < len(toks) && toks[i+1].kind == tokNumber && toks[i+2].up == "PERCENT" {
+			return nil, denied("TOP … PERCENT is a proportion, not a row ceiling; use TOP n")
+		}
+	}
+
 	// 3. no forbidden construct anywhere, and no SELECT … INTO.
 	for i, t := range toks {
 		if t.kind != tokWord || t.quoted {

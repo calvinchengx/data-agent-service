@@ -109,6 +109,9 @@ REFUSED = {
     # APPLY over a function: a relation with no Table node in it, so the
     # schema check never saw it. Both implementations allowed it.
     "SELECT * FROM dbo.fct_sales CROSS APPLY other.f(1)": "",
+    # A proportion is not a ceiling: `TOP 100 PERCENT` returns every row, and
+    # both implementations read its literal as a row count.
+    "SELECT TOP 100 PERCENT * FROM dbo.fct_sales": "proportion",
     "SELECT * FROM other_schema.secrets": "not queryable",
     "SELECT * FROM fct_sales": "schema-qualified",
     "SELECT 1": "reads no table",
