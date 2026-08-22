@@ -39,10 +39,24 @@ REPORTS = ROOT / "reports"
 DEFAULT_USER = os.environ.get("DAS_USER") or "carol@entraemulator.dev"
 
 
+# The question set each run actually READ, keyed by usecase. Recorded at load
+# time rather than re-read when the report is written: an ablation runs twice
+# over minutes, and a question added between the halves would otherwise be
+# invisible -- both halves would carry the same hash, taken from whichever
+# version of the file happened to exist at the end. That is not hypothetical.
+# It happened: a run compared 14 questions against 18 and reported one hash for
+# both, so the number whose whole job is to make two scorecards comparable
+# could not see that they were not.
+_QUESTIONS_READ: dict[str, tuple[str, int]] = {}
+
+
 def load_questions(usecase: str, tier: str | None) -> list[dict]:
     path = ROOT / "usecases" / usecase / "questions.jsonl"
-    items = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    return [q for q in items if not tier or q["tier"] == tier]
+    raw = path.read_bytes()
+    items = [json.loads(line) for line in raw.decode().splitlines() if line.strip()]
+    selected = [q for q in items if not tier or q["tier"] == tier]
+    _QUESTIONS_READ[usecase] = (hashlib.sha256(raw).hexdigest()[:12], len(selected))
+    return selected
 
 
 def gold_rows(question: dict, conn) -> list[list] | None:
@@ -321,7 +335,8 @@ def summarise(results: list[Result]) -> dict:
 
 def fingerprint(usecase: str, model: str, effort: str, om: bool, agent_kind: str) -> dict:
     prompt = (pathlib.Path(agent_mod.HERE) / "prompt.md").read_bytes()
-    questions = (ROOT / "usecases" / usecase / "questions.jsonl").read_bytes()
+    # What THIS run read, not what the file says now.
+    questions_sha, questions_n = _QUESTIONS_READ.get(usecase, ("unread", 0))
     # Skills change the agent's behaviour, so a scorecard that does not name
     # them cannot be compared with another one. Hashes, not names: a skill
     # edited in place is a different agent. The gold baseline runs reference
@@ -334,7 +349,10 @@ def fingerprint(usecase: str, model: str, effort: str, om: bool, agent_kind: str
         "effort": effort,
         "catalog": om,
         "prompt_sha256": hashlib.sha256(prompt).hexdigest()[:12],
-        "questions_sha256": hashlib.sha256(questions).hexdigest()[:12],
+        "questions_sha256": questions_sha,
+        # The count too: two different sets can only be told apart by a hash if
+        # someone compares hashes, and a differing count is legible at a glance.
+        "questions_n": questions_n,
         "skills": skills_mod.fingerprint(loaded),
     }
 
