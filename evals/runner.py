@@ -110,7 +110,9 @@ class Result:
             )
             if v is not None
         ]
-        return all(checks)
+        # `all([])` is True, so a result with nothing scored would otherwise
+        # count as a pass. A decline is exactly that case.
+        return bool(checks) and all(checks) and not self.score.declined
 
 
 class GoldAgent:
@@ -167,8 +169,11 @@ def evaluate(
     expect = question.get("expect", "answer")
     s = scoring.Score()
     ok, why = scoring.behaved(expect, answer.text, answer)
-    s.behaviour = ok
-    if not ok:
+    # `None` is the third outcome, not a missing one: the client declined to
+    # attempt the question. Left out of `behaviour` so it scores as neither.
+    s.declined = ok is None
+    s.behaviour = None if ok is None else ok
+    if ok is not True:
         s.detail = why
 
     if expect != "answer":
@@ -265,10 +270,20 @@ def summarise(results: list[Result]) -> dict:
     by_tier: dict[str, dict] = {}
     for tier in sorted({r.question["tier"] for r in results}):
         subset = [r for r in results if r.question["tier"] == tier]
+        # A declined question was not scored, so it belongs in neither half of
+        # a pass rate. Reported alongside it instead, because a tier that is
+        # mostly declines is a fact about the client and needs to be visible
+        # rather than averaged away.
+        scored = [r for r in subset if not r.score.declined]
+        declined = len(subset) - len(scored)
         by_tier[tier] = {
             "n": len(subset),
-            "passed": sum(1 for r in subset if r.passed),
-            "pass_rate": round(100 * sum(1 for r in subset if r.passed) / len(subset), 1),
+            "scored": len(scored),
+            "declined": declined,
+            "passed": sum(1 for r in scored if r.passed),
+            "pass_rate": (
+                round(100 * sum(1 for r in scored if r.passed) / len(scored), 1) if scored else None
+            ),
         }
     return {
         "n": len(results),

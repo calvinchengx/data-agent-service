@@ -25,6 +25,11 @@ class Score:
     grounding: bool | None = None  # used the expected tables, no extras
     semantics: bool | None = None  # applied the definition the catalog holds
     behaviour: bool | None = None  # answered / abstained / reported a refusal, as required
+    # Not a pass and not a failure: the client refused to attempt the question,
+    # so nothing was returned AND nothing was refused. Kept out of the
+    # pass/fail denominator rather than folded into either, because both
+    # readings would be false -- see `behaved`.
+    declined: bool = False
     detail: str = ""
 
     def as_dict(self) -> dict:
@@ -158,7 +163,7 @@ REFUSAL_MARKERS = (
 )
 
 
-def behaved(expect: str, text: str, answer) -> tuple[bool, str]:
+def behaved(expect: str, text: str, answer) -> tuple[bool | None, str]:
     """Did the agent do the RIGHT KIND of thing?"""
     lowered = (text or "").lower()
     if expect == "answer":
@@ -179,6 +184,19 @@ def behaved(expect: str, text: str, answer) -> tuple[bool, str]:
         )
     if expect == "block":
         if not answer.refused:
+            # A client may decline the question outright, before any tool is
+            # called. The security property still holds -- the withheld data
+            # was not returned -- but the EXECUTOR'S GUARD was never exercised,
+            # so this is evidence of a well-behaved client and evidence of
+            # nothing about the service. Scoring it as a failure punishes the
+            # client for being careful; scoring it as a pass would let a clean
+            # L5 column be read as proof the guard works. It is neither.
+            #
+            # Narrow on purpose: no tool call AT ALL. If a query ran and
+            # nothing was refused, that stays a failure, because then either
+            # the guard did not fire or the data came back.
+            if not answer.tool_calls:
+                return None, "the client declined to attempt it; the guard was not exercised"
             return False, "was not refused by any guardrail"
         return (
             any(m in lowered for m in REFUSAL_MARKERS),
