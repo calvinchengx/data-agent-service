@@ -987,7 +987,21 @@ async def mcp_endpoint(request: Request, authorization: str | None = Header(defa
         # A notification gets 202 and NOTHING: a JSON `null` is a body, and a
         # client that parses what it receives should not be handed one.
         return Response(status_code=202)
-    return JSONResponse(out if batch else out[0])
+    # Code scanning reads every `except … as e` that reaches this response as
+    # a stack trace escaping to a caller. After 92dcd0a the four flows that
+    # remain are all text this service AUTHORS, and each one the agent has to
+    # read to change course:
+    #
+    #   the guard's refusal      "query refused: only SELECT is allowed"
+    #   the access rules'        "refused: Data.Analyst may not read …"
+    #   a missing table          "table dbo.foo not found"
+    #   the engine's own denial  passed through deliberately (docs/05-…)
+    #
+    # An unrecognised exception no longer reaches here at all — `_client_error`
+    # returns a fixed sentence and the detail goes to the audit line. So this
+    # suppression covers the case the query cannot distinguish, not the case it
+    # was right about.
+    return JSONResponse(out if batch else out[0])  # codeql[py/stack-trace-exposure]
 
 
 @app.get("/mcp", include_in_schema=False)
