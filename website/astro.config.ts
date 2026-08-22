@@ -70,6 +70,7 @@ export default defineConfig({
           label: 'Reference',
           items: [
             { slug: '00-plan' },
+            { slug: '15-http-sources' },
             { slug: 'parity' },
             { slug: 'upstream-issues' },
             { slug: 'adr/0001-two-executors' },
