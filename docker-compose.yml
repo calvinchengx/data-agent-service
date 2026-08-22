@@ -260,6 +260,14 @@ services:
       context: .
       dockerfile: docker/tools/Dockerfile
     env_file: ${ENVFILE:-.env}
+    # The same managed identity contract the executor has, for the same
+    # reason: a harness resolves `keyvault:` settings with its own identity
+    # rather than reading a secret someone wrote to disk. In Azure this is a
+    # container app with a user-assigned identity, so the harness holds no
+    # credential there either.
+    environment:
+      IDENTITY_ENDPOINT: "https://entra-emulator:8443/msi/token"
+      IDENTITY_HEADER: "${DAS_MI_HEADER:-managed-identity-secret}"
     volumes:
       - ./:/app:rw
       - tools-venv:/app/.venv

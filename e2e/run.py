@@ -1777,11 +1777,166 @@ def quality() -> None:
         else ", ".join(f"{k} {v}%" for k, v in sorted(recorded.items())),
     )
 
+    # A settings file names credentials; it does not hold them. Code scanning
+    # found the APIM subscription key written into .env in clear text by the
+    # seed, and the fix was a `keyvault:` reference resolved with the same
+    # managed identity the executor uses.
+    #
+    # Scoped to what the SEED writes, deliberately. Some hand-authored
+    # settings are still literal -- POSTGRES_PASSWORD is read by the database
+    # container itself, which has no identity and no vault to read from, so a
+    # reference there is a chicken-and-egg rather than an improvement. A
+    # witness that claimed otherwise would be asserting a property this repo
+    # does not have.
+    written_by_seed = ("DAS_OM_SUBSCRIPTION_KEY",)
+    env_file = pathlib.Path(".env")
+    literal = []
+    if env_file.exists():
+        values = dict(
+            line.split("=", 1)
+            for line in env_file.read_text().splitlines()
+            if "=" in line and not line.startswith("#")
+        )
+        literal = [
+            name
+            for name in written_by_seed
+            if values.get(name, "").strip() and not values[name].strip().startswith("keyvault:")
+        ]
+    check(
+        "quality",
+        "a credential the seed writes reaches the settings file as a reference, not a value",
+        not literal,
+        ", ".join(literal) if literal else f"{len(written_by_seed)} checked, all references",
+    )
+
     check(
         "quality",
         "go lint configuration is present and enables the checks that matter",
         all(linter in text for linter in ("errcheck", "gosec", "noctx", "errorlint")),
         f"{len(text.splitlines())} lines" if text else "missing",
+    )
+
+
+def phase17() -> None:
+    """A REST source: a third engine that is not an engine at all.
+
+    Phase 13 asked whether the design generalised across SQL engines. This
+    asks the harder version — whether it generalises to a source with no SQL,
+    no tables and no parse tree — and the answer has to be visible in the same
+    four places as any other source: the catalog, the guard, the access rules
+    and the audit.
+    """
+    from agent import identity
+
+    sources = {s["name"]: s for s in c.sources()}
+    http = {
+        n: s for n, s in sources.items() if s.get("surface") == "http" or s.get("kind") == "rest"
+    }
+    check(
+        "phase17",
+        "an http source is configured alongside the SQL ones",
+        bool(http),
+        ", ".join(f"{n} ({s.get('kind')})" for n, s in sorted(http.items())) or "none",
+    )
+    if not http:
+        return
+    name, src = sorted(http.items())[0]
+    carol = identity.token_for("carol@entraemulator.dev")
+
+    def tool(tool_name, args, token=carol) -> str:
+        """The text an MCP client would see — a refusal arrives as a tool error
+        with a reason in it, not as a transport failure, so both are strings."""
+        _, body = rpc("tools/call", {"name": tool_name, "arguments": args}, token)
+        _, text = tool_result(body)
+        return text
+
+    # 1. The surface is declared, so a client knows which verbs apply.
+    listed = tool("list_sources", {})
+    declared = {s["name"]: s.get("surface") for s in json.loads(listed).get("sources", [])}
+    check(
+        "phase17",
+        "every source declares its surface",
+        declared.get(name) == "http" and "sql" in declared.values(),
+        ", ".join(f"{n}={v}" for n, v in sorted(declared.items())),
+    )
+
+    # 2. The operations the guard will permit, and only those.
+    ops_raw = tool("list_operations", {"source": name})
+    operations = json.loads(ops_raw).get("operations", [])
+    collections = {o["collection"] for o in operations}
+    allowed = set(src.get("collections") or ())
+    check(
+        "phase17",
+        "only the allowed collections are listed",
+        bool(operations) and collections <= allowed,
+        f"{len(operations)} operations in {sorted(collections)}",
+    )
+
+    # 3. The catalog knows the same API, joined by om_service_fqn.
+    service = src.get("om_service_fqn", "")
+    kv = c.CFG["DAS_KEYVAULT_URL"].rstrip("/")
+    _, _, secret = c.http(
+        "GET",
+        f"{kv}/secrets/om-bot-das-reader?api-version=7.5",
+        headers=c.bearer("https://vault.azure.net"),
+    )
+    bot = {"Authorization": "Bearer " + json.loads(secret)["value"]}
+    _, _, raw = c.http(
+        "GET", f"{c.OM}/api/v1/apiEndpoints?limit=200&fields=apiCollection", headers=bot
+    )
+    catalog = json.loads(raw)
+    registered = {
+        e.get("displayName") or e["name"]
+        for e in catalog.get("data", [])
+        if str((e.get("apiCollection") or {}).get("fullyQualifiedName", "")).startswith(service)
+    }
+    named = {o["operation"] for o in operations}
+    check(
+        "phase17",
+        "the catalog describes the operations the executor serves",
+        bool(registered) and named <= registered,
+        f"{len(registered)} registered, {len(named)} served, {len(named - registered)} unmatched",
+    )
+
+    # 4. A real call, through the guard, with the ceiling applied.
+    first = next((o for o in operations if o["operation"] == "listGlossaries"), operations[0])
+    called = tool(
+        "call_operation",
+        {"source": name, "operation": first["operation"], "arguments": {"limit": 3}},
+    )
+    payload = json.loads(called)
+    check(
+        "phase17",
+        "an operation answers through the same gateway and guard",
+        payload.get("itemCount", 0) >= 1 and "url" in payload,
+        f"{first['operation']} -> {payload.get('url', '')[:70]}",
+    )
+
+    # 5. The refusals. Each names its rule, because the agent reads the reason.
+    refusals = {
+        "a collection outside the allow-list": ("listUsers", {}),
+        "an undeclared parameter": (first["operation"], {"apiKey": "x"}),
+        "a parameter of the wrong type": (first["operation"], {"limit": "lots"}),
+    }
+    for what, (operation, args) in refusals.items():
+        out = tool("call_operation", {"source": name, "operation": operation, "arguments": args})
+        check("phase17", f"refused: {what}", "refused" in out.lower(), out[:80])
+
+    # 6. A write operation is not merely refused — it was never offered.
+    check(
+        "phase17",
+        "no state-changing operation is exposed at all",
+        all(o["method"] in ("GET", "HEAD") for o in operations),
+        f"methods offered: {sorted({o['method'] for o in operations})}",
+    )
+
+    # 7. SQL against an http source says so, rather than failing as bad SQL.
+    wrong = tool("run_query", {"source": name, "sql": "SELECT 1"})
+    check(
+        "phase17",
+        "a SQL query against an http source is told which surface to use",
+        "http source" in wrong.lower() or "call_operation" in wrong.lower(),
+        wrong[:90],
     )
 
 
@@ -1804,6 +1959,7 @@ PHASES = {
     "phase14": phase14,
     "phase15": phase15,
     "phase16": phase16,
+    "phase17": phase17,
 }
 
 MANIFEST = pathlib.Path(__file__).resolve().parents[1] / "docs" / "witnesses.json"

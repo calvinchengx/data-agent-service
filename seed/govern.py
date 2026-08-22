@@ -461,19 +461,9 @@ def ensure_reader_bot(name: str) -> str:
 
 
 def store_secret(name: str, value: str) -> None:
-    kv = c.CFG.get("DAS_KEYVAULT_URL", "").rstrip("/")
-    if not kv:
-        c.log(f"secret {name}: no DAS_KEYVAULT_URL, skipped")
-        return
-    st, _, body = c.http(
-        "PUT",
-        f"{kv}/secrets/{name}?api-version=7.5",
-        headers=c.bearer("https://vault.azure.net"),
-        json_body={"value": value},
-    )
-    if st not in (200, 201):
-        raise SystemExit(f"key vault PUT {name}: {st} {body[:300]}")
-    c.log(f"secret {name}: stored in Key Vault")
+    """Kept as a name here; the implementation moved to seed.common so the
+    apim seed could use it without importing this module."""
+    c.store_secret(name, value)
 
 
 if __name__ == "__main__":

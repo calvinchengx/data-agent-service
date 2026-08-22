@@ -306,6 +306,67 @@ def load_state() -> dict:
     return json.loads(STATE.read_text()) if STATE.exists() else {}
 
 
+# Settings whose NAME contains a secret-ish word but whose VALUE is not one.
+# Written out rather than pattern-matched around: each is a deliberate
+# judgement, and a list you can read is the only kind anyone re-checks.
+NOT_SECRETS = frozenset(
+    {
+        "AZURE_TOKEN_CREDENTIALS",  # which credential TYPE to use
+        "DAS_EXECUTOR_SECRET_NAME",  # the name of a secret, which is the point
+        "DAS_KEYVAULT_URL",  # a URL that happens to contain "_KEY"
+        "DAS_LLM_TOKENS_PER_MINUTE",  # a quota
+        "DAS_LLM_CALLS_PER_MINUTE",  # a quota
+        "DAS_PROMOTE_KEY_SECRET",  # named for the key it derives, set by hand
+    }
+)
+
+
+def looks_like_a_secret(name: str) -> bool:
+    """Would a value under this name be a credential?
+
+    Substring matching with an exemption list, not an exact list of known
+    secrets: a setting nobody has added yet should be caught by default, and
+    the cost of that is naming the exceptions.
+    """
+    if name in NOT_SECRETS:
+        return False
+    return any(word in name.upper() for word in ("SECRET", "PASSWORD", "_KEY", "TOKEN"))
+
+
+def setting(name: str, default: str = "") -> str:
+    """A configured value, with `keyvault:` references resolved.
+
+    Every harness reads its settings through here rather than off CFG
+    directly, so a reference works wherever a literal did. See vaultref.py for
+    why the reference exists at all.
+    """
+    import vaultref
+
+    return vaultref.resolve(CFG.get(name, default))
+
+
+def store_secret(name: str, value: str) -> None:
+    """Put a secret in Key Vault and return nothing.
+
+    Nothing, deliberately: a caller that wanted the value back would be about
+    to write it somewhere, and where it gets written is the thing this exists
+    to stop.
+    """
+    kv = CFG.get("DAS_KEYVAULT_URL", "").rstrip("/")
+    if not kv:
+        log(f"secret {name}: no DAS_KEYVAULT_URL, skipped")
+        return
+    st, _hd, body = http(
+        "PUT",
+        f"{kv}/secrets/{name}?api-version=7.5",
+        headers=bearer("https://vault.azure.net"),
+        json_body={"value": value},
+    )
+    if st not in (200, 201):
+        raise SystemExit(f"key vault PUT {name}: {st} {body[:300]}")
+    log(f"secret {name}: stored in Key Vault")
+
+
 def write_env(**values: str) -> None:
     """Persist ids the seed CREATED back into the env file this run loaded.
 
@@ -334,6 +395,17 @@ def write_env(**values: str) -> None:
             lines[i] = f"{key}={remaining.pop(key)}"
     for key, value in remaining.items():
         lines.append(f"{key}={value}")
+    # A settings file names credentials; it does not hold them. Anything that
+    # looks like a secret must arrive as a `keyvault:` reference, so the value
+    # stays in the vault and only its NAME reaches disk. Refusing here rather
+    # than trusting every caller is what makes that true of callers nobody has
+    # written yet.
+    for key, value in values.items():
+        if looks_like_a_secret(key) and value and not value.startswith("keyvault:"):
+            raise SystemExit(
+                f"write_env({key}=…) would put a secret in {target.name} in clear text. "
+                f"Store it with store_secret() and write keyvault:<name> instead."
+            )
     target.write_text("\n".join(lines) + "\n")
     # This file holds a client secret and a gateway subscription key. It is
     # gitignored, and on a shared machine that is not the same as private --

@@ -100,7 +100,7 @@ def mcp_config(token: str, *, om: bool) -> dict:
     }
     if om:
         headers = {"Authorization": "Bearer " + token}
-        key = _setting("DAS_OM_SUBSCRIPTION_KEY")
+        key = c.setting("DAS_OM_SUBSCRIPTION_KEY") or _setting("DAS_OM_SUBSCRIPTION_KEY")
         if key:
             headers["Ocp-Apim-Subscription-Key"] = key
         servers["catalog"] = {

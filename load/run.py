@@ -110,7 +110,10 @@ def set_rate_limit(calls: int) -> None:
 def env_for(scenario: dict, args) -> dict[str, str]:
     from seed import common as c
 
-    env = {k: c.CFG[k] for k in PASSTHROUGH if k in c.CFG}
+    # Resolved rather than copied: k6 runs in its own container with no
+    # identity, so a `keyvault:` reference would reach it unresolved and be
+    # sent as a credential.
+    env = {k: c.setting(k) for k in PASSTHROUGH if k in c.CFG}
     env["DAS_AUTHORITY"] = c.AUTHORITY
     env["DAS_LOAD_USER"] = args.user
     # k6 cannot sign a person in. Where the tenant forbids the password grant,

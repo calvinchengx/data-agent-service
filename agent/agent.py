@@ -105,7 +105,13 @@ def build_toolbox(token: str, *, om: bool = True) -> Toolbox:
     ]
     if om:
         extra = {}
-        key = os.environ.get("DAS_OM_SUBSCRIPTION_KEY", "")
+        # A `keyvault:` reference where this process has an identity to
+        # resolve it with; a literal where it does not -- a third-party MCP
+        # client on someone's laptop has the key pasted into its own config
+        # and never had an identity. Both are real deployments.
+        import vaultref
+
+        key = vaultref.resolve(os.environ.get("DAS_OM_SUBSCRIPTION_KEY", ""))
         if key:
             extra["Ocp-Apim-Subscription-Key"] = key
         servers.append(

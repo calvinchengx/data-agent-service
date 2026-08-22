@@ -204,6 +204,11 @@ def om_bot_token() -> str:
     return json.loads(b)["value"]
 
 
+# The name the subscription key is stored under, and therefore the only part
+# of it that reaches a settings file.
+OM_KEY_SECRET = "das-om-subscription-key"
+
+
 def om_subscription_key() -> str:
     """A subscription for the OpenMetadata route, and its key. Standard APIM:
     the key is only readable through listSecrets, never echoed on create."""
@@ -476,8 +481,11 @@ def main() -> dict:
     c.save_state(apim=out)
     subscription_key = out.get("om_subscription_key")
     if isinstance(subscription_key, str) and subscription_key:
-        # The agent and the client-config generator both send this header.
-        c.write_env(DAS_OM_SUBSCRIPTION_KEY=subscription_key)
+        # The agent and the client-config generator both send this header, so
+        # the value has to be reachable -- but it does not have to be on disk.
+        # It goes to the vault, and the settings file gets its NAME.
+        c.store_secret(OM_KEY_SECRET, subscription_key)
+        c.write_env(DAS_OM_SUBSCRIPTION_KEY=f"keyvault:{OM_KEY_SECRET}")
     return out
 
 

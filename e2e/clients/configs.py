@@ -31,7 +31,11 @@ GW = c.CFG["DAS_APIM_BASE"].rstrip("/")
 PUBLIC = c.CFG.get("DAS_PUBLIC_BASE_URL", GW).rstrip("/")
 WAREHOUSE = PUBLIC + c.CFG.get("DAS_WAREHOUSE_MCP_PATH", "/warehouse/mcp")
 CATALOG = PUBLIC + c.CFG.get("DAS_OM_MCP_PATH", "/om/mcp")
-OM_KEY = c.CFG.get("DAS_OM_SUBSCRIPTION_KEY", "")
+# Resolved, not read: the setting holds a `keyvault:` reference, and a
+# generated client config has to carry the real key -- a person pastes it into
+# Claude Desktop or Cursor, which have no identity to resolve one with. This is
+# the boundary where a literal is unavoidable, and it is explicit.
+OM_KEY = c.setting("DAS_OM_SUBSCRIPTION_KEY")
 CLIENT_ID = c.CFG.get("DAS_AGENT_CLIENT_ID", "")
 AUDIENCE = c.CFG["DAS_AGENT_AUDIENCE"]
 SCOPE = f"{AUDIENCE}/{c.CFG.get('DAS_REQUIRED_SCOPE', 'access_as_user')}"
