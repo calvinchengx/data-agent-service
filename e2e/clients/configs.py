@@ -75,6 +75,20 @@ def json_block(auth: str, token: str, key: str = "mcpServers") -> str:
     return json.dumps({key: servers(auth, token)}, indent=2)
 
 
+# Three personas rather than one, because the interesting behaviour is the
+# DIFFERENCE between them, and a single connection can only ever show one side
+# of it. Named by the person so a conversation can say which to use.
+PERSONAS = (
+    (
+        "alice",
+        "alice@entraemulator.dev",
+        "Data.Analyst — personal-data columns withheld by the rules",
+    ),
+    ("carol", "carol@entraemulator.dev", "Data.Finance — reads the columns the analyst cannot"),
+    ("bob", "bob@entraemulator.dev", "no role on the source — refused by the ENGINE, not by us"),
+)
+
+
 def desktop_bridge(_auth: str, _token: str) -> str:
     """Claude Desktop, via the stdio bridge.
 
@@ -93,40 +107,30 @@ def desktop_bridge(_auth: str, _token: str) -> str:
     # renders inside the tools container, where the repo is /app. The Makefile
     # passes the real one; without it the output would be confidently wrong.
     root = os.environ.get("DAS_HOST_REPO") or str(pathlib.Path(__file__).resolve().parents[2])
-    root = pathlib.Path(root)
 
-    def entry(server: str) -> dict:
-        return {
-            "command": "docker",
-            "args": [
-                "compose",
-                "--project-directory",
-                str(root),
-                "--env-file",
-                str(root / ".env"),
-                "--profile",
-                "tools",
-                "run",
-                "--rm",
-                "-T",
-                "tools",
-                "python",
-                "-m",
-                "e2e.clients.stdio_bridge",
-                "--server",
-                server,
-            ],
-        }
+    def entry(server: str, upn: str = "") -> dict:
+        args = [
+            "compose",
+            "--project-directory",
+            root,
+            "--env-file",
+            str(pathlib.Path(root) / ".env"),
+            "--profile",
+            "tools",
+            "run",
+            "--rm",
+            "-T",
+        ]
+        if upn:
+            args += ["-e", f"DAS_BRIDGE_USER={upn}"]
+        args += ["tools", "python", "-m", "e2e.clients.stdio_bridge", "--server", server]
+        return {"command": "docker", "args": args}
 
-    return json.dumps(
-        {
-            "mcpServers": {
-                "warehouse": entry("warehouse"),
-                "catalog": entry("catalog"),
-            }
-        },
-        indent=2,
-    )
+    servers = {f"warehouse-{name}": entry("warehouse", upn) for name, upn, _ in PERSONAS}
+    # One catalog connection: the business context is the same whoever is
+    # asking. Only the DATA is per-person, which is the point.
+    servers["catalog"] = entry("catalog")
+    return json.dumps({"mcpServers": servers}, indent=2)
 
 
 CLIENTS = {
