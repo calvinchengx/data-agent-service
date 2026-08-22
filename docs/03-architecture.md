@@ -27,6 +27,31 @@ MCP server. Owning the tool surface additionally means the tool descriptions
 say what an analyst needs ("describe before you query"), which is what the
 model reads.
 
+## Two surfaces, one contract
+
+A source declares whether it speaks SQL or HTTP, and `list_sources` reports it
+so a client knows which verbs apply.
+
+| | SQL source | HTTP source |
+|---|---|---|
+| Discovery | `list_tables`, `describe_table` | `list_operations`, `describe_operation` |
+| Execution | `run_query` | `call_operation` |
+| The allow-list | schemas, and the parse tree | the OpenAPI document |
+| Access rules | `schema.table.column` | `collection.operation.field` — the same matcher |
+
+`call_operation` is a second surface rather than an overload of `run_query`.
+Passing a JSON body pretending to be a statement would keep the contract's
+shape and lose its meaning.
+
+**An enterprise knowledge base is an HTTP source.** Most retrieval APIs are
+`POST /search` with a JSON body, which the guard admits only when the spec
+marks the operation `x-read-only` — a POST that changes state and a POST that
+runs a search are indistinguishable otherwise. What that buys is the property
+enterprise retrieval usually cannot state about itself: the source says whether
+it applies the *caller's* document permissions or a service identity's, that
+answer is recorded in every audit line, and a field a role may not read is
+stripped from retrieved documents exactly as it is from warehouse columns.
+
 ## Where each guardrail lives
 
 | Guardrail | Enforced in | Why there |
@@ -34,6 +59,7 @@ model reads.
 | Rate limit per caller | APIM policy | the chokepoint every call passes |
 | Token validation | executor (and APIM in production) | cannot be bypassed by reaching the service directly |
 | Read-only SQL, schema scope, row ceiling | `sqlguard.py`, in the executor process | a guard beside the cursor cannot be routed around |
+| Safe methods, declared parameters, item and body ceilings | `httpguard.py`, same process | the HTTP counterpart; an API call has no parse tree, so every property was translated rather than ported |
 | Who may see which rows | the data source itself, via the OBO token | the database is the authority, not our code |
 | Catalog writes | OpenMetadata's own policy on the read-only bot | the catalog decides what its bot may do |
 

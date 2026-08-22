@@ -154,7 +154,7 @@ footer a{text-decoration:none}
       <div class="stat"><b>115</b><span>end-to-end witnesses</span></div>
       <div class="stat"><b>28</b><span>contract checks, both executors</span></div>
       <div class="stat"><b>44</b><span>eval questions, 5 tiers</span></div>
-      <div class="stat"><b>3</b><span>source adapters shipped</span></div>
+      <div class="stat"><b>4</b><span>source adapters shipped</span></div>
       <div class="stat"><b>+1.6<small>ms</small></b><span>gateway cost at p95</span></div>
     </div>
   </div>
@@ -232,9 +232,9 @@ footer a{text-decoration:none}
         <text class="lbl" x="690" y="238" text-anchor="middle">Databricks</text>
         <text class="sub" x="690" y="256" text-anchor="middle">Statement Execution</text>
 
-        <rect class="bx" x="600" y="292" width="180" height="60" rx="10" stroke-dasharray="5 4"/>
-        <text class="lbl" x="690" y="318" text-anchor="middle">REST · GraphQL</text>
-        <text class="sub" x="690" y="336" text-anchor="middle">designed, not built</text>
+        <rect class="bx" x="600" y="292" width="180" height="60" rx="10"/>
+        <text class="lbl" x="690" y="318" text-anchor="middle">REST · retrieval APIs</text>
+        <text class="sub" x="690" y="336" text-anchor="middle">OpenAPI-guarded</text>
 
         <path class="ar" d="M148 186 H190" marker-end="url(#a)"/>
         <path class="ar" d="M336 186 H378" marker-end="url(#a)"/>
@@ -243,7 +243,7 @@ footer a{text-decoration:none}
         <path class="ar" d="M548 172 H594" marker-end="url(#a)"/>
         <path class="ar" d="M548 186 H570 V92 H594" marker-end="url(#a)"/>
         <path class="ar" d="M548 200 H570 V242 H594" marker-end="url(#a)"/>
-        <path class="ar" d="M548 214 H560 V322 H594" marker-end="url(#a)" stroke-dasharray="5 4"/>
+        <path class="ar" d="M548 214 H560 V322 H594" marker-end="url(#a)"/>
         <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
           <path d="M0 0 L10 5 L0 10 z" fill="currentColor" style="color:var(--diagram-line)"/></marker></defs>
       </svg>
@@ -268,12 +268,23 @@ footer a{text-decoration:none}
       </div>
 
       <div class="card">
-        <h3>REST &amp; GraphQL sources <span class="tag t-plan">not built</span></h3>
-        <p>A service that already speaks MCP needs no code and is <em>in use today</em> — the catalog
-           reaches the agent that way. A REST or GraphQL service of your own needs an adapter, and that
-           is the part nobody has written. Not because it is hard to reach: because the guard here
-           validates a SQL parse tree, and an HTTP operation has no parse tree to validate.</p>
-        <span class="ev">OpenMetadata registers API assets already · plan §15</span>
+        <h3>REST APIs as a source <span class="tag t-ship">shipped</span></h3>
+        <p>An OpenAPI document is the allow-list. Unsafe operations are never even offered, an
+           undeclared parameter is refused rather than dropped, and the item ceiling is written into
+           the request. The guard here validates a SQL parse tree; an HTTP call has no parse tree, so
+           every property was translated rather than ported.</p>
+        <span class="ev">10 witnesses · OpenMetadata's own API is the live source</span>
+      </div>
+
+      <div class="card">
+        <h3>Enterprise RAG as a source <span class="tag t-ship">shipped</span></h3>
+        <p>A knowledge base plugs in as a REST source — <code>POST /search</code> with a JSON body,
+           the shape most retrieval APIs take. The usual hole in enterprise retrieval is that the
+           vector store is queried with a <em>service</em> identity, so a passage from a document the
+           asking user may not read lands in their answer and nothing records it. Here the source
+           states whether it applies the caller's own permissions, and denied fields are stripped
+           from retrieved documents as they are from warehouse columns.</p>
+        <span class="ev">top_k capped by the deployment, not the model · docs/15-http-sources</span>
       </div>
 
       <div class="card">
@@ -397,7 +408,9 @@ footer a{text-decoration:none}
           <tr><td>Power BI generation</td><td><span class="tag t-ship">shipped</span></td><td>Published under OBO and verified against its own SQL; rendering prod-only</td></tr>
           <tr><td>Existing MCP server as a source</td><td><span class="tag t-ship">shipped</span></td><td>APIM <code>mcpMode: passthrough</code>; OpenMetadata's own MCP server reaches the agent this way in every run</td></tr>
           <tr><td>REST source, no adapter (APIM REST&rarr;MCP)</td><td><span class="tag t-wip">blocked upstream</span></td><td>The pinned gateway builds a fresh request and copies no inbound headers, so on-behalf-of sees an anonymous caller (<a href="docs/upstream-issues/">upstream #8</a>)</td></tr>
-          <tr><td>REST / GraphQL source adapter</td><td><span class="tag t-plan">not built</span></td><td>Nothing blocks it: OpenMetadata registers API assets already. It needs a guard for operations rather than SQL, and operation-level eval metrics</td></tr>
+          <tr><td>REST source adapter (incl. retrieval APIs)</td><td><span class="tag t-ship">shipped</span></td><td>Python executor; guarded against the OpenAPI document, registered in OpenMetadata as an <code>apiService</code>, 10 witnesses</td></tr>
+          <tr><td>GraphQL source adapter</td><td><span class="tag t-plan">not built</span></td><td>Needs a query parser with depth and cost budgets — closer to the SQL guard than to REST</td></tr>
+          <tr><td>Operation-level eval metrics</td><td><span class="tag t-plan">not built</span></td><td>Result-set comparison is meaningless for retrieved prose; a KB source needs its own scoring</td></tr>
         </tbody>
       </table>
     </div>
@@ -426,7 +439,8 @@ docker pull ghcr.io/calvinchengx/data-agent-service/executor-go:0.1.0</code></pr
       <a href="docs/adr/0001-two-executors/">ADR&nbsp;0001</a>.</p>
     <div class="note">
       <b>What this version does not yet do.</b>
-      <p>The Go executor has no Databricks adapter, and REST/GraphQL sources are designed rather than
+      <p>The REST adapter landed after v0.1.0 and is Python-only — the Go executor has neither it nor
+        a Databricks adapter, recorded in ADR&nbsp;0001 rather than discovered later. GraphQL is not
         built. An unknown source <code>kind</code> is refused outright rather than guessed at, so a
         source no adapter handles fails loudly instead of being answered from the wrong engine.</p>
     </div>

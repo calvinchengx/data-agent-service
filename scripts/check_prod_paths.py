@@ -82,6 +82,9 @@ ALLOWED = {
     "scripts/check-discipline.sh::token forge": "same: the pattern list of the emulator-only surfaces that check "
     "forbids, not a call to one",
     "e2e/clients/configs.py::emulator hostname": "example client configuration for the local stack, shown to a reader",
+    "scripts/eval-cli.sh::emulator hostname": "`docker compose port apim-emulator 8445` is a compose SERVICE name "
+    "passed to a compose command, not an address written into code — it is what "
+    "avoids hardcoding the published port, which is the thing this check exists to prevent",
     "tests/conftest.py::emulator hostname": "the unit suite's fixture issuer; nothing here reaches a network, and a "
     "test that signs tokens must name the issuer it signs them for",
     "services/warehouse-query-go/service_test.go::emulator hostname": "the fixture IS the assertion: graphURL() must follow a non-Azure "

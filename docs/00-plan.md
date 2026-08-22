@@ -262,10 +262,17 @@ data-agent-service/
 | Snowflake | `snowflake` | ~150 lines | Snowflake External OAuth trusting Entra (OBO) | small–medium |
 | Azure DB for PostgreSQL | `postgres` | ~120 lines | Entra OBO → `ossrdbms-aad.database.windows.net` | small |
 | Non-Azure DB | same adapters | — | ❌ service credential from KV; `authz_tier=service` (APIM roles + OM scope only) | small, weaker authz |
-| REST API (OpenAPI) | — | **none**: APIM `type: mcp` REST→MCP | APIM forwards JWT / MI / oauth2 | config only |
+| REST API (OpenAPI) | `rest` | **done** — `httpguard` + `RestBackend` | Entra OBO → the API's resource, or a `keyvault:` credential at `authz_tier=service` | done (Python only) |
+| Enterprise RAG / knowledge base | `rest` | **none beyond the above** — `POST /search` marked `x-read-only` | as above; `user` tier applies the caller's own document permissions | config only |
+| GraphQL service | `graphql` | ~450 lines: parser, depth and cost budgets | as above | medium — see `docs/15-http-sources.md` |
 | Existing MCP server | — | **none**: APIM `mcpMode: passthrough` | upstream's | config only |
 
-Invariant: agent, APIM pattern, OM grounding, evals/load harness unchanged; only the adapter and the `authz_tier` vary. Leaks to document: identity model per target; REST targets need operation-level (not result-set) eval metrics.
+Invariant: agent, APIM pattern, OM grounding and the load harness are unchanged; only the adapter and the `authz_tier` vary.
+
+Two things the REST work changed about this table rather than confirmed:
+
+* **"REST needs no code" was wrong in the pinned gateway.** APIM's REST→MCP synthesis drops the caller's identity (upstream #8), so an on-behalf-of design behind a synthesised API sees an anonymous request. An adapter was the honest route, not the expensive one.
+* **The eval does not generalise.** Result-set comparison is meaningless for retrieved prose, so a REST or KB source still needs operation-level metrics — did it call the right endpoint with the right parameters, and does the answer carry a gold fact. That remains unbuilt, and it is the reason a knowledge-base source is not yet claimed as *evaluated* rather than merely *reachable*.
 
 ---
 
