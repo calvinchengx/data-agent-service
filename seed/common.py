@@ -381,6 +381,18 @@ def write_env(**values: str) -> None:
     their names; a seed reaching in and editing that file would be surprising in
     exactly the place surprises are expensive.
     """
+    # Refused BEFORE anything else, including the checks that return early.
+    # This guard used to sit next to the write, after `if not target.exists():
+    # return` -- so on a machine with no .env it never ran, and the test for it
+    # passed locally and failed in CI. A caller passing a credential is a
+    # programming error whether or not there is a file to write it to.
+    for key, value in values.items():
+        if looks_like_a_secret(key) and value and not value.startswith("keyvault:"):
+            raise SystemExit(
+                f"write_env({key}=…) would put a secret in the settings file in clear "
+                f"text. Store it with store_secret() and write keyvault:<name> instead."
+            )
+
     if os.environ.get("DAS_ENV", "local") == "prod":
         log("prod environment: not rewriting .env.prod (see docs/10-production.md)")
         return
@@ -395,17 +407,6 @@ def write_env(**values: str) -> None:
             lines[i] = f"{key}={remaining.pop(key)}"
     for key, value in remaining.items():
         lines.append(f"{key}={value}")
-    # A settings file names credentials; it does not hold them. Anything that
-    # looks like a secret must arrive as a `keyvault:` reference, so the value
-    # stays in the vault and only its NAME reaches disk. Refusing here rather
-    # than trusting every caller is what makes that true of callers nobody has
-    # written yet.
-    for key, value in values.items():
-        if looks_like_a_secret(key) and value and not value.startswith("keyvault:"):
-            raise SystemExit(
-                f"write_env({key}=…) would put a secret in {target.name} in clear text. "
-                f"Store it with store_secret() and write keyvault:<name> instead."
-            )
     target.write_text("\n".join(lines) + "\n")
     # This file holds a client secret and a gateway subscription key. It is
     # gitignored, and on a shared machine that is not the same as private --

@@ -121,20 +121,33 @@ def test_a_setting_that_merely_sounds_like_one_is_not(name):
     assert not c.looks_like_a_secret(name)
 
 
-def test_write_env_refuses_to_put_a_credential_on_disk(tmp_path, monkeypatch):
-    """The regression this whole change exists to prevent."""
-    env = tmp_path / ".env"
-    env.write_text("DAS_APIM_BASE=https://gw.example\n")
-    monkeypatch.setattr(c, "ENVFILE", env, raising=False)
+def test_write_env_refuses_to_put_a_credential_on_disk():
+    """The regression this whole change exists to prevent.
+
+    Depends on nothing ambient. The first version patched an attribute
+    `write_env` does not read and leaned on a .env existing, so it asserted
+    the guard on a developer's machine and asserted nothing in CI -- where a
+    clean checkout has no .env and the function returned before reaching it.
+    """
     with pytest.raises(SystemExit, match="clear text"):
         c.write_env(DAS_OM_SUBSCRIPTION_KEY="a-real-looking-secret-value")
 
 
-def test_write_env_accepts_the_reference(tmp_path, monkeypatch):
-    env = tmp_path / ".env"
-    env.write_text("DAS_APIM_BASE=https://gw.example\n")
-    monkeypatch.setattr(c, "ENVFILE", env, raising=False)
+def test_the_refusal_does_not_depend_on_a_settings_file_existing(tmp_path, monkeypatch):
+    """Explicitly: with ROOT pointed at an empty directory, it still refuses."""
+    monkeypatch.setattr(c, "ROOT", tmp_path)
+    assert not (tmp_path / ".env").exists()
+    with pytest.raises(SystemExit, match="clear text"):
+        c.write_env(POSTGRES_PASSWORD="hunter2")
+
+
+def test_write_env_accepts_a_reference(monkeypatch, tmp_path):
+    """A reference is not a secret, so it may be written."""
+    monkeypatch.setattr(c, "ROOT", tmp_path)
+    (tmp_path / ".env").write_text("DAS_APIM_BASE=https://gw.example\n")
+    monkeypatch.setattr(c, "CFG", dict(c.CFG))
     c.write_env(DAS_OM_SUBSCRIPTION_KEY="keyvault:das-om-subscription-key")
+    assert "keyvault:das-om-subscription-key" in (tmp_path / ".env").read_text()
 
 
 # ---------------------------------------------- the transport, against a real server --

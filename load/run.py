@@ -103,6 +103,25 @@ def compose(*args: str, quiet: bool = True) -> subprocess.CompletedProcess:
     return proc
 
 
+def resolved_passthrough() -> dict[str, str]:
+    """The settings k6 needs, with `keyvault:` references already expanded.
+
+    One call rather than one per setting: the container start dominates, and
+    a loop would pay it for every value.
+    """
+    script = (
+        "import json;from seed import common as c;"
+        f"print(json.dumps({{k: c.setting(k) for k in {list(PASSTHROUGH)!r} if k in c.CFG}}))"
+    )
+    proc = compose("python", "-c", script)
+    if proc.returncode != 0:
+        raise SystemExit("could not resolve the load settings inside the stack")
+    for line in reversed((proc.stdout or "").splitlines()):
+        if line.startswith("{"):
+            return json.loads(line)
+    raise SystemExit(f"no settings came back from the stack: {(proc.stdout or '')[:200]}")
+
+
 def set_rate_limit(calls: int) -> None:
     compose("python", "-m", "seed.apim", "--rate-calls", str(calls))
 
@@ -113,7 +132,13 @@ def env_for(scenario: dict, args) -> dict[str, str]:
     # Resolved rather than copied: k6 runs in its own container with no
     # identity, so a `keyvault:` reference would reach it unresolved and be
     # sent as a credential.
-    env = {k: c.setting(k) for k in PASSTHROUGH if k in c.CFG}
+    #
+    # Resolved IN THE STACK, which is the rule this module already states and
+    # which I broke: the driver runs on the host, and the host has neither a
+    # managed identity nor a route to the vault. Doing it here worked on a
+    # laptop whose environment happened to carry the value and failed in CI
+    # from a clean checkout -- the shape of every ambient-state bug.
+    env = resolved_passthrough()
     env["DAS_AUTHORITY"] = c.AUTHORITY
     env["DAS_LOAD_USER"] = args.user
     # k6 cannot sign a person in. Where the tenant forbids the password grant,
