@@ -241,11 +241,54 @@ seeds.
 
 ### 3. Paired statistics
 
-Both arms answer the same questions, so comparing two independent proportions
-discards the pairing. **McNemar's test** on discordant pairs is the right test:
-each question is its own control for difficulty, which is most of the variance.
-Reported alongside **Wilson intervals per tier** — never a bare point estimate,
-and never pooled across tiers where L1 sits at ceiling and dilutes.
+Two pieces of arithmetic, both in `evals/stats.py` with no dependencies, so a
+reader can check them rather than trust them.
+
+**A Wilson interval** is the honest width around a pass rate. "80%" from five
+questions and "80%" from five hundred are the same number and completely
+different claims, and only one of them should be quoted. The interval says how
+much of that difference is real: 4 out of 5 is 80%, and also **anything from
+38% to 99%**.
+
+Wilson specifically, rather than the textbook `p ± 1.96·√(p(1−p)/n)`, because
+that formula misbehaves at exactly the sizes used here — at 5 passes out of 5
+it produces an interval of *zero width*, claiming certainty from five
+observations. Wilson does not.
+
+**McNemar's test** is for comparing two arms that answered the *same*
+questions. Every question lands in one of four boxes:
+
+|  | passes without catalog | fails without catalog |
+|---|---|---|
+| **passes with catalog** | an easy question | **the catalog helped** |
+| **fails with catalog** | **the catalog hurt** | a hard question |
+
+The diagonal carries no information. A question both arms pass is merely easy;
+one both fail is merely hard. Neither says which arm is better, and pooling
+them into two percentages buries the signal under differences in question
+difficulty — which is most of the variance in a small suite.
+
+Only the off-diagonal counts: the **discordant** questions, where the two arms
+disagree. McNemar asks one thing of them — if the catalog made no difference, a
+question that changed should have been equally likely to change in *either*
+direction. So it is a coin-flip test on the questions that moved.
+
+That is why the first ablation proved so little. It had **two** discordant
+pairs, both favouring the catalog: two heads in two tosses, `p = 0.5`. Real
+coins do that constantly. Six in one direction would be `p ≈ 0.03`, which is
+evidence.
+
+It also answers "how many questions do we need?" — not a round number, but
+roughly **six to ten discordant pairs**. Questions both arms get right or wrong
+add nothing however many are added, which is why growing the suite (item 4)
+targeted L3, where the arms can actually disagree.
+
+The exact binomial form is used rather than the usual chi-squared
+approximation, which is unreliable below about 25 discordant pairs — every run
+this suite is likely to produce.
+
+Reported per tier, never pooled: L1 sits at ceiling and would dilute anything
+it was averaged with.
 
 ### What item 3 did to the headline
 
