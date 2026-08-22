@@ -137,12 +137,25 @@ def _challenge() -> dict[str, str]:
     return {"WWW-Authenticate": challenge}
 
 
+DEFAULT_SOURCE = os.environ.get("DAS_DEFAULT_SOURCE", "").strip()
+
+
 def _source(name: str | None):
+    """Which source a call is about.
+
+    One source: it is unambiguous, so requiring the name would be ceremony.
+    Several: the caller must say, UNLESS a default is configured — because two
+    sources can hold a table of the same name, and guessing which one a query
+    meant is the kind of wrong answer that looks right. `DAS_DEFAULT_SOURCE`
+    makes that choice a deployment's explicit decision rather than ours.
+    """
     if not SOURCES:
         raise HTTPException(500, "no sources configured (DAS_SOURCES)")
     if name is None:
         if len(SOURCES) == 1:
             return next(iter(SOURCES.values()))
+        if DEFAULT_SOURCE and DEFAULT_SOURCE in SOURCES:
+            return SOURCES[DEFAULT_SOURCE]
         raise HTTPException(400, f"source is required; one of {', '.join(sorted(SOURCES))}")
     try:
         return SOURCES[name]

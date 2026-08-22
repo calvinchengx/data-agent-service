@@ -23,7 +23,9 @@ SERVER_INFO = {"name": "data-agent-service.warehouse-query", "version": "0.1.0"}
 
 _SOURCE_PROP = {
     "type": "string",
-    "description": "Source name from list_sources. Omit when there is only one source.",
+    "description": ("Source name from list_sources. Omit only when a single source is "
+                    "configured or the deployment names a default — with several sources "
+                    "the same table name can exist in more than one, so say which."),
 }
 
 

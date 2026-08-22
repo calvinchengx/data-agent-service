@@ -18,6 +18,11 @@ from seed import common as c
 
 def provision(dataset: str, reset: bool) -> dict:
     ds = importlib.import_module(f"seed.datasets.{dataset}")
+    # A dataset declares the engine it belongs to. Dispatching on that is not a
+    # branch on which TARGET we are talking to — it is the difference between a
+    # Fabric warehouse and a PostgreSQL database, which is real everywhere.
+    if getattr(ds, "ENGINE", "fabric") == "postgres":
+        return provision_postgres(dataset, ds, reset)
 
     c.log(f"ensure SQL audience {c.SQL_AUD} is issuable (Graph; no-op on a real tenant)")
     c.graph_ensure_resource_app(c.SQL_AUD, "Azure SQL Database")
@@ -78,6 +83,41 @@ def provision(dataset: str, reset: bool) -> dict:
     return c.save_state(dataset=dataset, workspace=ws["id"], workspace_name=ds.WORKSPACE,
                         warehouse=wh["id"], warehouse_name=ds.WAREHOUSE,
                         sql_server=server, sql_database=database, schema=ds.SCHEMA)
+
+
+def provision_postgres(dataset: str, ds, reset: bool) -> dict:
+    """Create the schema and load it. No control plane: a PostgreSQL database
+    is provisioned by connecting to it, which is the whole difference from
+    Fabric and the reason the source entry carries a DSN instead of an item id.
+    """
+    import psycopg
+
+    src = c.source_by_name(ds.SOURCE_NAME)
+    if not src.get("dsn"):
+        raise SystemExit(f"source {ds.SOURCE_NAME} has no dsn; add one to DAS_SOURCES")
+    data = ds.generate()
+    with psycopg.connect(src["dsn"], connect_timeout=20) as conn, conn.cursor() as cur:
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {ds.SCHEMA}")
+        cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = %s",
+                    (ds.SCHEMA,))
+        existing = {r[0] for r in cur.fetchall()}
+        for table in ds.COLUMNS:
+            if table in existing and reset:
+                cur.execute(f"DROP TABLE {ds.SCHEMA}.{table} CASCADE")
+                existing.discard(table)
+            if table in existing:
+                cur.execute(f"SELECT COUNT(*) FROM {ds.SCHEMA}.{table}")
+                c.log(f"{table}: exists with {cur.fetchone()[0]} rows (use --reset to reload)")
+                continue
+            cur.execute(ds.ddl(table))
+            rows = data[table]
+            placeholders = ",".join(["%s"] * len(ds.COLUMNS[table]))
+            with cur.copy(f"COPY {ds.SCHEMA}.{table} FROM STDIN") as copy:
+                for row in rows:
+                    copy.write_row(row)
+            c.log(f"{table}: created, {len(rows)} rows")
+        conn.commit()
+    return c.save_state(**{f"{dataset}_schema": ds.SCHEMA, f"{dataset}_source": ds.SOURCE_NAME})
 
 
 if __name__ == "__main__":

@@ -24,6 +24,15 @@ from seed import common as c
 OM = c.OM
 _TOKEN: str | None = None
 
+# PostgreSQL -> OpenMetadata dataType
+_PG_TYPE = {"character varying": "VARCHAR", "varchar": "VARCHAR", "character": "CHAR",
+            "text": "TEXT", "integer": "INT", "bigint": "BIGINT", "smallint": "SMALLINT",
+            "boolean": "BOOLEAN", "numeric": "NUMERIC", "real": "FLOAT",
+            "double precision": "DOUBLE", "date": "DATE",
+            "timestamp without time zone": "TIMESTAMP",
+            "timestamp with time zone": "TIMESTAMPZ", "time without time zone": "TIME",
+            "uuid": "UUID", "jsonb": "JSON", "json": "JSON", "bytea": "BYTEA"}
+
 # T-SQL -> OpenMetadata dataType
 _TYPE = {"varchar": "VARCHAR", "nvarchar": "VARCHAR", "char": "CHAR", "int": "INT",
          "bigint": "BIGINT", "smallint": "SMALLINT", "tinyint": "TINYINT", "bit": "BOOLEAN",
@@ -79,6 +88,33 @@ def tag(term_fqn: str) -> dict:
 
 
 # -------------------------------------------------------------- schema read --
+def live_columns_postgres(dsn: str, schema: str) -> dict[str, list[dict]]:
+    """The same reflection, in the other engine's spelling.
+
+    Read live rather than taken from the dataset module for the same reason as
+    Fabric: the catalog should describe what the database HAS, not what a seed
+    intended it to have.
+    """
+    import psycopg
+
+    out: dict[str, list[dict]] = {}
+    with psycopg.connect(dsn, connect_timeout=20) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT table_name, column_name, data_type, character_maximum_length, "
+            "numeric_precision, numeric_scale FROM information_schema.columns "
+            "WHERE table_schema = %s ORDER BY table_name, ordinal_position", (schema,))
+        for table, name, dtype, clen, prec, scale in cur.fetchall():
+            col = {"name": name, "dataType": _PG_TYPE.get(dtype.lower(), "UNKNOWN"),
+                   "dataTypeDisplay": dtype}
+            if col["dataType"] in ("VARCHAR", "CHAR", "BINARY", "VARBINARY"):
+                col["dataLength"] = int(clen) if clen else 4000
+                col["dataTypeDisplay"] = f"{dtype}({col['dataLength']})"
+            if col["dataType"] in ("DECIMAL", "NUMERIC") and prec:
+                col["precision"], col["scale"] = int(prec), int(scale or 0)
+            out.setdefault(table, []).append(col)
+    return out
+
+
 def live_columns(conn, schema: str) -> dict[str, list[dict]]:
     cur = conn.cursor()
     rows = cur.execute(
@@ -99,11 +135,15 @@ def live_columns(conn, schema: str) -> dict[str, list[dict]]:
 
 
 # ----------------------------------------------------------------- govern --
+def engine_of(dataset: str) -> str:
+    return getattr(importlib.import_module(f"seed.datasets.{dataset}"), "ENGINE", "fabric")
+
+
 def govern(dataset: str) -> dict:
     ds = importlib.import_module(f"seed.datasets.{dataset}")
     sem = importlib.import_module(f"seed.datasets.{dataset}.semantics")
     st = c.load_state()
-    if st.get("dataset") != dataset:
+    if engine_of(dataset) == "fabric" and st.get("dataset") != dataset:
         raise SystemExit("run seed.provision first")
 
     # 1. domain + data product
@@ -113,18 +153,34 @@ def govern(dataset: str) -> dict:
 
     # 2. service / database / schema — standard hierarchy; the service is the
     #    join key to DAS_SOURCES[].om_service_fqn.
-    src = c.source_for(ds.WORKSPACE, ds.WAREHOUSE)
-    service = src.get("om_service_fqn") or sem.SERVICE
+    engine = getattr(ds, "ENGINE", "fabric")
+    if engine == "postgres":
+        src = c.source_by_name(ds.SOURCE_NAME)
+        service = src.get("om_service_fqn") or sem.SERVICE
+        database = src.get("database") or ds.SCHEMA
+        connection_options = {"kind": src.get("kind", "postgres"),
+                              "dialect": src.get("dialect", "postgres"),
+                              "authzTier": src.get("authz_tier", "service"),
+                              "schema": ds.SCHEMA}
+        description = (f"PostgreSQL database `{database}` — queried as the service "
+                       f"(authz_tier={src.get('authz_tier')}), so the engine cannot "
+                       f"distinguish callers and authorization is the gateway's alone.")
+    else:
+        src = c.source_for(ds.WORKSPACE, ds.WAREHOUSE)
+        service = src.get("om_service_fqn") or sem.SERVICE
+        database = ds.WAREHOUSE
+        connection_options = {"kind": src.get("kind", "fabric"),
+                              "dialect": src.get("dialect", "tsql"),
+                              "workspace": ds.WORKSPACE, "warehouse": ds.WAREHOUSE,
+                              "sqlServer": st.get("sql_server", "")}
+        description = (f"Fabric Warehouse `{ds.WAREHOUSE}` in workspace `{ds.WORKSPACE}` "
+                       "(TDS, Entra FedAuth).")
     put("/services/databaseServices", {
-        "name": service, "serviceType": "CustomDatabase",
-        "description": f"Fabric Warehouse `{ds.WAREHOUSE}` in workspace `{ds.WORKSPACE}` (TDS, Entra FedAuth).",
+        "name": service, "serviceType": "CustomDatabase", "description": description,
         "connection": {"config": {"type": "CustomDatabase", "sourcePythonClass": "",
-                                  "connectionOptions": {
-                                      "kind": src.get("kind", "fabric"), "dialect": src.get("dialect", "tsql"),
-                                      "workspace": ds.WORKSPACE, "warehouse": ds.WAREHOUSE,
-                                      "sqlServer": st["sql_server"]}}}})
-    db_fqn = f"{service}.{ds.WAREHOUSE}"
-    put("/databases", {"name": ds.WAREHOUSE, "service": service,
+                                  "connectionOptions": connection_options}}})
+    db_fqn = f"{service}.{database}"
+    put("/databases", {"name": database, "service": service,
                        "description": sem.DATA_PRODUCT["description"], "domains": [dom]})
     schema_fqn = f"{db_fqn}.{ds.SCHEMA}"
     put("/databaseSchemas", {"name": ds.SCHEMA, "database": db_fqn, "domains": [dom]})
@@ -145,9 +201,12 @@ def govern(dataset: str) -> dict:
             col_terms.setdefault(col, []).append(term_fqn[name])
 
     # 4. tables from the live schema, with descriptions, keys and term tags
-    conn = c.tds_connect(st["sql_server"], st["sql_database"])
-    live = live_columns(conn, ds.SCHEMA)
-    conn.close()
+    if engine == "postgres":
+        live = live_columns_postgres(src["dsn"], ds.SCHEMA)
+    else:
+        conn = c.tds_connect(st["sql_server"], st["sql_database"])
+        live = live_columns(conn, ds.SCHEMA)
+        conn.close()
     table_ids: dict[str, str] = {}
     for table, cols in live.items():
         keys = sem.KEYS.get(table, {})
@@ -191,8 +250,11 @@ def govern(dataset: str) -> dict:
 
     # 7. read-only bot for the gateway token swap (D3/D8)
     bot_token = ensure_reader_bot("das-reader")
-    c.save_state(om_service=service, om_schema_fqn=schema_fqn, om_tables=table_ids,
-                 om_domain=dom, om_reader_bot="das-reader")
+    c.save_state(**{f"om_{dataset}": {"service": service, "schema_fqn": schema_fqn,
+                                      "tables": table_ids, "domain": dom}})
+    if engine == "fabric":
+        c.save_state(om_service=service, om_schema_fqn=schema_fqn, om_tables=table_ids,
+                     om_domain=dom, om_reader_bot="das-reader")
     return {"service": service, "schema": schema_fqn, "tables": list(table_ids),
             "terms": len(term_fqn), "bot_token_len": len(bot_token)}
 

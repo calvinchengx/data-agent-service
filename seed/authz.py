@@ -75,15 +75,23 @@ ROLE_GROUPS = {
 # What each role may read. Column rules express what the source cannot: Fabric
 # grants reach a table, not a column, and the catalog knows which columns carry
 # personal data. Patterns are fnmatch-style over `schema.table[.column]`.
+# Patterns cover every source, and a rule that names only one source's schema
+# silently withholds everything in the others — which is how the second engine
+# arrived: `dbo.*` alone hid every column of `support.*` from every role,
+# including from `describe_table`, and looked exactly like a permissions
+# decision rather than a missing line.
 ACCESS_RULES = [
     {"role": "Data.Admin", "allow_tables": ["*"], "deny_columns": []},
-    {"role": "Data.Finance", "allow_tables": ["dbo.*"], "deny_columns": []},
-    {"role": "Data.Analyst", "allow_tables": ["dbo.*"],
+    {"role": "Data.Finance", "allow_tables": ["dbo.*", "support.*"], "deny_columns": []},
+    {"role": "Data.Analyst", "allow_tables": ["dbo.*", "support.*"],
      "deny_columns": ["dbo.dim_customer.email", "dbo.dim_party.email",
-                      "dbo.dim_customer.name"]},
-    # No role: the gateway lets the call through, the warehouse decides. Listed
+                      "dbo.dim_customer.name",
+                      # The same rule in the other engine: an analyst measures
+                      # support performance without reading who complained.
+                      "support.customers.email", "support.agents.email"]},
+    # No role: the gateway lets the call through and the source decides. Listed
     # so the default is written down rather than implied.
-    {"role": "*", "allow_tables": ["dbo.*"], "deny_columns": []},
+    {"role": "*", "allow_tables": ["dbo.*", "support.*"], "deny_columns": []},
 ]
 
 # OpenMetadata: one read-only bot per role. The analyst bot cannot read assets

@@ -232,6 +232,13 @@ def sources() -> list[dict]:
     return json.loads(CFG.get("DAS_SOURCES", "[]"))
 
 
+def source_by_name(name: str) -> dict:
+    for src in sources():
+        if src.get("name") == name:
+            return src
+    raise SystemExit(f"no source named {name} in DAS_SOURCES")
+
+
 def source_for(workspace: str, item: str) -> dict:
     for src in sources():
         if src.get("workspace") == workspace and src.get("item") == item:

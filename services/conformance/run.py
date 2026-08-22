@@ -104,6 +104,12 @@ ALLOWED = [
 ]
 
 
+# Statements each tier's probe runs. Kept beside the checks rather than inline
+# so a new engine changes one line instead of hunting through assertions.
+SIMPLE_COUNT = "SELECT COUNT(*) AS n FROM dbo.fct_revenue_summary"
+SERVICE_TIER_COUNT = "SELECT COUNT(*) AS n FROM support.tickets"
+
+
 def conform(base: str) -> None:
     ex = Executor(base)
     carol = token("carol@entraemulator.dev")   # Data.Finance
@@ -210,6 +216,43 @@ def conform(base: str) -> None:
     err, text = ex.tool("list_tables", {}, bob)
     check("a user with no role on the source is refused by the source",
           bool(err) and "access" in text.lower(), text[:70])
+
+    # ---- identity per source -------------------------------------------
+    # The defect this pins: an adapter can look complete and still ask the
+    # wrong authorization server question. A `user`-tier source must obtain a
+    # DATA-PLANE token for the asking user before it queries, and it must ask
+    # for the scope ITS OWN engine accepts — one global scope silently hands a
+    # Databricks warehouse an Azure SQL token, which fails at sign-in and reads
+    # as an outage. A suite that only exercises one engine keeps that property.
+    err, text = ex.tool("list_sources", {}, alice)
+    listed = json.loads(text).get("sources", []) if err is False else []
+    check("every source declares how its callers are authorized",
+          bool(listed) and all(s_.get("authzTier") in ("user", "service") for s_ in listed),
+          ", ".join(f"{s_['name']}={s_.get('authzTier')}" for s_ in listed))
+
+    user_tier = [s_ for s_ in listed if s_.get("authzTier") == "user"]
+    if user_tier:
+        name = user_tier[0]["name"]
+        err, text = ex.tool("run_query", {"source": name, "sql": SIMPLE_COUNT}, alice)
+        # Reaching rows at all proves the on-behalf-of exchange happened: the
+        # engine will not answer a token it did not accept.
+        check(f"a user-tier source ({name}) answers only after acting for the caller",
+              err is False, text[:60])
+        err, text = ex.tool("run_query", {"source": name, "sql": SIMPLE_COUNT}, bob)
+        check(f"and refuses a caller the SOURCE does not know ({name})",
+              bool(err) and "access" in text.lower(), text[:70])
+
+    service_tier = [s_ for s_ in listed if s_.get("authzTier") == "service"]
+    if service_tier:
+        name = service_tier[0]["name"]
+        first, _ = ex.tool("run_query", {"source": name, "sql": SERVICE_TIER_COUNT}, alice)
+        second, _ = ex.tool("run_query", {"source": name, "sql": SERVICE_TIER_COUNT}, carol)
+        # Both succeed BECAUSE the engine cannot tell them apart. That is the
+        # weaker tier behaving as documented rather than a bug — and it is why
+        # the audit records the tier on every line.
+        check(f"a service-tier source ({name}) cannot distinguish its callers",
+              first is False and second is False,
+              "two personas, same result — authorization is the gateway's alone")
 
     # ---- discovery ----------------------------------------------------
     st, _, raw = c.http("GET", ex.base + "/.well-known/oauth-protected-resource")

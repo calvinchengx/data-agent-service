@@ -247,6 +247,29 @@ services:
       - tools-venv:/app/.venv
     working_dir: /app
 
+  # --------------------------------------------------------------- postgres
+  # The second engine, and the one that makes `authz_tier` concrete. Azure
+  # Database for PostgreSQL accepts an Entra token as the password, so a source
+  # there is `user`-tier; a plain PostgreSQL has no such trust, is queried as
+  # the service, and every caller looks identical to it. That is weaker, and
+  # having it in the stack means the weaker path is exercised rather than
+  # described.
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: das
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-das-local-only}
+      POSTGRES_DB: support
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U das -d support"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   # ------------------------------------------------- data-agent-service (ours)
   # The executor. Reaches Fabric's TDS front as the ASKING USER (OBO) and holds
   # no secret in its environment: its managed identity is discovered through the
@@ -266,6 +289,8 @@ services:
       fabric-emulator:
         condition: service_healthy
       keyvault-emulator:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     ports:
       - "${EXECUTOR_PORT:-8090}:8090"
@@ -289,6 +314,7 @@ services:
 
 volumes:
   tools-venv:
+  postgres-data:
   entra-data:
   fabric-data:
   om-db-data:
