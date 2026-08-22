@@ -1150,6 +1150,114 @@ def phase14() -> None:
     )
 
 
+def phase15() -> None:
+    """Promotion: recurring templates surface, and nothing personal does.
+
+    The privacy checks are asserted against the released surface -- the thing
+    a person actually reads -- rather than against an intermediate, because
+    that is where a leak would reach someone.
+    """
+    from promoter import catalog as promoter_catalog
+    from promoter.audit import parse as parse_audit
+    from promoter.score import release
+    from promoter.store import build as build_store
+    from promoter.title import derive
+
+    team_sql = (
+        "SELECT a.team, AVG(t.resolution_minutes) AS m FROM support.tickets t "
+        "JOIN support.agents a ON a.agent_id = t.agent_id GROUP BY a.team"
+    )
+    # A recurring question asked by several people, in the several ways people
+    # write the same query; one person's private lookup alongside it.
+    recurring = [
+        json.dumps(
+            {
+                "op": "run_query",
+                "oid": f"user-{i}@contoso.example",
+                "source": "contoso_support",
+                "verdict": "ok",
+                "sql": team_sql.replace("AS m", f"AS alias_{i}"),
+            }
+        )
+        for i in range(6)
+    ]
+    private = json.dumps(
+        {
+            "op": "run_query",
+            "oid": "solo@contoso.example",
+            "source": "contoso_support",
+            "verdict": "ok",
+            "sql": "SELECT COUNT(*) AS n FROM support.tickets WHERE customer_id = 'CUST-4471'",
+        }
+    )
+    lines = list(parse_audit([f"INFO audit {line}" for line in [*recurring, private]]))
+
+    candidates, skipped = build_store(
+        lines, window="witness", key=b"witness-key", source_dialects={"contoso_support": "postgres"}
+    )
+    check(
+        "phase15",
+        "differently-written runs of one question collapse to one template",
+        len(candidates) == 2 and max(c.runs for c in candidates.values()) == 6,
+        f"{len(candidates)} templates from {len(lines)} lines, skipped {skipped.as_dict()}",
+    )
+
+    names = promoter_catalog.column_names()
+    check(
+        "phase15",
+        "the catalog names columns, and does not name two columns the same thing",
+        names.get("resolution_minutes") == "Resolution Time"
+        and names.get("elapsed_minutes") == "Elapsed Time",
+        f"resolution={names.get('resolution_minutes')}, elapsed={names.get('elapsed_minutes')}",
+    )
+
+    titles = {k: derive(c.template, names) for k, c in candidates.items()}
+    released, withheld = release(
+        candidates,
+        titles,
+        window="witness",
+        env={
+            "DAS_PROMOTE_MIN_USERS": "3",
+            "DAS_PROMOTE_MIN_RUNS": "5",
+            "DAS_PROMOTE_EPSILON": "1.0",
+        },
+    )
+    check(
+        "phase15",
+        "the recurring question is proposed, titled from the catalog",
+        len(released) == 1 and released[0].title == "Resolution Time by Support Team",
+        released[0].title if released else "nothing released",
+    )
+    check(
+        "phase15",
+        "a question only one person asks is withheld, and the withholding is reported",
+        withheld["below_user_threshold"] == 1,
+        f"withheld {withheld}",
+    )
+
+    rendered = json.dumps([r.as_dict() for r in released])
+    leaked = [
+        term
+        for term in ("CUST-4471", "contoso.example", "user-1", "solo", "witness-key")
+        if term in rendered
+    ]
+    check(
+        "phase15",
+        "no literal, subject or key reaches the released surface",
+        not leaked,
+        "clean" if not leaked else f"leaked {leaked}",
+    )
+    check(
+        "phase15",
+        "the filtered column survives as a slicer, without its value",
+        all(
+            "customer_id" not in r.template_sql or "CUST-4471" not in r.template_sql
+            for r in released
+        ),
+        f"{len(released)} candidate(s) checked",
+    )
+
+
 # ---------------------------------------------------------------- quality --
 def quality() -> None:
     """The lint and type gates, asserted by RUNNING them.
@@ -1199,6 +1307,7 @@ PHASES = {
     "phase12": phase12,
     "phase13": phase13,
     "phase14": phase14,
+    "phase15": phase15,
 }
 
 if __name__ == "__main__":

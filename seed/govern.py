@@ -292,9 +292,14 @@ def govern(dataset: str) -> dict:
         pk = set(keys.get("pk", []))
         fks = dict(keys.get("fk", []))
         for col in cols:
-            desc = sem.COLUMNS.get(f"{table}.{col['name']}")
-            if desc:
-                col["description"] = desc
+            # A semantics entry is either a description, or a
+            # (description, displayName) pair when the column needs a name of
+            # its own — see the note in the support dataset's semantics.
+            entry = sem.COLUMNS.get(f"{table}.{col['name']}")
+            if isinstance(entry, tuple):
+                col["description"], col["displayName"] = entry
+            elif entry:
+                col["description"] = entry
             tags = [tag(f) for f in col_terms.get(f"{table}.{col['name']}", [])]
             if tags:
                 col["tags"] = tags

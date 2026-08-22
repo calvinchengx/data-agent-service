@@ -131,13 +131,28 @@ TABLES = {
     ),
 }
 
+# A description says what a column means; a DISPLAY NAME says what to call it.
+# Both are needed and they are not the same job: all three minute columns are
+# tagged with the Resolution Time glossary term, because all three take part in
+# computing it, so a term cannot name any one of them. Anything generated from
+# this catalog — a dashboard title, a report header — needs a name that belongs
+# to the column alone.
 COLUMNS = {
     "tickets.elapsed_minutes": (
-        "Wall-clock minutes from opened to resolved. NOT the answer to "
-        "'how long did we take' — see Resolution Time."
+        (
+            "Wall-clock minutes from opened to resolved. NOT the answer to "
+            "'how long did we take' — see Resolution Time."
+        ),
+        "Elapsed Time",
     ),
-    "tickets.waiting_minutes": "Minutes the ticket spent waiting on the customer.",
-    "tickets.resolution_minutes": "elapsed_minutes minus waiting_minutes. NULL while open.",
+    "tickets.waiting_minutes": (
+        "Minutes the ticket spent waiting on the customer.",
+        "Waiting Time",
+    ),
+    "tickets.resolution_minutes": (
+        "elapsed_minutes minus waiting_minutes. NULL while open.",
+        "Resolution Time",
+    ),
     "tickets.status": "resolved | open.",
     "tickets.resolved_at": "NULL while the ticket is open.",
 }

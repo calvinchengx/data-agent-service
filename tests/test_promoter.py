@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from promoter.canonical import bucket, canonicalise, pseudonym
+from promoter.canonical import Template, bucket, canonicalise, pseudonym
 
 FASTEST_TEAM = (
     "SELECT a.team, AVG(t.resolution_minutes) AS m "
@@ -100,3 +100,121 @@ def test_pseudonym_requires_a_key():
 )
 def test_cardinality_is_bucketed_not_counted(distinct, expected):
     assert bucket(distinct) == expected
+
+
+# ------------------------------------------------------------- the store --
+from promoter.audit import parse  # noqa: E402
+from promoter.score import laplace, release, settings  # noqa: E402
+from promoter.store import build  # noqa: E402
+from promoter.title import derive  # noqa: E402
+
+TEAM_SQL = (
+    "SELECT a.team, AVG(t.resolution_minutes) AS m FROM support.tickets t "
+    "JOIN support.agents a ON a.agent_id = t.agent_id GROUP BY a.team"
+)
+
+
+def audit_line(oid: str, sql: str = TEAM_SQL, verdict: str = "ok") -> str:
+    import json
+
+    return "INFO audit " + json.dumps(
+        {"op": "run_query", "oid": oid, "source": "s", "verdict": verdict, "sql": sql}
+    )
+
+
+def store_of(lines: list[str]):
+    return build(list(parse(lines)), window="w", key=b"key", source_dialects={"s": "postgres"})
+
+
+def test_blocked_and_denied_queries_are_never_aggregated():
+    """Security events stay in the audit log with identity, per §17."""
+    lines = [audit_line(f"u{i}", verdict=v) for i, v in enumerate(["blocked", "denied", "error"])]
+    candidates, skipped = store_of(lines)
+    assert candidates == {}
+    assert skipped.not_promotable == 3
+
+
+def test_truncated_sql_is_skipped_and_counted_not_guessed():
+    long_sql = TEAM_SQL + " -- " + "x" * 1000
+    candidates, skipped = store_of([audit_line("u1", long_sql)])
+    assert candidates == {}
+    assert skipped.truncated == 1
+
+
+def test_unparseable_sql_is_counted_rather_than_dropped_silently():
+    candidates, skipped = store_of([audit_line("u1", "SELECT TOP 5 * FROM t")])
+    assert candidates == {}
+    assert skipped.unparseable == 1
+
+
+def test_one_user_asking_many_times_is_not_a_candidate():
+    """The k-threshold is about people, not popularity."""
+    lines = [audit_line("lonely") for _ in range(50)]
+    candidates, _ = store_of(lines)
+    titles = {k: derive(c.template, {}) for k, c in candidates.items()}
+    released, withheld = release(
+        candidates,
+        titles,
+        window="w",
+        env={"DAS_PROMOTE_MIN_USERS": "3", "DAS_PROMOTE_MIN_RUNS": "5"},
+    )
+    assert released == []
+    assert withheld["below_user_threshold"] == 1
+
+
+def test_enough_distinct_users_releases_a_candidate():
+    lines = [audit_line(f"u{i}") for i in range(4)] * 2
+    candidates, _ = store_of(lines)
+    titles = {
+        k: derive(c.template, {"resolution_minutes": "Resolution Time", "team": "Support Team"})
+        for k, c in candidates.items()
+    }
+    released, _ = release(
+        candidates,
+        titles,
+        window="w",
+        env={"DAS_PROMOTE_MIN_USERS": "3", "DAS_PROMOTE_MIN_RUNS": "5"},
+    )
+    assert len(released) == 1
+    assert released[0].title == "Resolution Time by Support Team"
+    assert released[0].title_quality == "ok"
+
+
+def test_a_released_candidate_carries_no_literal_and_no_subject():
+    """The release surface is the one a person reads. Nothing personal in it."""
+    sql = TEAM_SQL.replace("GROUP BY", "WHERE t.customer_id = 'CUST-4471' GROUP BY")
+    lines = [audit_line(f"user-{i}@example.com", sql) for i in range(5)]
+    candidates, _ = store_of(lines)
+    titles = {k: derive(c.template, {}) for k, c in candidates.items()}
+    released, _ = release(
+        candidates,
+        titles,
+        window="w",
+        env={"DAS_PROMOTE_MIN_USERS": "3", "DAS_PROMOTE_MIN_RUNS": "5"},
+    )
+    rendered = str([r.as_dict() for r in released])
+    assert "CUST-4471" not in rendered
+    assert "example.com" not in rendered
+    assert "customer_id" in rendered  # the column is kept: it becomes a slicer
+
+
+def test_counts_are_noised_but_stable_within_a_window():
+    assert laplace(20, 1.0, "w|a") == laplace(20, 1.0, "w|a")
+    assert laplace(20, 1.0, "w|a") != laplace(20, 1.0, "w|b")
+    assert laplace(0, 1.0, "w|a") >= 0
+
+
+def test_a_degraded_title_names_the_column_that_caused_it():
+    """An unnamed column is surfaced, not papered over with a humanised guess."""
+    mystery = Template(
+        sql="", hash="", tables=(), measures=("avg(t0.mystery_column)",), dimensions=(), slots=()
+    )
+    title = derive(mystery, {})
+    assert title.quality == "degraded"
+    assert "mystery_column" in title.degraded
+
+
+def test_settings_come_from_configuration():
+    assert settings(
+        {"DAS_PROMOTE_MIN_USERS": "7", "DAS_PROMOTE_MIN_RUNS": "9", "DAS_PROMOTE_EPSILON": "0.5"}
+    ) == (7, 9, 0.5)
