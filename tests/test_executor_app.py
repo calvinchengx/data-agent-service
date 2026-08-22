@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT / "services" / "warehouse-query-py"))
 from cryptography.hazmat.primitives import serialization  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from jose import jwt  # noqa: E402
+import jwt  # noqa: E402
 
 import app as app_mod  # noqa: E402
 

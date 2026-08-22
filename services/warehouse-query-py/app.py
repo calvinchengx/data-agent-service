@@ -28,9 +28,10 @@ import time
 import urllib.parse
 import urllib.request
 
+import jwt
 from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from jose import jwt
+from jwt import PyJWKSet
 
 import access
 import mcp as mcpproto
@@ -104,9 +105,15 @@ def principal(authorization: str | None) -> Principal:
         raise HTTPException(401, "a bearer token is required", headers=_challenge())
     token = authorization.split(" ", 1)[1].strip()
     try:
-        claims = jwt.decode(
-            token, _jwks(), audience=AUDIENCE, issuer=ISSUER, options={"verify_at_hash": False}
-        )
+        # The signing key is chosen by the token's `kid` against the
+        # authority's published set, and the algorithm is stated here rather
+        # than taken from the token: a verifier that accepts whatever `alg`
+        # the token names can be talked into accepting `none`.
+        header = jwt.get_unverified_header(token)
+        if not header.get("kid"):
+            raise ValueError("the token names no signing key (kid)")
+        key = PyJWKSet.from_dict(_jwks())[header["kid"]]
+        claims = jwt.decode(token, key.key, algorithms=["RS256"], audience=AUDIENCE, issuer=ISSUER)
     except Exception as e:  # noqa: BLE001 — any failure to VERIFY is a 401,
         # not a 500: an unparseable, unsigned or wrongly-keyed token is the
         # caller's problem, and reporting it as a server error would hide a
