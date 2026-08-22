@@ -149,6 +149,13 @@ def run_scenario(name: str, args) -> dict:
         "-v",
         f"{REPORTS}:/out",
     ]
+    # k6's image runs as its own uid, which cannot write into a host directory
+    # owned by someone else. Docker Desktop's VM maps uids permissively so this
+    # is invisible on macOS; on Linux the summary is silently never written and
+    # the run reports "no summary" with every threshold green. Write as the
+    # caller instead.
+    if hasattr(os, "getuid"):
+        cmd += ["--user", f"{os.getuid()}:{os.getgid()}"]
     for key, value in env.items():
         cmd += ["-e", f"{key}={value}"]
     cmd += [
