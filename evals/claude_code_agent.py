@@ -86,7 +86,11 @@ def _setting(key: str, default: str = "") -> str:
 
 
 def mcp_config(token: str, *, om: bool) -> dict:
-    base = _setting("DAS_CLAUDE_APIM_BASE", "https://localhost:8446").rstrip("/")
+    # No literal address here at all. `DAS_APIM_BASE` is the gateway the rest
+    # of the service already uses; `DAS_CLAUDE_APIM_BASE` overrides it only
+    # because this harness runs on the HOST, where the gateway answers on its
+    # published port rather than its compose hostname.
+    base = (_setting("DAS_CLAUDE_APIM_BASE") or _setting("DAS_APIM_BASE")).rstrip("/")
     servers = {
         "warehouse": {
             "type": "http",
