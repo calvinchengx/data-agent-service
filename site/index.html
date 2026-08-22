@@ -388,7 +388,7 @@ footer a{text-decoration:none}
           <tr><td>Guardrails on the parse tree</td><td><span class="tag t-ship">shipped</span></td><td>Unit corpus shared by both implementations</td></tr>
           <tr><td>Load testing</td><td><span class="tag t-ship">measured</span></td><td>Four k6 scenarios with gating thresholds</td></tr>
           <tr><td>Eval harness and gold baseline</td><td><span class="tag t-ship">shipped</span></td><td>31 questions, five tiers, result-set scoring</td></tr>
-          <tr><td>Live model accuracy score</td><td><span class="tag t-wip">not yet run</span></td><td>Needs an API key; no model report exists</td></tr>
+          <tr><td>Live model accuracy score</td><td><span class="tag t-wip">measured once</span></td><td>Run through Claude Code, not the SDK: catalog lifts semantic fidelity 40% &rarr; 100%. Pass rate understates this client — see the caveats in the report</td></tr>
           <tr><td>Audit trail</td><td><span class="tag t-ship">shipped</span></td><td>Structured line per operation, authz tier recorded</td></tr>
           <tr><td>Production parity (real Azure)</td><td><span class="tag t-wip">gated, unwitnessed</span></td><td>Terraform validates, runbook and preflight exist; not yet run against a tenant</td></tr>
           <tr><td>Dashboard promotion</td><td><span class="tag t-ship">shipped</span></td><td>Templates counted by pseudonymous user, k-threshold, catalog-derived titles; no question stored</td></tr>
