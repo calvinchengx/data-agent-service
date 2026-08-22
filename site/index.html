@@ -131,8 +131,9 @@ footer a{text-decoration:none}
     <p class="eyebrow">data-agent-service</p>
     <h1>Ask your warehouse a question. Get an answer you can defend.</h1>
     <p>Natural-language questions over Microsoft Fabric Warehouses and other sources — grounded in the
-       glossary, metrics and schema held in OpenMetadata, fronted by Azure API Management, answered
-       with the <em>asking user's</em> own permissions.</p>
+       glossary, metrics and schema held in OpenMetadata, fronted by Azure API Management. Each query
+       is authorized <em>twice</em>: role rules in the service, then the engine under the caller's own
+       identity.</p>
     <p>It runs locally on an emulator family, and against real Azure by changing configuration only.</p>
     <p class="claim">Every capability below carries the command that proves it. Where something is
        designed but not built, this page says so.</p>

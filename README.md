@@ -10,6 +10,11 @@
 
 **Ask your data warehouse a question in English. Get an answer you can defend.**
 
+Natural-language questions over Fabric, PostgreSQL and more, grounded in the glossary,
+metrics and schema held in OpenMetadata. Each query is authorized twice — role rules in
+the service, then the engine under the caller's own identity. Any MCP client, unchanged
+against real Azure.
+
 📖 **[Documentation site](https://calvinchengx.github.io/data-agent-service/docs/)** — the full
 reference, also browsable as Markdown in [`docs/`](docs/).
 
