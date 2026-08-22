@@ -77,6 +77,9 @@ ALLOWED = {
     "scripts/check-discipline.sh::token forge": "same: the pattern list of the emulator-only surfaces that check "
     "forbids, not a call to one",
     "e2e/clients/configs.py::emulator hostname": "example client configuration for the local stack, shown to a reader",
+    "services/warehouse-query-go/service_test.go::emulator hostname": "the fixture IS the assertion: graphURL() must follow a non-Azure "
+    "issuer rather than assume graph.microsoft.com, and a hostname that is not "
+    "Microsoft's is what makes that provable",
     "scripts/check_prod_paths.py::emulator admin surface": "this file's own patterns",
     "scripts/check_prod_paths.py::emulator hostname": "this file's own patterns",
     "scripts/check_prod_paths.py::auth disabled": "this file's own patterns",
