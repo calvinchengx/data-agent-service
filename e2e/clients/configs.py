@@ -16,6 +16,7 @@ docs/09-mcp-clients.md:
   * **token** — a bearer the client sends as a header. Every client supports
     this, and it is how a headless or unattended one connects.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,12 +46,16 @@ def headers(auth: str, token: str, catalog: bool) -> dict:
 
 def servers(auth: str, token: str) -> dict:
     return {
-        "warehouse": {"type": "http", "url": WAREHOUSE,
-                      **({"headers": headers(auth, token, False)}
-                         if headers(auth, token, False) else {})},
-        "catalog": {"type": "http", "url": CATALOG,
-                    **({"headers": headers(auth, token, True)}
-                       if headers(auth, token, True) else {})},
+        "warehouse": {
+            "type": "http",
+            "url": WAREHOUSE,
+            **({"headers": headers(auth, token, False)} if headers(auth, token, False) else {}),
+        },
+        "catalog": {
+            "type": "http",
+            "url": CATALOG,
+            **({"headers": headers(auth, token, True)} if headers(auth, token, True) else {}),
+        },
     }
 
 
@@ -70,11 +75,14 @@ def json_block(auth: str, token: str, key: str = "mcpServers") -> str:
 
 CLIENTS = {
     "claude-code": ("Claude Code (CLI)", "shell", claude_code),
-    "claude-desktop": ("Claude Desktop — claude_desktop_config.json",
-                       "json", json_block),
+    "claude-desktop": ("Claude Desktop — claude_desktop_config.json", "json", json_block),
     "cursor": ("Cursor — .cursor/mcp.json", "json", json_block),
     "vscode": ("VS Code — .vscode/mcp.json", "json", lambda a, t: json_block(a, t, "servers")),
-    "sdk": ("Any client built on an MCP SDK", "python", lambda a, t: f'''\
+    "sdk": (
+        "Any client built on an MCP SDK",
+        "python",
+        lambda a, t: (
+            f'''\
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 import httpx2
@@ -83,7 +91,9 @@ http = httpx2.AsyncClient(headers={{"Authorization": "Bearer <token>"}})
 async with http, streamable_http_client("{WAREHOUSE}", http_client=http) as streams:
     async with ClientSession(streams[0], streams[1]) as session:
         await session.initialize()
-        tools = await session.list_tools()'''),
+        tools = await session.list_tools()'''
+        ),
+    ),
 }
 
 
@@ -117,7 +127,7 @@ registration, so the client id is configured rather than requested):
   discovery     {PUBLIC}/warehouse/.well-known/oauth-protected-resource
 """)
 
-    for name in (a.client or sorted(CLIENTS)):
+    for name in a.client or sorted(CLIENTS):
         title, kind, render = CLIENTS[name]
         print(f"\n# {title}\n")
         print(f"```{kind}\n{render(a.auth, token)}\n```")

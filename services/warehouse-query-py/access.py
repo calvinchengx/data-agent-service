@@ -28,6 +28,7 @@ Column rules exist because a warehouse grant reaches a table, not a column,
 while the catalog knows exactly which columns carry personal data. Denying a
 column is therefore something this layer can do that the engine cannot.
 """
+
 from __future__ import annotations
 
 import fnmatch
@@ -64,8 +65,9 @@ class Denied(Exception):
 
 class Rules:
     def __init__(self, raw: list[dict] | None = None):
-        self.rules = raw if raw is not None else json.loads(
-            os.environ.get("DAS_ACCESS_RULES", "[]"))
+        self.rules = (
+            raw if raw is not None else json.loads(os.environ.get("DAS_ACCESS_RULES", "[]"))
+        )
 
     def for_roles(self, roles: tuple[str, ...]) -> dict:
         """The union of every rule that applies. Allowances add; denials are
@@ -87,8 +89,9 @@ class Rules:
             allow = [p for r in fallback for p in r.get("allow_tables", [])] or allow
         return {"allow_tables": allow or ["*"], "deny_columns": deny}
 
-    def check(self, roles: tuple[str, ...], tables: tuple[str, ...],
-              columns: tuple[str, ...]) -> None:
+    def check(
+        self, roles: tuple[str, ...], tables: tuple[str, ...], columns: tuple[str, ...]
+    ) -> None:
         """`tables` are schema.table; `columns` are schema.table.column, or
         schema.table.* where the query selects everything."""
         effective = self.for_roles(roles)
@@ -103,7 +106,8 @@ class Rules:
                     if denied.startswith(prefix):
                         raise Denied(
                             f"{who} may not read {denied}, so SELECT * is refused on "
-                            f"{denied.rsplit('.', 1)[0]} — name the columns you need instead")
+                            f"{denied.rsplit('.', 1)[0]} — name the columns you need instead"
+                        )
                 elif fnmatch.fnmatch(column, denied):
                     raise Denied(f"{who} may not read {denied}")
 
@@ -165,15 +169,25 @@ class RoleResolver:
         try:
             if self.source in ("appRole", "both") and self._app_id:
                 names = self._app_role_names()
-                assignments = self._get(
-                    f"/servicePrincipals/{self._app_id}/appRoleAssignedTo").get("value", [])
-                roles.update(names[a["appRoleId"]] for a in assignments
-                             if a.get("principalId") == oid and a.get("appRoleId") in names)
+                assignments = self._get(f"/servicePrincipals/{self._app_id}/appRoleAssignedTo").get(
+                    "value", []
+                )
+                roles.update(
+                    names[a["appRoleId"]]
+                    for a in assignments
+                    if a.get("principalId") == oid and a.get("appRoleId") in names
+                )
             if self.source in ("group", "both"):
                 member_of = self._get(f"/users/{oid}/memberOf").get("value", [])
-                roles.update(self._map_groups(
-                    [g for g in member_of if g.get("@odata.type", "").endswith("group")
-                     or "displayName" in g]))
+                roles.update(
+                    self._map_groups(
+                        [
+                            g
+                            for g in member_of
+                            if g.get("@odata.type", "").endswith("group") or "displayName" in g
+                        ]
+                    )
+                )
         except Exception as e:  # noqa: BLE001 — a directory that will not answer
             # means no role, never every role: authorization fails closed. It
             # says so, because "no roles" and "could not ask" look identical
@@ -191,7 +205,8 @@ class RoleResolver:
 
     def _get(self, path: str) -> dict:
         req = urllib.request.Request(
-            self._graph + path, headers={"Authorization": "Bearer " + self._graph_token()})
+            self._graph + path, headers={"Authorization": "Bearer " + self._graph_token()}
+        )
         with urllib.request.urlopen(req, context=_SSL, timeout=15) as r:
             return json.loads(r.read())
 

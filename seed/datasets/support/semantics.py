@@ -13,14 +13,22 @@ states a rule does not.
 """
 
 SERVICE = "postgres_support"
-DOMAIN = {"name": "contoso-support", "displayName": "Contoso Support",
-          "domainType": "Consumer-aligned",
-          "description": "Customer support operations: tickets, agents and service levels."}
-DATA_PRODUCT = {"name": "contoso-support-desk", "displayName": "Contoso Support Desk",
-                "description": "Ticket operations reporting for the support organisation."}
+DOMAIN = {
+    "name": "contoso-support",
+    "displayName": "Contoso Support",
+    "domainType": "Consumer-aligned",
+    "description": "Customer support operations: tickets, agents and service levels.",
+}
+DATA_PRODUCT = {
+    "name": "contoso-support-desk",
+    "displayName": "Contoso Support Desk",
+    "description": "Ticket operations reporting for the support organisation.",
+}
 
-GLOSSARY = {"name": "Contoso Support",
-            "description": "Business vocabulary for Contoso's support operations."}
+GLOSSARY = {
+    "name": "Contoso Support",
+    "description": "Business vocabulary for Contoso's support operations.",
+}
 
 TERMS = {
     "Resolution Time": {
@@ -31,17 +39,22 @@ TERMS = {
             "data mean elapsed is 369 minutes against mean resolution of 256, a 44% "
             "difference, and the two orderings of teams disagree. Always use "
             "`resolution_minutes`; use `elapsed_minutes` only when the question is explicitly "
-            "about wall-clock duration."),
+            "about wall-clock duration."
+        ),
         "synonyms": ["handling time", "time to resolve"],
-        "columns": ["tickets.resolution_minutes", "tickets.elapsed_minutes",
-                    "tickets.waiting_minutes"],
+        "columns": [
+            "tickets.resolution_minutes",
+            "tickets.elapsed_minutes",
+            "tickets.waiting_minutes",
+        ],
     },
     "Service Level Target": {
         "description": (
             "The minutes allowed for a priority, from the `sla` table: P1 60, P2 240, P3 1440. "
             "A ticket breaches when its Resolution Time exceeds the target for its priority — "
             "so a breach is measured against resolution, never against elapsed time, or "
-            "customers who were slow to reply would count against the team."),
+            "customers who were slow to reply would count against the team."
+        ),
         "synonyms": ["SLA", "target", "breach threshold"],
         "columns": ["sla.target_minutes", "sla.priority", "tickets.priority"],
     },
@@ -49,7 +62,8 @@ TERMS = {
         "description": (
             "A ticket with status 'open': it has no `resolved_at`, and its "
             "`resolution_minutes` is NULL. Averages over resolution time therefore describe "
-            "resolved tickets only, and a count of tickets is not a count of resolved ones."),
+            "resolved tickets only, and a count of tickets is not a count of resolved ones."
+        ),
         "synonyms": ["unresolved"],
         "columns": ["tickets.status", "tickets.resolved_at"],
     },
@@ -66,38 +80,62 @@ TERMS = {
 }
 
 METRICS = [
-    {"name": "mean_resolution_minutes", "displayName": "Mean resolution time (minutes)",
-     "description": "Average Resolution Time over resolved tickets — waiting time excluded.",
-     "metricType": "AVERAGE", "unitOfMeasurement": "COUNT", "granularity": "DAY",
-     "expression": ("SELECT AVG(resolution_minutes) FROM support.tickets "
-                    "WHERE status = 'resolved'"),
-     "terms": ["Resolution Time"]},
-    {"name": "sla_breach_rate", "displayName": "SLA breach rate",
-     "description": ("Share of resolved tickets whose Resolution Time exceeded the Service "
-                     "Level Target for their priority."),
-     "metricType": "RATIO", "unitOfMeasurement": "PERCENTAGE", "granularity": "MONTH",
-     "expression": ("SELECT AVG(CASE WHEN t.resolution_minutes > s.target_minutes THEN 1.0 "
-                    "ELSE 0.0 END) FROM support.tickets t JOIN support.sla s "
-                    "ON s.priority = t.priority WHERE t.status = 'resolved'"),
-     "terms": ["Service Level Target", "Resolution Time"]},
-    {"name": "open_tickets", "displayName": "Open tickets",
-     "description": "Count of tickets not yet resolved.",
-     "metricType": "COUNT", "unitOfMeasurement": "COUNT", "granularity": "DAY",
-     "expression": "SELECT COUNT(*) FROM support.tickets WHERE status = 'open'",
-     "terms": ["Open Ticket"]},
+    {
+        "name": "mean_resolution_minutes",
+        "displayName": "Mean resolution time (minutes)",
+        "description": "Average Resolution Time over resolved tickets — waiting time excluded.",
+        "metricType": "AVERAGE",
+        "unitOfMeasurement": "COUNT",
+        "granularity": "DAY",
+        "expression": (
+            "SELECT AVG(resolution_minutes) FROM support.tickets WHERE status = 'resolved'"
+        ),
+        "terms": ["Resolution Time"],
+    },
+    {
+        "name": "sla_breach_rate",
+        "displayName": "SLA breach rate",
+        "description": (
+            "Share of resolved tickets whose Resolution Time exceeded the Service "
+            "Level Target for their priority."
+        ),
+        "metricType": "RATIO",
+        "unitOfMeasurement": "PERCENTAGE",
+        "granularity": "MONTH",
+        "expression": (
+            "SELECT AVG(CASE WHEN t.resolution_minutes > s.target_minutes THEN 1.0 "
+            "ELSE 0.0 END) FROM support.tickets t JOIN support.sla s "
+            "ON s.priority = t.priority WHERE t.status = 'resolved'"
+        ),
+        "terms": ["Service Level Target", "Resolution Time"],
+    },
+    {
+        "name": "open_tickets",
+        "displayName": "Open tickets",
+        "description": "Count of tickets not yet resolved.",
+        "metricType": "COUNT",
+        "unitOfMeasurement": "COUNT",
+        "granularity": "DAY",
+        "expression": "SELECT COUNT(*) FROM support.tickets WHERE status = 'open'",
+        "terms": ["Open Ticket"],
+    },
 ]
 
 TABLES = {
     "customers": "Customers as the support desk knows them, with their plan and country.",
     "agents": "Support agents and the team each belongs to.",
     "sla": "Minutes allowed per priority before a ticket breaches its Service Level Target.",
-    "tickets": ("One row per ticket. `elapsed_minutes` is wall-clock; `resolution_minutes` "
-                "excludes customer-waiting time and is the figure to report."),
+    "tickets": (
+        "One row per ticket. `elapsed_minutes` is wall-clock; `resolution_minutes` "
+        "excludes customer-waiting time and is the figure to report."
+    ),
 }
 
 COLUMNS = {
-    "tickets.elapsed_minutes": ("Wall-clock minutes from opened to resolved. NOT the answer to "
-                                "'how long did we take' — see Resolution Time."),
+    "tickets.elapsed_minutes": (
+        "Wall-clock minutes from opened to resolved. NOT the answer to "
+        "'how long did we take' — see Resolution Time."
+    ),
     "tickets.waiting_minutes": "Minutes the ticket spent waiting on the customer.",
     "tickets.resolution_minutes": "elapsed_minutes minus waiting_minutes. NULL while open.",
     "tickets.status": "resolved | open.",
@@ -108,8 +146,12 @@ KEYS = {
     "customers": {"pk": ["customer_id"]},
     "agents": {"pk": ["agent_id"]},
     "sla": {"pk": ["priority"]},
-    "tickets": {"pk": ["ticket_id"],
-                "fk": [("customer_id", "customers.customer_id"),
-                       ("agent_id", "agents.agent_id"),
-                       ("priority", "sla.priority")]},
+    "tickets": {
+        "pk": ["ticket_id"],
+        "fk": [
+            ("customer_id", "customers.customer_id"),
+            ("agent_id", "agents.agent_id"),
+            ("priority", "sla.priority"),
+        ],
+    },
 }

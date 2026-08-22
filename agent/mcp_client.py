@@ -8,6 +8,7 @@ rather than the agent's.
 Tool names are namespaced per server (`warehouse__run_query`) because two
 servers may use the same name and the model must be able to tell them apart.
 """
+
 from __future__ import annotations
 
 import json
@@ -22,8 +23,16 @@ class McpError(Exception):
 
 
 class McpServer:
-    def __init__(self, name: str, url: str, token: str, *, headers: dict | None = None,
-                 insecure: bool = False, timeout: int = 120):
+    def __init__(
+        self,
+        name: str,
+        url: str,
+        token: str,
+        *,
+        headers: dict | None = None,
+        insecure: bool = False,
+        timeout: int = 120,
+    ):
         self.name = name
         self.url = url
         self.token = token
@@ -43,13 +52,17 @@ class McpServer:
         body = {"jsonrpc": "2.0", "method": method, "params": params or {}}
         if not notify:
             body["id"] = self._id
-        headers = {"Content-Type": "application/json",
-                   "Accept": "application/json, text/event-stream",
-                   "Authorization": "Bearer " + self.token, **self.extra}
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "Authorization": "Bearer " + self.token,
+            **self.extra,
+        }
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
-        req = urllib.request.Request(self.url, data=json.dumps(body).encode(),
-                                     headers=headers, method="POST")
+        req = urllib.request.Request(
+            self.url, data=json.dumps(body).encode(), headers=headers, method="POST"
+        )
         try:
             with urllib.request.urlopen(req, context=self._ssl, timeout=self.timeout) as r:
                 sid = r.headers.get("Mcp-Session-Id")
@@ -68,8 +81,14 @@ class McpServer:
 
     # ---------------------------------------------------------------- api --
     def connect(self) -> list[dict]:
-        self._rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
-                                 "clientInfo": {"name": "data-agent-service", "version": "0.1.0"}})
+        self._rpc(
+            "initialize",
+            {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "data-agent-service", "version": "0.1.0"},
+            },
+        )
         self._rpc("notifications/initialized", notify=True)
         self.tools = (self._rpc("tools/list") or {}).get("tools", [])
         return self.tools
@@ -105,9 +124,11 @@ class Toolbox:
 
     def connect(self) -> list[dict]:
         return [
-            {"name": f"{server.name}{self.SEP}{tool['name']}",
-             "description": tool.get("description", ""),
-             "input_schema": tool.get("inputSchema") or {"type": "object", "properties": {}}}
+            {
+                "name": f"{server.name}{self.SEP}{tool['name']}",
+                "description": tool.get("description", ""),
+                "input_schema": tool.get("inputSchema") or {"type": "object", "properties": {}},
+            }
             for server in self.servers.values()
             for tool in server.connect()
         ]

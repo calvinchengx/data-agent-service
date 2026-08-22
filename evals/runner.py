@@ -13,6 +13,7 @@ this whole architecture is plumbing, and the report should say so.
 Every run records the model, the prompt hash and the question-set hash, because
 a scorecard whose inputs are unknown cannot be compared with another one.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -70,7 +71,8 @@ class GoldConnections:
             if not src:
                 raise SystemExit(
                     f"question {question['id']} names source {name!r}, which is not in "
-                    f"DAS_SOURCES ({', '.join(s['name'] for s in c.sources())})")
+                    f"DAS_SOURCES ({', '.join(s['name'] for s in c.sources())})"
+                )
             self._open[name] = c.connect_source(src)
         return self._open[name]
 
@@ -96,8 +98,16 @@ class Result:
 
     @property
     def passed(self) -> bool:
-        checks = [v for v in (self.score.execution, self.score.grounding,
-                              self.score.semantics, self.score.behaviour) if v is not None]
+        checks = [
+            v
+            for v in (
+                self.score.execution,
+                self.score.grounding,
+                self.score.semantics,
+                self.score.behaviour,
+            )
+            if v is not None
+        ]
         return all(checks)
 
 
@@ -117,8 +127,10 @@ class GoldAgent:
         # being a safe default the moment there were two.
         args = {"source": question["source"]} if question.get("source") else {}
         if expect != "answer":
-            text = {"abstain": "That data does not exist in this source.",
-                    "block": "That is not permitted: the query was refused."}[expect]
+            text = {
+                "abstain": "That data does not exist in this source.",
+                "block": "That is not permitted: the query was refused.",
+            }[expect]
             calls = []
             if expect == "block":
                 toolbox = agent_mod.build_toolbox(self.token, om=False)
@@ -126,23 +138,30 @@ class GoldAgent:
                 # A statement refused by the GUARD rather than by a missing
                 # table, so the probe means the same thing on every engine.
                 out, is_error = toolbox.call(
-                    "warehouse__run_query", {**args, "sql": "DROP TABLE some_table"})
+                    "warehouse__run_query", {**args, "sql": "DROP TABLE some_table"}
+                )
                 calls = [agent_mod.ToolCall("warehouse__run_query", args, out, is_error, 0)]
             return agent_mod.Answer(text, calls)
         toolbox = agent_mod.build_toolbox(self.token, om=False)
         toolbox.connect()
-        out, is_error = toolbox.call("warehouse__run_query",
-                                     {**args, "sql": question["gold_sql"]})
+        out, is_error = toolbox.call("warehouse__run_query", {**args, "sql": question["gold_sql"]})
         payload = {} if is_error else json.loads(out)
         rows = payload.get("rows", [])
         numbers = [str(cell) for row in rows[:20] for cell in row]
         text = f"Result: {', '.join(numbers)[:400]}"
-        return agent_mod.Answer(text, [agent_mod.ToolCall(
-            "warehouse__run_query", {**args, "sql": question["gold_sql"]}, out, is_error, 0)])
+        return agent_mod.Answer(
+            text,
+            [
+                agent_mod.ToolCall(
+                    "warehouse__run_query", {**args, "sql": question["gold_sql"]}, out, is_error, 0
+                )
+            ],
+        )
 
 
-def evaluate(question: dict, answer: agent_mod.Answer, gold: list[list] | None,
-             conn) -> scoring.Score:
+def evaluate(
+    question: dict, answer: agent_mod.Answer, gold: list[list] | None, conn
+) -> scoring.Score:
     expect = question.get("expect", "answer")
     s = scoring.Score()
     ok, why = scoring.behaved(expect, answer.text, answer)
@@ -161,20 +180,37 @@ def evaluate(question: dict, answer: agent_mod.Answer, gold: list[list] | None,
             actual = [list(r) for r in cur.fetchall()]
         except Exception as e:  # noqa: BLE001 — a statement that will not re-run is a miss
             s.detail = (s.detail + f" | gold re-run failed: {e}")[:300]
-    ordered = any(w in question["question"].lower()
-                  for w in ("first", "order", "rank", "top", "highest", "lowest"))
-    s.execution = bool(actual is not None and gold is not None
-                       and scoring.rows_match(actual, gold, ordered=ordered)
-                       and scoring.answer_states_a_gold_number(answer.text, gold))
+    ordered = any(
+        w in question["question"].lower()
+        for w in ("first", "order", "rank", "top", "highest", "lowest")
+    )
+    s.execution = bool(
+        actual is not None
+        and gold is not None
+        and scoring.rows_match(actual, gold, ordered=ordered)
+        and scoring.answer_states_a_gold_number(answer.text, gold)
+    )
     s.grounding = scoring.grounding(set(answer.tables), question.get("gold_tables", []))
     if question.get("required_semantics") or question.get("forbidden_semantics"):
-        s.semantics = scoring.semantics(answer.sql, question.get("required_semantics", []),
-                                        question.get("forbidden_semantics", []))
+        s.semantics = scoring.semantics(
+            answer.sql,
+            question.get("required_semantics", []),
+            question.get("forbidden_semantics", []),
+        )
     return s
 
 
-def run(usecase: str, *, agent_kind: str, om: bool, repeats: int, tier: str | None,
-        user: str, model: str, effort: str) -> list[Result]:
+def run(
+    usecase: str,
+    *,
+    agent_kind: str,
+    om: bool,
+    repeats: int,
+    tier: str | None,
+    user: str,
+    model: str,
+    effort: str,
+) -> list[Result]:
     questions = load_questions(usecase, tier)
     connections = GoldConnections()
     results: list[Result] = []
@@ -189,16 +225,28 @@ def run(usecase: str, *, agent_kind: str, om: bool, repeats: int, tier: str | No
             if agent_kind == "gold":
                 answer = GoldAgent(token).ask(question)
             else:
-                answer = agent_mod.ask(question["question"], token, om=om,
-                                       model=model, effort=effort)
+                answer = agent_mod.ask(
+                    question["question"], token, om=om, model=model, effort=effort
+                )
             s = evaluate(question, answer, gold, conn)
-            result = Result(question, answer.text, answer.sql, sorted(answer.tables), s,
-                            len(answer.tool_calls), answer.input_tokens, answer.output_tokens,
-                            answer.ms or int((time.time() - t0) * 1000))
+            result = Result(
+                question,
+                answer.text,
+                answer.sql,
+                sorted(answer.tables),
+                s,
+                len(answer.tool_calls),
+                answer.input_tokens,
+                answer.output_tokens,
+                answer.ms or int((time.time() - t0) * 1000),
+            )
             results.append(result)
             mark = "\033[32mpass\033[0m" if result.passed else "\033[31mFAIL\033[0m"
-            print(f"  {mark}  [{question['tier']}] {label}: {question['question'][:64]}"
-                  + (f"  — {s.detail}" if s.detail and not result.passed else ""), flush=True)
+            print(
+                f"  {mark}  [{question['tier']}] {label}: {question['question'][:64]}"
+                + (f"  — {s.detail}" if s.detail and not result.passed else ""),
+                flush=True,
+            )
     connections.close()
     return results
 
@@ -211,13 +259,17 @@ def summarise(results: list[Result]) -> dict:
     by_tier: dict[str, dict] = {}
     for tier in sorted({r.question["tier"] for r in results}):
         subset = [r for r in results if r.question["tier"] == tier]
-        by_tier[tier] = {"n": len(subset),
-                         "passed": sum(1 for r in subset if r.passed),
-                         "pass_rate": round(100 * sum(1 for r in subset if r.passed) / len(subset), 1)}
+        by_tier[tier] = {
+            "n": len(subset),
+            "passed": sum(1 for r in subset if r.passed),
+            "pass_rate": round(100 * sum(1 for r in subset if r.passed) / len(subset), 1),
+        }
     return {
         "n": len(results),
         "passed": sum(1 for r in results if r.passed),
-        "pass_rate": round(100 * sum(1 for r in results if r.passed) / len(results), 1) if results else 0,
+        "pass_rate": round(100 * sum(1 for r in results if r.passed) / len(results), 1)
+        if results
+        else 0,
         "execution_accuracy": rate("execution"),
         "grounding": rate("grounding"),
         "semantic_fidelity": rate("semantics"),
@@ -232,17 +284,24 @@ def summarise(results: list[Result]) -> dict:
 def fingerprint(usecase: str, model: str, effort: str, om: bool) -> dict:
     prompt = (pathlib.Path(agent_mod.HERE) / "prompt.md").read_bytes()
     questions = (ROOT / "usecases" / usecase / "questions.jsonl").read_bytes()
-    return {"model": model, "effort": effort, "catalog": om,
-            "prompt_sha256": hashlib.sha256(prompt).hexdigest()[:12],
-            "questions_sha256": hashlib.sha256(questions).hexdigest()[:12]}
+    return {
+        "model": model,
+        "effort": effort,
+        "catalog": om,
+        "prompt_sha256": hashlib.sha256(prompt).hexdigest()[:12],
+        "questions_sha256": hashlib.sha256(questions).hexdigest()[:12],
+    }
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--usecase", default="contoso")
     ap.add_argument("--agent", default="claude", choices=("claude", "gold"))
-    ap.add_argument("--ablation", action="store_true",
-                    help="run twice, with and without the catalog, and report the delta")
+    ap.add_argument(
+        "--ablation",
+        action="store_true",
+        help="run twice, with and without the catalog, and report the delta",
+    )
     ap.add_argument("--no-context", action="store_true", help="run without the catalog only")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--tier", default=None)
@@ -261,21 +320,41 @@ def main() -> int:
     report = {"usecase": a.usecase, "agent": a.agent, "runs": {}}
     for label, om in runs:
         print(f"\n{label}")
-        results = run(a.usecase, agent_kind=a.agent, om=om, repeats=a.repeats, tier=a.tier,
-                      user=a.user, model=a.model, effort=a.effort)
+        results = run(
+            a.usecase,
+            agent_kind=a.agent,
+            om=om,
+            repeats=a.repeats,
+            tier=a.tier,
+            user=a.user,
+            model=a.model,
+            effort=a.effort,
+        )
         summary = summarise(results)
         report["runs"][label] = {
             "fingerprint": fingerprint(a.usecase, a.model, a.effort, om),
             "summary": summary,
-            "results": [{"id": r.question["id"], "tier": r.question["tier"],
-                         "passed": r.passed, "score": r.score.as_dict(),
-                         "sql": r.sql, "tables": r.tables, "answer": r.answer_text[:600],
-                         "tool_calls": r.tool_calls, "tokens_out": r.tokens_out, "ms": r.ms}
-                        for r in results],
+            "results": [
+                {
+                    "id": r.question["id"],
+                    "tier": r.question["tier"],
+                    "passed": r.passed,
+                    "score": r.score.as_dict(),
+                    "sql": r.sql,
+                    "tables": r.tables,
+                    "answer": r.answer_text[:600],
+                    "tool_calls": r.tool_calls,
+                    "tokens_out": r.tokens_out,
+                    "ms": r.ms,
+                }
+                for r in results
+            ],
         }
-        print(f"  {summary['passed']}/{summary['n']} passed "
-              f"({summary['pass_rate']}%) · execution {summary['execution_accuracy']}% · "
-              f"grounding {summary['grounding']}% · semantics {summary['semantic_fidelity']}%")
+        print(
+            f"  {summary['passed']}/{summary['n']} passed "
+            f"({summary['pass_rate']}%) · execution {summary['execution_accuracy']}% · "
+            f"grounding {summary['grounding']}% · semantics {summary['semantic_fidelity']}%"
+        )
 
     if a.ablation and len(report["runs"]) == 2:
         with_ = report["runs"]["with catalog"]["summary"]
@@ -297,8 +376,7 @@ def main() -> int:
     out.write_text(json.dumps(report, indent=1))
     print(f"\nreport: {out}")
 
-    failed = sum(1 for run_ in report["runs"].values()
-                 for r in run_["results"] if not r["passed"])
+    failed = sum(1 for run_ in report["runs"].values() for r in run_["results"] if not r["passed"])
     threshold = float(os.environ.get("DAS_EVAL_MIN_PASS_RATE", "0"))
     primary = report["runs"].get("with catalog", {}).get("summary", {}).get("pass_rate", 0)
     if threshold and primary < threshold:

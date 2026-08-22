@@ -7,6 +7,7 @@ Standard surfaces only: Fabric REST (workspace/warehouse create, LRO), Graph
 token (DDL + bulk insert). Idempotent: existing workspace/warehouse/tables
 are reused; --reset drops and recreates the tables.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,8 +39,11 @@ def provision(dataset: str, reset: bool) -> dict:
     if wh:
         c.log(f"warehouse {ds.WAREHOUSE} exists ({wh['id']})")
     else:
-        wh = c.fabric_post_wait(f"/v1/workspaces/{ws['id']}/warehouses",
-                                {"displayName": ds.WAREHOUSE}, "create warehouse")
+        wh = c.fabric_post_wait(
+            f"/v1/workspaces/{ws['id']}/warehouses",
+            {"displayName": ds.WAREHOUSE},
+            "create warehouse",
+        )
         c.log(f"created warehouse {ds.WAREHOUSE} ({wh['id']})")
 
     src = c.source_for(ds.WORKSPACE, ds.WAREHOUSE)
@@ -60,8 +64,12 @@ def provision(dataset: str, reset: bool) -> dict:
 
     cur = conn.cursor()
     data = ds.generate()
-    existing = {r[0] for r in cur.execute(
-        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=?", ds.SCHEMA)}
+    existing = {
+        r[0]
+        for r in cur.execute(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=?", ds.SCHEMA
+        )
+    }
     for table in ds.COLUMNS:
         if table in existing and reset:
             cur.execute(f"DROP TABLE [{ds.SCHEMA}].[{table}]")
@@ -75,14 +83,22 @@ def provision(dataset: str, reset: bool) -> dict:
         ncols = len(ds.COLUMNS[table])
         cur.fast_executemany = True
         cur.executemany(
-            f"INSERT INTO [{ds.SCHEMA}].[{table}] VALUES ({','.join('?' * ncols)})", rows)
+            f"INSERT INTO [{ds.SCHEMA}].[{table}] VALUES ({','.join('?' * ncols)})", rows
+        )
         conn.commit()
         c.log(f"{table}: created, {len(rows)} rows")
     conn.close()
 
-    return c.save_state(dataset=dataset, workspace=ws["id"], workspace_name=ds.WORKSPACE,
-                        warehouse=wh["id"], warehouse_name=ds.WAREHOUSE,
-                        sql_server=server, sql_database=database, schema=ds.SCHEMA)
+    return c.save_state(
+        dataset=dataset,
+        workspace=ws["id"],
+        workspace_name=ds.WORKSPACE,
+        warehouse=wh["id"],
+        warehouse_name=ds.WAREHOUSE,
+        sql_server=server,
+        sql_database=database,
+        schema=ds.SCHEMA,
+    )
 
 
 def provision_postgres(dataset: str, ds, reset: bool) -> dict:
@@ -102,17 +118,20 @@ def provision_postgres(dataset: str, ds, reset: bool) -> dict:
         # a dataset module rather than from input, but composing costs nothing
         # and keeps the shape that would be safe if that ever changed.
         cur.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(ds.SCHEMA)))
-        cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = %s",
-                    (ds.SCHEMA,))
+        cur.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = %s", (ds.SCHEMA,)
+        )
         existing = {r[0] for r in cur.fetchall()}
         for table in ds.COLUMNS:
             if table in existing and reset:
-                cur.execute(sql.SQL("DROP TABLE {} CASCADE").format(
-                    sql.Identifier(ds.SCHEMA, table)))
+                cur.execute(
+                    sql.SQL("DROP TABLE {} CASCADE").format(sql.Identifier(ds.SCHEMA, table))
+                )
                 existing.discard(table)
             if table in existing:
-                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(
-                    sql.Identifier(ds.SCHEMA, table)))
+                cur.execute(
+                    sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(ds.SCHEMA, table))
+                )
                 row = cur.fetchone()
                 count = row[0] if row else 0
                 c.log(f"{table}: exists with {count} rows (use --reset to reload)")
@@ -120,8 +139,9 @@ def provision_postgres(dataset: str, ds, reset: bool) -> dict:
             cur.execute(sql.SQL(ds.ddl(table)))
             rows = data[table]
             ",".join(["%s"] * len(ds.COLUMNS[table]))
-            with cur.copy(sql.SQL("COPY {} FROM STDIN").format(
-                    sql.Identifier(ds.SCHEMA, table))) as copy:
+            with cur.copy(
+                sql.SQL("COPY {} FROM STDIN").format(sql.Identifier(ds.SCHEMA, table))
+            ) as copy:
                 for row in rows:
                     copy.write_row(row)
             c.log(f"{table}: created, {len(rows)} rows")

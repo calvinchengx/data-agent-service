@@ -9,6 +9,7 @@ Nothing here knows anything about a particular business. The tables, the
 glossary and the metric formulas all arrive at runtime from the catalog; the
 prompt (agent/prompt.md) describes the *method*, never the data.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -86,15 +87,28 @@ def build_toolbox(token: str, *, om: bool = True) -> Toolbox:
     """
     base = os.environ["DAS_APIM_BASE"].rstrip("/")
     insecure = os.environ.get("DAS_ENTRA_TLS_INSECURE", "false").lower() in ("1", "true", "yes")
-    servers = [McpServer("warehouse", base + os.environ.get("DAS_WAREHOUSE_MCP_PATH", "/warehouse/mcp"),
-                         token, insecure=insecure)]
+    servers = [
+        McpServer(
+            "warehouse",
+            base + os.environ.get("DAS_WAREHOUSE_MCP_PATH", "/warehouse/mcp"),
+            token,
+            insecure=insecure,
+        )
+    ]
     if om:
         extra = {}
         key = os.environ.get("DAS_OM_SUBSCRIPTION_KEY", "")
         if key:
             extra["Ocp-Apim-Subscription-Key"] = key
-        servers.append(McpServer("catalog", base + os.environ.get("DAS_OM_MCP_PATH", "/om/mcp"),
-                                 token, headers=extra, insecure=insecure))
+        servers.append(
+            McpServer(
+                "catalog",
+                base + os.environ.get("DAS_OM_MCP_PATH", "/om/mcp"),
+                token,
+                headers=extra,
+                insecure=insecure,
+            )
+        )
     return Toolbox(servers)
 
 
@@ -111,9 +125,16 @@ def model_client() -> Any:
     return anthropic.Anthropic(base_url=base) if base else anthropic.Anthropic()
 
 
-def ask(question: str, token: str, *, om: bool = True, model: str = DEFAULT_MODEL,
-        effort: str = DEFAULT_EFFORT, on_step: Callable[[str], None] | None = None,
-        client: Any = None) -> Answer:
+def ask(
+    question: str,
+    token: str,
+    *,
+    om: bool = True,
+    model: str = DEFAULT_MODEL,
+    effort: str = DEFAULT_EFFORT,
+    on_step: Callable[[str], None] | None = None,
+    client: Any = None,
+) -> Answer:
     toolbox = build_toolbox(token, om=om)
     tools = toolbox.connect()
     client = client or model_client()
@@ -125,7 +146,8 @@ def ask(question: str, token: str, *, om: bool = True, model: str = DEFAULT_MODE
 
     for _ in range(MAX_STEPS):
         response = client.beta.messages.create(
-            model=model, max_tokens=16000,
+            model=model,
+            max_tokens=16000,
             system=system_prompt(),
             output_config={"effort": effort},
             tools=tools,
@@ -140,8 +162,14 @@ def ask(question: str, token: str, *, om: bool = True, model: str = DEFAULT_MODE
         stop_reason = response.stop_reason or ""
 
         if stop_reason == "refusal":
-            return Answer("(the model declined to answer this question)", calls,
-                          tokens_in, tokens_out, int((time.time() - started) * 1000), stop_reason)
+            return Answer(
+                "(the model declined to answer this question)",
+                calls,
+                tokens_in,
+                tokens_out,
+                int((time.time() - started) * 1000),
+                stop_reason,
+            )
         if stop_reason == "pause_turn":
             messages.append({"role": "assistant", "content": response.content})
             continue
@@ -149,32 +177,54 @@ def ask(question: str, token: str, *, om: bool = True, model: str = DEFAULT_MODE
         uses = [b for b in response.content if b.type == "tool_use"]
         if not uses:
             text = "".join(b.text for b in response.content if b.type == "text")
-            return Answer(text.strip(), calls, tokens_in, tokens_out,
-                          int((time.time() - started) * 1000), stop_reason)
+            return Answer(
+                text.strip(),
+                calls,
+                tokens_in,
+                tokens_out,
+                int((time.time() - started) * 1000),
+                stop_reason,
+            )
 
         messages.append({"role": "assistant", "content": response.content})
         results = []
         for use in uses:
             t0 = time.time()
             text, is_error = toolbox.call(use.name, dict(use.input))
-            call = ToolCall(use.name, dict(use.input), text, is_error,
-                            int((time.time() - t0) * 1000))
+            call = ToolCall(
+                use.name, dict(use.input), text, is_error, int((time.time() - t0) * 1000)
+            )
             calls.append(call)
             if on_step:
                 on_step(_describe(call))
-            results.append({"type": "tool_result", "tool_use_id": use.id,
-                            "content": text[:20000] or "(no output)",
-                            # A refusal is a RESULT, not a transport failure:
-                            # the model must read it and change course.
-                            "is_error": is_error})
+            results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": use.id,
+                    "content": text[:20000] or "(no output)",
+                    # A refusal is a RESULT, not a transport failure:
+                    # the model must read it and change course.
+                    "is_error": is_error,
+                }
+            )
         messages.append({"role": "user", "content": results})
 
-    return Answer("(gave up: too many steps without an answer)", calls, tokens_in, tokens_out,
-                  int((time.time() - started) * 1000), "max_steps")
+    return Answer(
+        "(gave up: too many steps without an answer)",
+        calls,
+        tokens_in,
+        tokens_out,
+        int((time.time() - started) * 1000),
+        "max_steps",
+    )
 
 
 def _describe(call: ToolCall) -> str:
-    arg = call.arguments.get("sql") or call.arguments.get("table") \
-        or call.arguments.get("query") or json.dumps(call.arguments)[:80]
+    arg = (
+        call.arguments.get("sql")
+        or call.arguments.get("table")
+        or call.arguments.get("query")
+        or json.dumps(call.arguments)[:80]
+    )
     mark = "!" if call.is_error else "·"
     return f"  {mark} {call.name}({str(arg)[:110]}) {call.ms}ms"

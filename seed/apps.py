@@ -22,6 +22,7 @@ What it creates:
     used (parity gap, upstream #6). The executor reads it with its managed
     identity; it is never an environment variable.
 """
+
 from __future__ import annotations
 
 import json
@@ -29,14 +30,17 @@ import json
 from seed import common as c
 
 G = c.LOGIN_ORIGIN + "/graph/v1.0"
-API_AUDIENCE = c.CFG["DAS_AGENT_AUDIENCE"]              # api://data-agent-service
+API_AUDIENCE = c.CFG["DAS_AGENT_AUDIENCE"]  # api://data-agent-service
 SCOPE = "access_as_user"
 EXCHANGE_AUDIENCE = "api://AzureADTokenExchange"
 
 
 def apps() -> list[dict]:
-    _st, _, b = c.must("GET", f"{G}/applications?$select=appId,displayName,identifierUris,api",
-                      headers=c.bearer(c.GRAPH_AUD))
+    _st, _, b = c.must(
+        "GET",
+        f"{G}/applications?$select=appId,displayName,identifierUris,api",
+        headers=c.bearer(c.GRAPH_AUD),
+    )
     return b["value"] if isinstance(b, dict) else json.loads(b)["value"]
 
 
@@ -61,9 +65,11 @@ def _admin_add_scope(app_id: str, value: str, display: str) -> bool:
     """
     # emulator-setup-only: a real tenant already exposes the scope, so this
     # runs only where the postcondition is not already true (upstream #5).
-    st, _, b = c.http("POST", f"{c.LOGIN_ORIGIN}/admin/api/apps/{app_id}/scopes",
-                      json_body={"value": value, "adminConsentDisplayName": display,
-                                 "isEnabled": True})
+    st, _, b = c.http(
+        "POST",
+        f"{c.LOGIN_ORIGIN}/admin/api/apps/{app_id}/scopes",
+        json_body={"value": value, "adminConsentDisplayName": display, "isEnabled": True},
+    )
     if st in (200, 201, 409):
         c.log(f"scope {value}: registered via tenant admin surface ({st})")
         return True
@@ -72,8 +78,10 @@ def _admin_add_scope(app_id: str, value: str, display: str) -> bool:
 
 
 def has_scope(app: dict, value: str) -> bool:
-    return any(s.get("value") == value
-               for s in ((app.get("api") or {}).get("oauth2PermissionScopes") or []))
+    return any(
+        s.get("value") == value
+        for s in ((app.get("api") or {}).get("oauth2PermissionScopes") or [])
+    )
 
 
 def ensure_api_app() -> dict:
@@ -82,19 +90,30 @@ def ensure_api_app() -> dict:
         "displayName": "data-agent-service API",
         "identifierUris": [API_AUDIENCE],
         "signInAudience": "AzureADMyOrg",
-        "api": {"oauth2PermissionScopes": [{
-            "value": SCOPE, "type": "User", "isEnabled": True,
-            "adminConsentDisplayName": "Ask questions of governed data",
-            "adminConsentDescription": (
-                "Allows the app to query governed data sources and read their "
-                "business context on behalf of the signed-in user."),
-            "userConsentDisplayName": "Ask questions of governed data",
-            "userConsentDescription": "Lets the data agent answer your questions using your own access.",
-        }]},
+        "api": {
+            "oauth2PermissionScopes": [
+                {
+                    "value": SCOPE,
+                    "type": "User",
+                    "isEnabled": True,
+                    "adminConsentDisplayName": "Ask questions of governed data",
+                    "adminConsentDescription": (
+                        "Allows the app to query governed data sources and read their "
+                        "business context on behalf of the signed-in user."
+                    ),
+                    "userConsentDisplayName": "Ask questions of governed data",
+                    "userConsentDescription": "Lets the data agent answer your questions using your own access.",
+                }
+            ]
+        },
     }
     if app:
-        c.http("PATCH", f"{G}/applications/{app['appId']}", headers=c.bearer(c.GRAPH_AUD),
-               json_body={"api": body["api"]})
+        c.http(
+            "PATCH",
+            f"{G}/applications/{app['appId']}",
+            headers=c.bearer(c.GRAPH_AUD),
+            json_body={"api": body["api"]},
+        )
         c.log(f"API app {API_AUDIENCE} exists ({app['appId']})")
     else:
         _, _, r = c.must("POST", f"{G}/applications", headers=c.bearer(c.GRAPH_AUD), json_body=body)
@@ -105,15 +124,24 @@ def ensure_api_app() -> dict:
     # such field, so this is one more setup-only action; a real tenant makes an
     # app confidential the moment it holds a credential.
     # emulator-setup-only: Graph honours this write on a real tenant.
-    c.http("PATCH", f"{c.LOGIN_ORIGIN}/admin/api/apps/{(app or {}).get('appId')}",
-           json_body={"isConfidential": True})
+    c.http(
+        "PATCH",
+        f"{c.LOGIN_ORIGIN}/admin/api/apps/{(app or {}).get('appId')}",
+        json_body={"isConfidential": True},
+    )
 
     # Postcondition: the delegated scope must be issuable. Verify through Graph.
     fresh = by_uri(API_AUDIENCE) or app
     if not has_scope(fresh, SCOPE):
-        _admin_add_scope(fresh["appId"], SCOPE, body["api"]["oauth2PermissionScopes"][0]["adminConsentDisplayName"])
+        _admin_add_scope(
+            fresh["appId"],
+            SCOPE,
+            body["api"]["oauth2PermissionScopes"][0]["adminConsentDisplayName"],
+        )
         fresh = by_uri(API_AUDIENCE) or fresh
-    c.log(f"scope {SCOPE} on {API_AUDIENCE}: {'present' if has_scope(fresh, SCOPE) else 'NOT VISIBLE via Graph'}")
+    c.log(
+        f"scope {SCOPE} on {API_AUDIENCE}: {'present' if has_scope(fresh, SCOPE) else 'NOT VISIBLE via Graph'}"
+    )
     return fresh
 
 
@@ -123,13 +151,17 @@ def ensure_federated_credential(app_id: str, name: str, issuer: str, subject: st
     path = f"{G}/applications/{app_id}/federatedIdentityCredentials"
     st, _, b = c.http("GET", path, headers=c.bearer(c.GRAPH_AUD))
     if st == 200:
-        existing = (json.loads(b).get("value") or [])
+        existing = json.loads(b).get("value") or []
         if any(f.get("name") == name for f in existing):
             c.log(f"federated credential {name} exists on {app_id}")
             return
-    body = {"name": name, "issuer": issuer, "subject": subject,
-            "audiences": [EXCHANGE_AUDIENCE],
-            "description": "data-agent-service executor managed identity"}
+    body = {
+        "name": name,
+        "issuer": issuer,
+        "subject": subject,
+        "audiences": [EXCHANGE_AUDIENCE],
+        "description": "data-agent-service executor managed identity",
+    }
     st, _, b = c.http("POST", path, headers=c.bearer(c.GRAPH_AUD), json_body=body)
     if st in (200, 201):
         c.log(f"created federated credential {name} on {app_id}")
@@ -148,27 +180,41 @@ def ensure_secret(app_id: str, kv_name: str) -> str | None:
     """
     kv = c.CFG.get("DAS_KEYVAULT_URL", "").rstrip("/")
     if kv:
-        st, _, b = c.http("GET", f"{kv}/secrets/{kv_name}?api-version=7.5",
-                          headers=c.bearer("https://vault.azure.net"))
+        st, _, b = c.http(
+            "GET",
+            f"{kv}/secrets/{kv_name}?api-version=7.5",
+            headers=c.bearer("https://vault.azure.net"),
+        )
         if st == 200:
             c.log(f"secret {kv_name}: already in Key Vault")
             return json.loads(b)["value"]
-    st, _, b = c.http("POST", f"{G}/applications/{app_id}/addPassword", headers=c.bearer(c.GRAPH_AUD),
-                      json_body={"passwordCredential": {"displayName": "data-agent-service executor"}})
+    st, _, b = c.http(
+        "POST",
+        f"{G}/applications/{app_id}/addPassword",
+        headers=c.bearer(c.GRAPH_AUD),
+        json_body={"passwordCredential": {"displayName": "data-agent-service executor"}},
+    )
     secret = json.loads(b).get("secretText") if st in (200, 201) else None
     if not secret:
         # emulator-setup-only: `az ad app credential reset` does this in a
         # real tenant, and the runbook says so.
-        st2, _, b2 = c.http("POST", f"{c.LOGIN_ORIGIN}/admin/api/apps/{app_id}/secrets",
-                            json_body={"displayName": "data-agent-service executor"})
+        st2, _, b2 = c.http(
+            "POST",
+            f"{c.LOGIN_ORIGIN}/admin/api/apps/{app_id}/secrets",
+            json_body={"displayName": "data-agent-service executor"},
+        )
         if st2 not in (200, 201):
             c.log(f"WARN could not issue a client secret: graph {st}, admin {st2}")
             return None
         secret = json.loads(b2)["secretText"]
         c.log("client secret issued via tenant admin surface (Graph addPassword unavailable)")
     if kv:
-        st, _, b = c.http("PUT", f"{kv}/secrets/{kv_name}?api-version=7.5",
-                          headers=c.bearer("https://vault.azure.net"), json_body={"value": secret})
+        st, _, b = c.http(
+            "PUT",
+            f"{kv}/secrets/{kv_name}?api-version=7.5",
+            headers=c.bearer("https://vault.azure.net"),
+            json_body={"value": secret},
+        )
         c.log(f"secret {kv_name}: stored in Key Vault ({st})")
     return secret
 
@@ -184,9 +230,15 @@ def main() -> dict:
     ensure_federated_credential(api_id, "executor-managed-identity", c.ISSUER, mi_client_id)
     ensure_secret(api_id, "das-executor-client-secret")
 
-    out = {"api_app": api_id, "audience": API_AUDIENCE, "scope": SCOPE,
-           "public_client": agent_id, "middle_tier": api_id, "mi_subject": mi_client_id,
-           "secret_kv_name": "das-executor-client-secret"}
+    out = {
+        "api_app": api_id,
+        "audience": API_AUDIENCE,
+        "scope": SCOPE,
+        "public_client": agent_id,
+        "middle_tier": api_id,
+        "mi_subject": mi_client_id,
+        "secret_kv_name": "das-executor-client-secret",
+    }
     c.save_state(apps=out)
     return out
 

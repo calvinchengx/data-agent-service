@@ -5,6 +5,7 @@ mapping rules are pinned independently of what any tenant happens to contain.
 `.env` chooses one source, so without these the other one is only ever
 exercised by whoever happens to have configured it.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -17,8 +18,11 @@ import pytest
 EXECUTOR = Path(__file__).resolve().parent.parent / "services" / "warehouse-query-py"
 sys.path.insert(0, str(EXECUTOR))
 
-GROUP_MAP = {"DAS-Analysts": "Data.Analyst", "DAS-Finance": "Data.Finance",
-             "11111111-1111-1111-1111-111111111111": "Data.Admin"}
+GROUP_MAP = {
+    "DAS-Analysts": "Data.Analyst",
+    "DAS-Finance": "Data.Finance",
+    "11111111-1111-1111-1111-111111111111": "Data.Admin",
+}
 ALICE = "df8ec5dd-0000-0000-0000-000000000001"
 
 
@@ -26,6 +30,7 @@ ALICE = "df8ec5dd-0000-0000-0000-000000000001"
 def access(monkeypatch):
     """A fresh module per test: the resolver reads its configuration once, as
     a process does."""
+
     def build(source: str, **env):
         monkeypatch.setenv("DAS_ROLE_SOURCE", source)
         monkeypatch.setenv("DAS_GROUP_ROLE_MAP", json.dumps(GROUP_MAP))
@@ -35,6 +40,7 @@ def access(monkeypatch):
             monkeypatch.setenv(k, v)
         module = importlib.reload(importlib.import_module("access"))
         return module
+
     return build
 
 
@@ -58,8 +64,11 @@ APP_ROLE_RESPONSES = {
     "/servicePrincipals": {"value": [{"principalId": ALICE, "appRoleId": "role-1"}]},
 }
 GROUP_RESPONSES = {
-    "/users": {"value": [{"@odata.type": "#microsoft.graph.group",
-                          "id": "g1", "displayName": "DAS-Analysts"}]},
+    "/users": {
+        "value": [
+            {"@odata.type": "#microsoft.graph.group", "id": "g1", "displayName": "DAS-Analysts"}
+        ]
+    },
 }
 
 
@@ -88,23 +97,48 @@ def test_groups_claim_is_used_when_present(access):
     calls: list[str] = []
     r = resolver_with(module, GROUP_RESPONSES, calls)
     # A `groups` claim carries object ids, not names.
-    assert r.roles_for({"oid": ALICE,
-                        "groups": ["11111111-1111-1111-1111-111111111111"]}) == ("Data.Admin",)
+    assert r.roles_for({"oid": ALICE, "groups": ["11111111-1111-1111-1111-111111111111"]}) == (
+        "Data.Admin",
+    )
     assert calls == []
 
 
 def test_unmapped_group_grants_nothing(access):
     module = access("group")
-    r = resolver_with(module, {"/users": {"value": [{"@odata.type": "#microsoft.graph.group",
-                                                     "id": "g9", "displayName": "Some-Other-Team"}]}})
+    r = resolver_with(
+        module,
+        {
+            "/users": {
+                "value": [
+                    {
+                        "@odata.type": "#microsoft.graph.group",
+                        "id": "g9",
+                        "displayName": "Some-Other-Team",
+                    }
+                ]
+            }
+        },
+    )
     assert r.roles_for({"oid": ALICE}) == ()
 
 
 def test_both_sources_are_unioned(access):
     module = access("both")
-    r = resolver_with(module, {**APP_ROLE_RESPONSES,
-                               "/users": {"value": [{"@odata.type": "#microsoft.graph.group",
-                                                     "id": "g2", "displayName": "DAS-Finance"}]}})
+    r = resolver_with(
+        module,
+        {
+            **APP_ROLE_RESPONSES,
+            "/users": {
+                "value": [
+                    {
+                        "@odata.type": "#microsoft.graph.group",
+                        "id": "g2",
+                        "displayName": "DAS-Finance",
+                    }
+                ]
+            },
+        },
+    )
     assert r.roles_for({"oid": ALICE}) == ("Data.Analyst", "Data.Finance")
 
 
@@ -132,5 +166,12 @@ def test_group_mode_reaches_the_same_decision_as_app_role_mode(access):
 
 
 def module_rules(module):
-    return module.Rules([{"role": "Data.Analyst", "allow_tables": ["dbo.*"],
-                          "deny_columns": ["dbo.dim_customer.email"]}])
+    return module.Rules(
+        [
+            {
+                "role": "Data.Analyst",
+                "allow_tables": ["dbo.*"],
+                "deny_columns": ["dbo.dim_customer.email"],
+            }
+        ]
+    )

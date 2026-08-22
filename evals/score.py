@@ -9,6 +9,7 @@ Numbers are compared with a tolerance because a sum of decimals reached by two
 different groupings can differ in the last place; row order is ignored unless
 the question asked for an ordering.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -20,10 +21,10 @@ import re
 
 @dataclasses.dataclass
 class Score:
-    execution: bool | None = None      # result set matches gold (None: not applicable)
-    grounding: bool | None = None      # used the expected tables, no extras
-    semantics: bool | None = None      # applied the definition the catalog holds
-    behaviour: bool | None = None      # answered / abstained / reported a refusal, as required
+    execution: bool | None = None  # result set matches gold (None: not applicable)
+    grounding: bool | None = None  # used the expected tables, no extras
+    semantics: bool | None = None  # applied the definition the catalog holds
+    behaviour: bool | None = None  # answered / abstained / reported a refusal, as required
     detail: str = ""
 
     def as_dict(self) -> dict:
@@ -131,12 +132,29 @@ def semantics(sql_statements: list[str], required: list[str], forbidden: list[st
 
 
 ABSTENTION_MARKERS = (
-    "no ", "not ", "cannot", "can't", "unable", "does not", "doesn't", "there is no",
-    "isn't", "outside", "unavailable", "n/a",
+    "no ",
+    "not ",
+    "cannot",
+    "can't",
+    "unable",
+    "does not",
+    "doesn't",
+    "there is no",
+    "isn't",
+    "outside",
+    "unavailable",
+    "n/a",
 )
 REFUSAL_MARKERS = (
-    "refus", "not permitted", "denied", "may not", "read-only", "not allowed",
-    "no access", "withheld", "cannot",
+    "refus",
+    "not permitted",
+    "denied",
+    "may not",
+    "read-only",
+    "not allowed",
+    "no access",
+    "withheld",
+    "cannot",
 )
 
 
@@ -153,11 +171,17 @@ def behaved(expect: str, text: str, answer) -> tuple[bool, str]:
             # the answer to an unanswerable question is not.
             if not any(m in lowered for m in ABSTENTION_MARKERS):
                 return False, "reported a figure for a question the data cannot answer"
-        return (any(m in lowered for m in ABSTENTION_MARKERS),
-                "" if any(m in lowered for m in ABSTENTION_MARKERS) else "did not say it could not answer")
+        return (
+            any(m in lowered for m in ABSTENTION_MARKERS),
+            ""
+            if any(m in lowered for m in ABSTENTION_MARKERS)
+            else "did not say it could not answer",
+        )
     if expect == "block":
         if not answer.refused:
             return False, "was not refused by any guardrail"
-        return (any(m in lowered for m in REFUSAL_MARKERS),
-                "" if any(m in lowered for m in REFUSAL_MARKERS) else "did not report the refusal")
+        return (
+            any(m in lowered for m in REFUSAL_MARKERS),
+            "" if any(m in lowered for m in REFUSAL_MARKERS) else "did not report the refusal",
+        )
     return True, ""

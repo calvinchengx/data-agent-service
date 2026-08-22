@@ -19,6 +19,7 @@ Two hops, both standard:
 Nothing here is emulator-aware. `DAS_ENTRA_TLS_INSECURE` is the family's
 self-signed-certificate switch and is off in production.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -51,8 +52,9 @@ _SSL = _ssl_context()
 
 def _post_form(url: str, form: dict[str, str]) -> dict:
     data = urllib.parse.urlencode(form).encode()
-    req = urllib.request.Request(url, data=data, method="POST",
-                                 headers={"Content-Type": "application/x-www-form-urlencoded"})
+    req = urllib.request.Request(
+        url, data=data, method="POST", headers={"Content-Type": "application/x-www-form-urlencoded"}
+    )
     try:
         with urllib.request.urlopen(req, context=_SSL, timeout=30) as r:
             return json.loads(r.read())
@@ -76,8 +78,8 @@ class TokenError(Exception):
 
 @dataclasses.dataclass(frozen=True)
 class Settings:
-    authority: str                    # https://login.microsoftonline.com/<tenant>
-    client_id: str                    # the middle tier == the API app
+    authority: str  # https://login.microsoftonline.com/<tenant>
+    client_id: str  # the middle tier == the API app
     keyvault_url: str = ""
     secret_name: str = "das-executor-client-secret"
     identity_endpoint: str = ""
@@ -86,7 +88,7 @@ class Settings:
     @staticmethod
     def from_env() -> Settings:
         issuer = os.environ["DAS_ENTRA_ISSUER"].rstrip("/")
-        authority = issuer[:-len("/v2.0")] if issuer.endswith("/v2.0") else issuer
+        authority = issuer[: -len("/v2.0")] if issuer.endswith("/v2.0") else issuer
         return Settings(
             authority=authority,
             client_id=os.environ["DAS_MIDDLE_TIER_CLIENT_ID"],
@@ -137,8 +139,10 @@ class Credential:
             return None
         try:
             tok = self.managed_identity_token("https://vault.azure.net")
-            r = _get_json(f"{self.s.keyvault_url}/secrets/{self.s.secret_name}?api-version=7.5",
-                          {"Authorization": "Bearer " + tok})
+            r = _get_json(
+                f"{self.s.keyvault_url}/secrets/{self.s.secret_name}?api-version=7.5",
+                {"Authorization": "Bearer " + tok},
+            )
             self._secret = r["value"]
             return self._secret
         except (TokenError, KeyError):
@@ -162,10 +166,14 @@ class Credential:
         errors = []
         if assertion:
             try:
-                r = _post_form(url, {**form,
-                                     "client_assertion_type":
-                                         "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-                                     "client_assertion": assertion})
+                r = _post_form(
+                    url,
+                    {
+                        **form,
+                        "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                        "client_assertion": assertion,
+                    },
+                )
                 return self._store(key, r)
             except TokenError as e:
                 errors.append(f"federated credential: {e}")

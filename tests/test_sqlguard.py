@@ -1,8 +1,11 @@
 """The guard's contract. Both executor implementations must satisfy it."""
+
 import pathlib
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "services" / "warehouse-query-py"))
+sys.path.insert(
+    0, str(pathlib.Path(__file__).resolve().parent.parent / "services" / "warehouse-query-py")
+)
 import pytest
 
 from sqlguard import Denied, Policy, guard
@@ -66,7 +69,9 @@ def test_bigger_caller_limit_capped():
 
 
 def test_tables_reported():
-    v = guard("SELECT * FROM dbo.fct_sales s JOIN dbo.dim_product p ON p.product_id=s.product_id", P)
+    v = guard(
+        "SELECT * FROM dbo.fct_sales s JOIN dbo.dim_product p ON p.product_id=s.product_id", P
+    )
     assert v.tables == ("dbo.dim_product", "dbo.fct_sales")
 
 

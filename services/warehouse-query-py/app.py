@@ -18,6 +18,7 @@ Also served here, deliberately: the MCP protected-resource metadata
 (RFC 9728) that lets any MCP client discover how to authenticate. The gateway
 routes `/.well-known/*` to this service (docs/upstream-issues.md #1).
 """
+
 from __future__ import annotations
 
 import json
@@ -38,14 +39,16 @@ from sources import backend_for, guard, load_sources
 from sqlguard import Denied
 
 LOG = logging.getLogger("warehouse-query")
-logging.basicConfig(level=os.environ.get("DAS_LOG_LEVEL", "INFO"),
-                    format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(
+    level=os.environ.get("DAS_LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s"
+)
 
 ISSUER = os.environ["DAS_ENTRA_ISSUER"].rstrip("/")
 AUDIENCE = os.environ["DAS_AGENT_AUDIENCE"]
 REQUIRED_SCOPE = os.environ.get("DAS_REQUIRED_SCOPE", "access_as_user")
 JWKS_URL = os.environ.get("DAS_ENTRA_JWKS_URL") or (
-    (ISSUER[:-len("/v2.0")] if ISSUER.endswith("/v2.0") else ISSUER) + "/discovery/v2.0/keys")
+    (ISSUER[: -len("/v2.0")] if ISSUER.endswith("/v2.0") else ISSUER) + "/discovery/v2.0/keys"
+)
 MAX_ROWS = int(os.environ.get("DAS_SQL_MAX_ROWS", "500"))
 INSECURE = os.environ.get("DAS_ENTRA_TLS_INSECURE", "false").lower() in ("1", "true", "yes")
 
@@ -53,8 +56,11 @@ SOURCES = load_sources()
 CRED = Credential(Settings.from_env())
 RULES = access.Rules()
 ROLES = access.RoleResolver(lambda: CRED.managed_identity_token(access.GRAPH_AUDIENCE))
-app = FastAPI(title="warehouse-query", version="0.1.0",
-              description="Read-only query execution over governed data sources.")
+app = FastAPI(
+    title="warehouse-query",
+    version="0.1.0",
+    description="Read-only query execution over governed data sources.",
+)
 
 _JWKS: dict = {}
 _JWKS_AT = 0.0
@@ -65,6 +71,7 @@ def _jwks() -> dict:
     if _JWKS and time.time() - _JWKS_AT < 3600:
         return _JWKS
     import ssl
+
     ctx = ssl.create_default_context()
     if INSECURE:
         ctx.check_hostname = False
@@ -94,18 +101,19 @@ def principal(authorization: str | None) -> Principal:
     """Validate the caller's token. The gateway validates it too; this is the
     layer that cannot be bypassed by reaching the service directly."""
     if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(401, "a bearer token is required",
-                            headers=_challenge())
+        raise HTTPException(401, "a bearer token is required", headers=_challenge())
     token = authorization.split(" ", 1)[1].strip()
     try:
-        claims = jwt.decode(token, _jwks(), audience=AUDIENCE, issuer=ISSUER,
-                            options={"verify_at_hash": False})
+        claims = jwt.decode(
+            token, _jwks(), audience=AUDIENCE, issuer=ISSUER, options={"verify_at_hash": False}
+        )
     except Exception as e:  # noqa: BLE001 — any failure to VERIFY is a 401,
         # not a 500: an unparseable, unsigned or wrongly-keyed token is the
         # caller's problem, and reporting it as a server error would hide a
         # rejected credential behind an outage.
-        raise HTTPException(401, f"token rejected: {type(e).__name__}: {e}",
-                            headers=_challenge()) from None
+        raise HTTPException(
+            401, f"token rejected: {type(e).__name__}: {e}", headers=_challenge()
+        ) from None
     scopes = set((claims.get("scp") or "").split()) | set(claims.get("roles") or [])
     if REQUIRED_SCOPE and REQUIRED_SCOPE not in scopes:
         raise HTTPException(403, f"token lacks the {REQUIRED_SCOPE} scope")
@@ -127,7 +135,8 @@ def _metadata_url() -> str:
     parts = urllib.parse.urlsplit(base)
     path = parts.path.rstrip("/")
     return urllib.parse.urlunsplit(
-        (parts.scheme, parts.netloc, "/.well-known/oauth-protected-resource" + path, "", ""))
+        (parts.scheme, parts.netloc, "/.well-known/oauth-protected-resource" + path, "", "")
+    )
 
 
 def _challenge() -> dict[str, str]:
@@ -161,7 +170,9 @@ def _source(name: str | None):
     try:
         return SOURCES[name]
     except KeyError:
-        raise HTTPException(404, f"unknown source {name}; one of {', '.join(sorted(SOURCES))}") from None
+        raise HTTPException(
+            404, f"unknown source {name}; one of {', '.join(sorted(SOURCES))}"
+        ) from None
 
 
 def _principal_token(src, p: Principal) -> str:
@@ -169,8 +180,9 @@ def _principal_token(src, p: Principal) -> str:
     permissions apply at the engine; `service` means they do not, and the audit
     record says so."""
     if src.authz_tier != "user":
-        return CRED.managed_identity_token(os.environ.get("DAS_SQL_AUDIENCE",
-                                                          "https://database.windows.net"))
+        return CRED.managed_identity_token(
+            os.environ.get("DAS_SQL_AUDIENCE", "https://database.windows.net")
+        )
     try:
         # The scope the SOURCE needs, not one global setting: a Databricks
         # warehouse will not accept a token minted for Azure SQL, and the
@@ -190,18 +202,35 @@ def health():
     return {"status": "ok", "sources": sorted(SOURCES)}
 
 
-@app.get("/sources", operation_id="list_sources", summary="List the data sources this agent can query")
+@app.get(
+    "/sources", operation_id="list_sources", summary="List the data sources this agent can query"
+)
 def list_sources(authorization: str | None = Header(default=None)):
     principal(authorization)
-    return {"sources": [{"name": s.name, "kind": s.kind, "dialect": s.dialect,
-                         "authzTier": s.authz_tier, "openMetadataService": s.om_service_fqn,
-                         "schemas": list(s.schemas)} for s in SOURCES.values()]}
+    return {
+        "sources": [
+            {
+                "name": s.name,
+                "kind": s.kind,
+                "dialect": s.dialect,
+                "authzTier": s.authz_tier,
+                "openMetadataService": s.om_service_fqn,
+                "schemas": list(s.schemas),
+            }
+            for s in SOURCES.values()
+        ]
+    }
 
 
-@app.get("/tables", operation_id="list_tables",
-         summary="List the tables of a data source, as the asking user may see them")
-def list_tables(source: str | None = Query(default=None, description="Source name from list_sources"),
-                authorization: str | None = Header(default=None)):
+@app.get(
+    "/tables",
+    operation_id="list_tables",
+    summary="List the tables of a data source, as the asking user may see them",
+)
+def list_tables(
+    source: str | None = Query(default=None, description="Source name from list_sources"),
+    authorization: str | None = Header(default=None),
+):
     p = principal(authorization)
     src = _source(source)
     t0 = time.time()
@@ -212,19 +241,35 @@ def list_tables(source: str | None = Query(default=None, description="Source nam
         raise HTTPException(403, str(e)) from None
     except Exception as e:  # noqa: BLE001 — surface the engine's own message
         denied = _is_denial(e)
-        audit(op="list_tables", user=p.name, source=src.name,
-              verdict="denied" if denied else "error", reason=str(e)[:300])
+        audit(
+            op="list_tables",
+            user=p.name,
+            source=src.name,
+            verdict="denied" if denied else "error",
+            reason=str(e)[:300],
+        )
         raise HTTPException(403 if denied else 502, _engine_message(e)) from None
-    audit(op="list_tables", user=p.name, source=src.name, verdict="ok",
-          count=len(tables), ms=int((time.time() - t0) * 1000))
+    audit(
+        op="list_tables",
+        user=p.name,
+        source=src.name,
+        verdict="ok",
+        count=len(tables),
+        ms=int((time.time() - t0) * 1000),
+    )
     return {"source": src.name, "tables": tables}
 
 
-@app.get("/tables/{qualified_name}", operation_id="describe_table",
-         summary="Columns, types and keys of one table")
-def describe_table(qualified_name: str,
-                   source: str | None = Query(default=None),
-                   authorization: str | None = Header(default=None)):
+@app.get(
+    "/tables/{qualified_name}",
+    operation_id="describe_table",
+    summary="Columns, types and keys of one table",
+)
+def describe_table(
+    qualified_name: str,
+    source: str | None = Query(default=None),
+    authorization: str | None = Header(default=None),
+):
     p = principal(authorization)
     src = _source(source)
     t0 = time.time()
@@ -233,24 +278,51 @@ def describe_table(qualified_name: str,
     except LookupError as e:
         raise HTTPException(404, str(e)) from None
     except PermissionError as e:
-        audit(op="describe_table", user=p.name, source=src.name, table=qualified_name,
-              verdict="denied", reason=str(e))
+        audit(
+            op="describe_table",
+            user=p.name,
+            source=src.name,
+            table=qualified_name,
+            verdict="denied",
+            reason=str(e),
+        )
         raise HTTPException(403, str(e)) from None
     except Exception as e:  # noqa: BLE001
         denied = _is_denial(e)
-        audit(op="describe_table", user=p.name, source=src.name, table=qualified_name,
-              verdict="denied" if denied else "error", reason=str(e)[:300])
+        audit(
+            op="describe_table",
+            user=p.name,
+            source=src.name,
+            table=qualified_name,
+            verdict="denied" if denied else "error",
+            reason=str(e)[:300],
+        )
         raise HTTPException(403 if denied else 502, _engine_message(e)) from None
-    audit(op="describe_table", user=p.name, source=src.name, table=qualified_name,
-          verdict="ok", ms=int((time.time() - t0) * 1000))
+    audit(
+        op="describe_table",
+        user=p.name,
+        source=src.name,
+        table=qualified_name,
+        verdict="ok",
+        ms=int((time.time() - t0) * 1000),
+    )
     return {"source": src.name, **out}
 
 
-@app.post("/query", operation_id="run_query",
-          summary="Run one read-only SELECT and return rows")
-def run_query(body: dict = Body(..., examples=[{"sql": "SELECT TOP 10 * FROM dbo.fct_revenue_summary",  # noqa: B008 — FastAPI dependency declaration
-                                               "source": "contoso_warehouse", "maxRows": 100}]),
-              authorization: str | None = Header(default=None)):
+@app.post("/query", operation_id="run_query", summary="Run one read-only SELECT and return rows")
+def run_query(
+    body: dict = Body(  # noqa: B008 — FastAPI dependency declaration
+        ...,
+        examples=[
+            {
+                "sql": "SELECT TOP 10 * FROM dbo.fct_revenue_summary",
+                "source": "contoso_warehouse",
+                "maxRows": 100,
+            }
+        ],
+    ),
+    authorization: str | None = Header(default=None),
+):
     p = principal(authorization)
     src = _source(body.get("source"))
     sql = body.get("sql") or ""
@@ -260,14 +332,27 @@ def run_query(body: dict = Body(..., examples=[{"sql": "SELECT TOP 10 * FROM dbo
     try:
         verdict = guard(sql, src.policy(max_rows))
     except Denied as e:
-        audit(op="run_query", user=p.name, source=src.name, verdict="blocked",
-              reason=str(e), sql=sql[:500])
+        audit(
+            op="run_query",
+            user=p.name,
+            source=src.name,
+            verdict="blocked",
+            reason=str(e),
+            sql=sql[:500],
+        )
         raise HTTPException(400, f"query refused: {e}") from None
     try:
         RULES.check(p.roles, verdict.tables, verdict.columns)
     except access.Denied as e:
-        audit(op="run_query", user=p.name, roles=list(p.roles), source=src.name,
-              verdict="denied", reason=str(e), sql=sql[:500])
+        audit(
+            op="run_query",
+            user=p.name,
+            roles=list(p.roles),
+            source=src.name,
+            verdict="denied",
+            reason=str(e),
+            sql=sql[:500],
+        )
         raise HTTPException(403, str(e)) from None
 
     try:
@@ -277,21 +362,46 @@ def run_query(body: dict = Body(..., examples=[{"sql": "SELECT TOP 10 * FROM dbo
         raise HTTPException(403, str(e)) from None
     except Exception as e:  # noqa: BLE001
         denied = _is_denial(e)
-        audit(op="run_query", user=p.name, source=src.name,
-              verdict="denied" if denied else "error",
-              reason=str(e)[:300], sql=verdict.sql[:500])
+        audit(
+            op="run_query",
+            user=p.name,
+            source=src.name,
+            verdict="denied" if denied else "error",
+            reason=str(e)[:300],
+            sql=verdict.sql[:500],
+        )
         raise HTTPException(403 if denied else 502, _engine_message(e)) from None
 
     ms = int((time.time() - t0) * 1000)
-    audit(op="run_query", user=p.name, oid=p.oid, source=src.name, verdict="ok",
-          tables=list(verdict.tables), rows=result["rowCount"], ms=ms,
-          authz_tier=src.authz_tier, sql=verdict.sql[:1000])
-    return {"source": src.name, "sql": verdict.sql, "tables": list(verdict.tables),
-            "elapsedMs": ms, **result}
+    audit(
+        op="run_query",
+        user=p.name,
+        oid=p.oid,
+        source=src.name,
+        verdict="ok",
+        tables=list(verdict.tables),
+        rows=result["rowCount"],
+        ms=ms,
+        authz_tier=src.authz_tier,
+        sql=verdict.sql[:1000],
+    )
+    return {
+        "source": src.name,
+        "sql": verdict.sql,
+        "tables": list(verdict.tables),
+        "elapsedMs": ms,
+        **result,
+    }
 
 
-_DENIAL_MARKERS = ("access denied", "permission was denied", "principal has no role",
-                   "login failed", "not authorized", "permission denied")
+_DENIAL_MARKERS = (
+    "access denied",
+    "permission was denied",
+    "principal has no role",
+    "login failed",
+    "not authorized",
+    "permission denied",
+)
 
 
 def _is_denial(e: Exception) -> bool:
@@ -320,8 +430,7 @@ def _engine_message(e: Exception) -> str:
 # what an analyst needs to know, which is what the model actually reads.
 def _tools() -> list[dict]:
     one = next(iter(SOURCES.values())) if len(SOURCES) == 1 else None
-    return mcpproto.tool_definitions(one.name if one else None,
-                                     one.dialect if one else "tsql")
+    return mcpproto.tool_definitions(one.name if one else None, one.dialect if one else "tsql")
 
 
 def _filter_columns(p: Principal, described: dict) -> tuple[dict, list[str]]:
@@ -339,15 +448,26 @@ def _filter_columns(p: Principal, described: dict) -> tuple[dict, list[str]]:
     out = {**described, "columns": kept}
     if hidden:
         out["withheldColumns"] = len(hidden)
-        out["note"] = ("Some columns are not available to your role and are not listed; "
-                       "do not select them.")
+        out["note"] = (
+            "Some columns are not available to your role and are not listed; do not select them."
+        )
     return out, hidden
 
 
 def _sources_payload() -> dict:
-    return {"sources": [{"name": s.name, "kind": s.kind, "dialect": s.dialect,
-                         "authzTier": s.authz_tier, "openMetadataService": s.om_service_fqn,
-                         "schemas": list(s.schemas)} for s in SOURCES.values()]}
+    return {
+        "sources": [
+            {
+                "name": s.name,
+                "kind": s.kind,
+                "dialect": s.dialect,
+                "authzTier": s.authz_tier,
+                "openMetadataService": s.om_service_fqn,
+                "schemas": list(s.schemas),
+            }
+            for s in SOURCES.values()
+        ]
+    }
 
 
 def _dispatch(p: Principal, name: str, args: dict) -> dict:
@@ -359,15 +479,29 @@ def _dispatch(p: Principal, name: str, args: dict) -> dict:
         src = _source(args.get("source"))
         if name == "list_tables":
             tables = backend_for(src).list_tables(src, _principal_token(src, p))
-            audit(op="list_tables", user=p.name, source=src.name, verdict="ok",
-                  count=len(tables), via="mcp")
+            audit(
+                op="list_tables",
+                user=p.name,
+                source=src.name,
+                verdict="ok",
+                count=len(tables),
+                via="mcp",
+            )
             return mcpproto.text_content({"source": src.name, "tables": tables})
         if name == "describe_table":
             table = args.get("table") or ""
             out = backend_for(src).describe(src, table, _principal_token(src, p))
             out, hidden = _filter_columns(p, out)
-            audit(op="describe_table", user=p.name, roles=list(p.roles), source=src.name,
-                  table=table, verdict="ok", hidden=hidden, via="mcp")
+            audit(
+                op="describe_table",
+                user=p.name,
+                roles=list(p.roles),
+                source=src.name,
+                table=table,
+                verdict="ok",
+                hidden=hidden,
+                via="mcp",
+            )
             return mcpproto.text_content({"source": src.name, **out})
         if name == "run_query":
             sql = args.get("sql") or ""
@@ -376,38 +510,81 @@ def _dispatch(p: Principal, name: str, args: dict) -> dict:
             try:
                 verdict = guard(sql, src.policy(max_rows))
             except Denied as e:
-                audit(op="run_query", user=p.name, source=src.name, verdict="blocked",
-                      reason=str(e), sql=sql[:500], via="mcp")
+                audit(
+                    op="run_query",
+                    user=p.name,
+                    source=src.name,
+                    verdict="blocked",
+                    reason=str(e),
+                    sql=sql[:500],
+                    via="mcp",
+                )
                 return mcpproto.text_content(f"query refused: {e}", is_error=True)
             try:
                 RULES.check(p.roles, verdict.tables, verdict.columns)
             except access.Denied as e:
-                audit(op="run_query", user=p.name, roles=list(p.roles), source=src.name,
-                      verdict="denied", reason=str(e), sql=sql[:500], via="mcp")
+                audit(
+                    op="run_query",
+                    user=p.name,
+                    roles=list(p.roles),
+                    source=src.name,
+                    verdict="denied",
+                    reason=str(e),
+                    sql=sql[:500],
+                    via="mcp",
+                )
                 return mcpproto.text_content(f"refused: {e}", is_error=True)
             result = backend_for(src).run(src, verdict, _principal_token(src, p))
             ms = int((time.time() - t0) * 1000)
-            audit(op="run_query", user=p.name, oid=p.oid, roles=list(p.roles),
-                  source=src.name, verdict="ok", tables=list(verdict.tables),
-                  rows=result["rowCount"], ms=ms, authz_tier=src.authz_tier,
-                  sql=verdict.sql[:1000], via="mcp")
-            return mcpproto.text_content({"source": src.name, "sql": verdict.sql,
-                                          "tables": list(verdict.tables), "elapsedMs": ms,
-                                          **result})
+            audit(
+                op="run_query",
+                user=p.name,
+                oid=p.oid,
+                roles=list(p.roles),
+                source=src.name,
+                verdict="ok",
+                tables=list(verdict.tables),
+                rows=result["rowCount"],
+                ms=ms,
+                authz_tier=src.authz_tier,
+                sql=verdict.sql[:1000],
+                via="mcp",
+            )
+            return mcpproto.text_content(
+                {
+                    "source": src.name,
+                    "sql": verdict.sql,
+                    "tables": list(verdict.tables),
+                    "elapsedMs": ms,
+                    **result,
+                }
+            )
         return mcpproto.text_content(f"unknown tool {name}", is_error=True)
     except HTTPException as e:
-        audit(op=name, user=p.name, verdict="denied" if e.status_code in (401, 403) else "error",
-              reason=str(e.detail)[:300], via="mcp")
+        audit(
+            op=name,
+            user=p.name,
+            verdict="denied" if e.status_code in (401, 403) else "error",
+            reason=str(e.detail)[:300],
+            via="mcp",
+        )
         return mcpproto.text_content(f"{e.status_code}: {e.detail}", is_error=True)
     except LookupError as e:
         return mcpproto.text_content(str(e), is_error=True)
     except Exception as e:  # noqa: BLE001
         denied = _is_denial(e)
-        audit(op=name, user=p.name, verdict="denied" if denied else "error",
-              reason=str(e)[:300], via="mcp")
+        audit(
+            op=name,
+            user=p.name,
+            verdict="denied" if denied else "error",
+            reason=str(e)[:300],
+            via="mcp",
+        )
         return mcpproto.text_content(
             ("you do not have access: " if denied else "the source returned an error: ")
-            + _engine_message(e), is_error=True)
+            + _engine_message(e),
+            is_error=True,
+        )
 
 
 @app.post("/mcp", include_in_schema=False)
@@ -416,14 +593,20 @@ async def mcp_endpoint(request: Request, authorization: str | None = Header(defa
     try:
         payload = json.loads(await request.body() or b"{}")
     except json.JSONDecodeError:
-        return JSONResponse({"jsonrpc": "2.0", "id": None,
-                             "error": {"code": -32700, "message": "invalid JSON"}},
-                            status_code=400)
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "invalid JSON"}},
+            status_code=400,
+        )
     batch = isinstance(payload, list)
     messages = payload if batch else [payload]
     tools = _tools()
-    out = [r for r in (mcpproto.handle(m, tools=tools, call=lambda n, a: _dispatch(p, n, a))
-                       for m in messages) if r is not None]
+    out = [
+        r
+        for r in (
+            mcpproto.handle(m, tools=tools, call=lambda n, a: _dispatch(p, n, a)) for m in messages
+        )
+        if r is not None
+    ]
     if not out:
         # A notification gets 202 and NOTHING: a JSON `null` is a body, and a
         # client that parses what it receives should not be handed one.
@@ -435,8 +618,11 @@ async def mcp_endpoint(request: Request, authorization: str | None = Header(defa
 def mcp_stream():
     """This server initiates no messages, so the server-to-client stream is
     declined rather than held open for something that will never arrive."""
-    return JSONResponse({"error": "this server sends no unsolicited messages"},
-                        status_code=405, headers={"Allow": "POST"})
+    return JSONResponse(
+        {"error": "this server sends no unsolicited messages"},
+        status_code=405,
+        headers={"Allow": "POST"},
+    )
 
 
 # ------------------------------------------- MCP authorization discovery --
@@ -445,18 +631,20 @@ def protected_resource(request: Request):
     """RFC 9728. Lets any MCP client discover the authorization server and the
     scope to ask for, so no client needs bespoke configuration."""
     base = os.environ.get("DAS_PUBLIC_BASE_URL") or str(request.base_url).rstrip("/")
-    return JSONResponse({
-        "resource": AUDIENCE,
-        "authorization_servers": [ISSUER],
-        "scopes_supported": [f"{AUDIENCE}/{REQUIRED_SCOPE}"],
-        "bearer_methods_supported": ["header"],
-        "resource_documentation": f"{base}/docs",
-        # Entra implements no RFC 7591 registration endpoint, so a client
-        # cannot invent its own identity here: it uses one registered in the
-        # tenant. OAuth metadata documents permit extension parameters, and
-        # both executors emit this one identically because the contract pins
-        # it — an executor that omitted it would send a client down a path
-        # with no ending. (The MCP TOOL definitions carry no extensions; that
-        # is a different document with a different rule.)
-        "client_registration_required": False,
-    })
+    return JSONResponse(
+        {
+            "resource": AUDIENCE,
+            "authorization_servers": [ISSUER],
+            "scopes_supported": [f"{AUDIENCE}/{REQUIRED_SCOPE}"],
+            "bearer_methods_supported": ["header"],
+            "resource_documentation": f"{base}/docs",
+            # Entra implements no RFC 7591 registration endpoint, so a client
+            # cannot invent its own identity here: it uses one registered in the
+            # tenant. OAuth metadata documents permit extension parameters, and
+            # both executors emit this one identically because the contract pins
+            # it — an executor that omitted it would send a client down a path
+            # with no ending. (The MCP TOOL definitions carry no extensions; that
+            # is a different document with a different rule.)
+            "client_registration_required": False,
+        }
+    )

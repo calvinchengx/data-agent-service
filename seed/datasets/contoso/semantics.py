@@ -6,15 +6,23 @@ channel systems. This is the knowledge the agent must retrieve from
 OpenMetadata; it is never compiled into a prompt.
 """
 
-SERVICE = "fabric_contoso"           # OM databaseService name == DAS_SOURCES[].om_service_fqn
-DOMAIN = {"name": "contoso-commerce", "displayName": "Contoso Commerce",
-          "domainType": "Consumer-aligned",
-          "description": "Contoso's retail commerce across the POS and web selling systems."}
-DATA_PRODUCT = {"name": "contoso-analytics", "displayName": "Contoso Analytics",
-                "description": "Management reporting pack over Contoso's gold warehouse."}
+SERVICE = "fabric_contoso"  # OM databaseService name == DAS_SOURCES[].om_service_fqn
+DOMAIN = {
+    "name": "contoso-commerce",
+    "displayName": "Contoso Commerce",
+    "domainType": "Consumer-aligned",
+    "description": "Contoso's retail commerce across the POS and web selling systems.",
+}
+DATA_PRODUCT = {
+    "name": "contoso-analytics",
+    "displayName": "Contoso Analytics",
+    "description": "Management reporting pack over Contoso's gold warehouse.",
+}
 
-GLOSSARY = {"name": "Contoso Commerce",
-            "description": "Business vocabulary for Contoso's commerce reporting."}
+GLOSSARY = {
+    "name": "Contoso Commerce",
+    "description": "Business vocabulary for Contoso's commerce reporting.",
+}
 
 # name -> description, synonyms, columns it governs (table.column)
 TERMS = {
@@ -22,23 +30,33 @@ TERMS = {
         "description": (
             "Contoso's financial year starts on **1 April** and is named by the calendar "
             "year in which it ENDS: FY2025 runs 1 April 2024 – 31 March 2025. July trading "
-            "is therefore Q2, not Q3. Never substitute the calendar year."),
+            "is therefore Q2, not Q3. Never substitute the calendar year."
+        ),
         "synonyms": ["FY", "financial year"],
-        "columns": ["dim_date.fiscal_year", "dim_date.fiscal_year_label",
-                    "fct_revenue_summary.fiscal_year", "fct_revenue_summary.fiscal_year_label"],
+        "columns": [
+            "dim_date.fiscal_year",
+            "dim_date.fiscal_year_label",
+            "fct_revenue_summary.fiscal_year",
+            "fct_revenue_summary.fiscal_year_label",
+        ],
     },
     "Fiscal Quarter": {
         "description": "Quarter of the Fiscal Year: Q1 = Apr–Jun, Q2 = Jul–Sep, Q3 = Oct–Dec, Q4 = Jan–Mar.",
         "synonyms": ["FQ"],
-        "columns": ["dim_date.fiscal_quarter", "dim_date.fiscal_quarter_label",
-                    "fct_revenue_summary.fiscal_quarter", "fct_revenue_summary.fiscal_quarter_label"],
+        "columns": [
+            "dim_date.fiscal_quarter",
+            "dim_date.fiscal_quarter_label",
+            "fct_revenue_summary.fiscal_quarter",
+            "fct_revenue_summary.fiscal_quarter_label",
+        ],
     },
     "Net Revenue": {
         "description": (
             "The headline revenue figure: USD value of sale lines that were NOT cancelled. "
             "Stored as `revenue_usd` in fct_revenue_summary, or computed from fct_sales as "
             "SUM(amount_usd) WHERE is_cancelled = 0. Gross would overstate the business by "
-            "the cancellation rate (~5% of web orders); always report net unless asked for gross."),
+            "the cancellation rate (~5% of web orders); always report net unless asked for gross."
+        ),
         "synonyms": ["revenue", "net sales", "revenue_usd"],
         "columns": ["fct_revenue_summary.revenue_usd", "fct_sales.amount_usd"],
     },
@@ -56,10 +74,14 @@ TERMS = {
         "description": (
             "Marketing segment assigned by the POS system: value, mainstream, premium, lapsed, new. "
             "Web-only shoppers have no segment and are reported as **Unsegmented** in "
-            "fct_revenue_summary (NULL in dim_party)."),
+            "fct_revenue_summary (NULL in dim_party)."
+        ),
         "synonyms": ["marketing segment", "segment"],
-        "columns": ["dim_customer.marketing_segment", "dim_party.marketing_segment",
-                    "fct_revenue_summary.customer_segment"],
+        "columns": [
+            "dim_customer.marketing_segment",
+            "dim_party.marketing_segment",
+            "fct_revenue_summary.customer_segment",
+        ],
     },
     "Product Segment": {
         "description": "Group data office rollup of products: Core, Peripheral, or Unallocated (SKUs the web store sells that were never published to the hierarchy).",
@@ -69,13 +91,20 @@ TERMS = {
     "Channel System": {
         "description": "Which selling system booked the sale: POS (stores) or WEB (online storefront). 'Revenue is up' and 'online revenue is up' are different sentences.",
         "synonyms": ["channel", "selling system"],
-        "columns": ["fct_sales.channel_system", "fct_revenue_summary.channel_system", "fct_orders.channel"],
+        "columns": [
+            "fct_sales.channel_system",
+            "fct_revenue_summary.channel_system",
+            "fct_orders.channel",
+        ],
     },
     "Carried FX Rate": {
         "description": "FX rates are published on trading days only; a sale on a non-trading day is converted at the last published rate (rate_is_carried = 1). revenue_at_carried_rate reports how much Net Revenue depends on a carried rate.",
         "synonyms": ["carried-forward rate"],
-        "columns": ["fct_sales.rate_is_carried", "fct_orders.rate_is_carried",
-                    "fct_revenue_summary.revenue_at_carried_rate"],
+        "columns": [
+            "fct_sales.rate_is_carried",
+            "fct_orders.rate_is_carried",
+            "fct_revenue_summary.revenue_at_carried_rate",
+        ],
     },
     "Party": {
         "description": "A customer resolved ACROSS selling systems by email: one party may appear in POS, web, or both (in_pos / in_web). Use dim_party, not dim_customer, when counting people across channels.",
@@ -86,36 +115,66 @@ TERMS = {
 
 # OpenMetadata Metric entities: the canonical formulas.
 METRICS = [
-    {"name": "net_revenue_usd", "displayName": "Net Revenue (USD)",
-     "description": "Headline revenue: non-cancelled sale lines in USD. Prefer fct_revenue_summary.revenue_usd; equivalently SUM(amount_usd) over fct_sales WHERE is_cancelled = 0.",
-     "metricType": "SUM", "unitOfMeasurement": "DOLLARS", "granularity": "DAY",
-     "expression": "SELECT SUM(revenue_usd) FROM dbo.fct_revenue_summary",
-     "terms": ["Net Revenue"]},
-    {"name": "cancelled_revenue_usd", "displayName": "Cancelled Revenue (USD)",
-     "description": "USD value of cancelled sale lines.",
-     "metricType": "SUM", "unitOfMeasurement": "DOLLARS", "granularity": "DAY",
-     "expression": "SELECT SUM(cancelled_revenue_usd) FROM dbo.fct_revenue_summary",
-     "terms": ["Cancelled Revenue"]},
-    {"name": "gross_revenue_usd", "displayName": "Gross Revenue (USD)",
-     "description": "Net plus cancelled revenue.",
-     "metricType": "SUM", "unitOfMeasurement": "DOLLARS", "granularity": "DAY",
-     "expression": "SELECT SUM(revenue_usd + cancelled_revenue_usd) FROM dbo.fct_revenue_summary",
-     "terms": ["Gross Revenue"]},
-    {"name": "cancellation_rate", "displayName": "Cancellation rate",
-     "description": "Cancelled revenue as a share of gross revenue.",
-     "metricType": "RATIO", "unitOfMeasurement": "PERCENTAGE", "granularity": "MONTH",
-     "expression": "SELECT SUM(cancelled_revenue_usd) / NULLIF(SUM(revenue_usd + cancelled_revenue_usd), 0) FROM dbo.fct_revenue_summary",
-     "terms": ["Cancelled Revenue", "Gross Revenue"]},
-    {"name": "units_sold", "displayName": "Units sold",
-     "description": "Quantity on non-cancelled sale lines.",
-     "metricType": "SUM", "unitOfMeasurement": "COUNT", "granularity": "DAY",
-     "expression": "SELECT SUM(units) FROM dbo.fct_revenue_summary",
-     "terms": ["Net Revenue"]},
-    {"name": "average_order_value_usd", "displayName": "Average order value (USD)",
-     "description": "Net revenue per non-cancelled sale line.",
-     "metricType": "AVERAGE", "unitOfMeasurement": "DOLLARS", "granularity": "MONTH",
-     "expression": "SELECT SUM(amount_usd) / COUNT(*) FROM dbo.fct_sales WHERE is_cancelled = 0",
-     "terms": ["Net Revenue"]},
+    {
+        "name": "net_revenue_usd",
+        "displayName": "Net Revenue (USD)",
+        "description": "Headline revenue: non-cancelled sale lines in USD. Prefer fct_revenue_summary.revenue_usd; equivalently SUM(amount_usd) over fct_sales WHERE is_cancelled = 0.",
+        "metricType": "SUM",
+        "unitOfMeasurement": "DOLLARS",
+        "granularity": "DAY",
+        "expression": "SELECT SUM(revenue_usd) FROM dbo.fct_revenue_summary",
+        "terms": ["Net Revenue"],
+    },
+    {
+        "name": "cancelled_revenue_usd",
+        "displayName": "Cancelled Revenue (USD)",
+        "description": "USD value of cancelled sale lines.",
+        "metricType": "SUM",
+        "unitOfMeasurement": "DOLLARS",
+        "granularity": "DAY",
+        "expression": "SELECT SUM(cancelled_revenue_usd) FROM dbo.fct_revenue_summary",
+        "terms": ["Cancelled Revenue"],
+    },
+    {
+        "name": "gross_revenue_usd",
+        "displayName": "Gross Revenue (USD)",
+        "description": "Net plus cancelled revenue.",
+        "metricType": "SUM",
+        "unitOfMeasurement": "DOLLARS",
+        "granularity": "DAY",
+        "expression": "SELECT SUM(revenue_usd + cancelled_revenue_usd) FROM dbo.fct_revenue_summary",
+        "terms": ["Gross Revenue"],
+    },
+    {
+        "name": "cancellation_rate",
+        "displayName": "Cancellation rate",
+        "description": "Cancelled revenue as a share of gross revenue.",
+        "metricType": "RATIO",
+        "unitOfMeasurement": "PERCENTAGE",
+        "granularity": "MONTH",
+        "expression": "SELECT SUM(cancelled_revenue_usd) / NULLIF(SUM(revenue_usd + cancelled_revenue_usd), 0) FROM dbo.fct_revenue_summary",
+        "terms": ["Cancelled Revenue", "Gross Revenue"],
+    },
+    {
+        "name": "units_sold",
+        "displayName": "Units sold",
+        "description": "Quantity on non-cancelled sale lines.",
+        "metricType": "SUM",
+        "unitOfMeasurement": "COUNT",
+        "granularity": "DAY",
+        "expression": "SELECT SUM(units) FROM dbo.fct_revenue_summary",
+        "terms": ["Net Revenue"],
+    },
+    {
+        "name": "average_order_value_usd",
+        "displayName": "Average order value (USD)",
+        "description": "Net revenue per non-cancelled sale line.",
+        "metricType": "AVERAGE",
+        "unitOfMeasurement": "DOLLARS",
+        "granularity": "MONTH",
+        "expression": "SELECT SUM(amount_usd) / COUNT(*) FROM dbo.fct_sales WHERE is_cancelled = 0",
+        "terms": ["Net Revenue"],
+    },
 ]
 
 TABLES = {
@@ -149,10 +208,17 @@ KEYS = {
     "dim_date": {"pk": ["date_key"]},
     "dim_party": {"pk": ["party_key"], "fk": [("pos_customer_id", "dim_customer.customer_id")]},
     "dim_product": {"pk": ["product_id"]},
-    "fct_orders": {"pk": ["order_id"], "fk": [("customer_id", "dim_customer.customer_id"),
-                                               ("product_id", "dim_product.product_id")]},
-    "fct_sales": {"pk": ["sale_id"], "fk": [("party_key", "dim_party.party_key"),
-                                             ("product_id", "dim_product.product_id")]},
+    "fct_orders": {
+        "pk": ["order_id"],
+        "fk": [
+            ("customer_id", "dim_customer.customer_id"),
+            ("product_id", "dim_product.product_id"),
+        ],
+    },
+    "fct_sales": {
+        "pk": ["sale_id"],
+        "fk": [("party_key", "dim_party.party_key"), ("product_id", "dim_product.product_id")],
+    },
     "fct_revenue_summary": {"fk": [("country", "dim_country.country")]},
     "fct_daily_revenue": {"fk": [("country", "dim_country.country")]},
 }

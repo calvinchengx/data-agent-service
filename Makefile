@@ -76,6 +76,7 @@ endif
 
 lint: ## Lint and type-check everything (never edits; use `make format` for that)
 	@echo "== ruff (python lint)";      $(RUFF) check .
+	@echo "== ruff (python format)";    $(RUFF) format --check .
 	@echo "== ty (python types)";       $(TY) check
 	@echo "== golangci-lint (go)";      $(GOLINT)
 

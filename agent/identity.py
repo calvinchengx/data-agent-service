@@ -25,6 +25,7 @@ The three exist because a harness that can only authenticate one way is a
 harness that only runs in one place, and the whole point of this repo is that
 the same checks run against the emulators and against Azure.
 """
+
 from __future__ import annotations
 
 import json
@@ -37,7 +38,7 @@ import urllib.parse
 import urllib.request
 
 ISSUER = os.environ.get("DAS_ENTRA_ISSUER", "").rstrip("/")
-AUTHORITY = ISSUER[:-len("/v2.0")] if ISSUER.endswith("/v2.0") else ISSUER
+AUTHORITY = ISSUER[: -len("/v2.0")] if ISSUER.endswith("/v2.0") else ISSUER
 CLIENT_ID = os.environ.get("DAS_AGENT_CLIENT_ID", "")
 AUDIENCE = os.environ.get("DAS_AGENT_AUDIENCE", "")
 SCOPE = f"{AUDIENCE}/{os.environ.get('DAS_REQUIRED_SCOPE', 'access_as_user')}"
@@ -58,9 +59,12 @@ class SignInUnavailable(Exception):
 
 
 def _post(path: str, form: dict) -> dict:
-    req = urllib.request.Request(AUTHORITY + path, data=urllib.parse.urlencode(form).encode(),
-                                 headers={"Content-Type": "application/x-www-form-urlencoded"},
-                                 method="POST")
+    req = urllib.request.Request(
+        AUTHORITY + path,
+        data=urllib.parse.urlencode(form).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
     with urllib.request.urlopen(req, context=_SSL, timeout=60) as r:
         return json.loads(r.read())
 
@@ -86,7 +90,8 @@ def token_for(user: str | None = None, password: str | None = None) -> str:
     if MODE == "token":
         raise SignInUnavailable(
             f"DAS_HARNESS_AUTH=token and {env_key(user)} is not set. Supply a token for "
-            f"{user}, or switch DAS_HARNESS_AUTH to `device` to sign in interactively.")
+            f"{user}, or switch DAS_HARNESS_AUTH to `device` to sign in interactively."
+        )
     if MODE == "device":
         payload = device_code_flow(user)
     else:
@@ -94,17 +99,26 @@ def token_for(user: str | None = None, password: str | None = None) -> str:
         if not password:
             raise SignInUnavailable(
                 f"no password for {user}. Set DAS_TEST_PASSWORD, or use "
-                f"DAS_HARNESS_AUTH=device (interactive) or =token (supplied).")
+                f"DAS_HARNESS_AUTH=device (interactive) or =token (supplied)."
+            )
         try:
-            payload = _post("/oauth2/v2.0/token", {
-                "grant_type": "password", "client_id": CLIENT_ID,
-                "username": user, "password": password, "scope": SCOPE})
+            payload = _post(
+                "/oauth2/v2.0/token",
+                {
+                    "grant_type": "password",
+                    "client_id": CLIENT_ID,
+                    "username": user,
+                    "password": password,
+                    "scope": SCOPE,
+                },
+            )
         except urllib.error.HTTPError as e:
             body = e.read().decode()
             raise SignInUnavailable(
                 f"the password grant was refused for {user} ({e.code}). Production tenants "
                 f"usually disable it and Conditional Access blocks it; use "
-                f"DAS_HARNESS_AUTH=device or =token there.\n  {body[:300]}") from None
+                f"DAS_HARNESS_AUTH=device or =token there.\n  {body[:300]}"
+            ) from None
 
     _CACHE[user] = (time.time() + int(payload.get("expires_in", 3600)), payload["access_token"])
     return payload["access_token"]
@@ -115,17 +129,25 @@ def device_code_flow(user: str = "") -> dict:
     this process polls for the result."""
     start = _post("/oauth2/v2.0/devicecode", {"client_id": CLIENT_ID, "scope": SCOPE})
     who = f" as {user}" if user else ""
-    print(start.get("message") or
-          f"Sign in{who}: open {start['verification_uri']} and enter {start['user_code']}",
-          file=sys.stderr, flush=True)
+    print(
+        start.get("message")
+        or f"Sign in{who}: open {start['verification_uri']} and enter {start['user_code']}",
+        file=sys.stderr,
+        flush=True,
+    )
     interval = int(start.get("interval", 5))
     deadline = time.time() + int(start.get("expires_in", 900))
     while time.time() < deadline:
         time.sleep(interval)
         try:
-            return _post("/oauth2/v2.0/token", {
-                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                "client_id": CLIENT_ID, "device_code": start["device_code"]})
+            return _post(
+                "/oauth2/v2.0/token",
+                {
+                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                    "client_id": CLIENT_ID,
+                    "device_code": start["device_code"],
+                },
+            )
         except urllib.error.HTTPError as e:
             body = json.loads(e.read() or b"{}")
             error = body.get("error")

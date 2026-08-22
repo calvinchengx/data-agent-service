@@ -17,6 +17,7 @@ Policy, in order of severity:
 A query that cannot be parsed is refused. That is the whole point: the guard
 decides on a tree it understands, never on a regex over text it does not.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -26,15 +27,34 @@ from sqlglot import exp
 
 # Node types that must never appear, whatever the dialect spells them.
 _FORBIDDEN_NODES: tuple[type, ...] = (
-    exp.Insert, exp.Update, exp.Delete, exp.Merge, exp.Drop, exp.Create, exp.Alter,
-    exp.TruncateTable, exp.Grant, exp.Command, exp.Transaction, exp.Commit, exp.Rollback,
-    exp.Use, exp.Set,
+    exp.Insert,
+    exp.Update,
+    exp.Delete,
+    exp.Merge,
+    exp.Drop,
+    exp.Create,
+    exp.Alter,
+    exp.TruncateTable,
+    exp.Grant,
+    exp.Command,
+    exp.Transaction,
+    exp.Commit,
+    exp.Rollback,
+    exp.Use,
+    exp.Set,
 )
 
 # Callables that read or write outside the query's own tables, or run code.
 _DENIED_CALLS = {
-    "openrowset", "openquery", "opendatasource", "openxml", "bulk",
-    "sp_executesql", "xp_cmdshell", "sp_oacreate", "sp_send_dbmail",
+    "openrowset",
+    "openquery",
+    "opendatasource",
+    "openxml",
+    "bulk",
+    "sp_executesql",
+    "xp_cmdshell",
+    "sp_oacreate",
+    "sp_send_dbmail",
 }
 _DENIED_PREFIXES = ("xp_", "sp_", "fn_trace", "sys.fn_")
 
@@ -50,15 +70,15 @@ class Policy:
     allowed_schemas: tuple[str, ...] = ("dbo",)
     max_rows: int = 500
     max_length: int = 20_000
-    database: str | None = None      # the source's own database, for 3-part names
+    database: str | None = None  # the source's own database, for 3-part names
 
 
 @dataclasses.dataclass(frozen=True)
 class Verdict:
-    sql: str                          # the rewritten statement actually executed
-    tables: tuple[str, ...]           # schema-qualified tables it reads
+    sql: str  # the rewritten statement actually executed
+    tables: tuple[str, ...]  # schema-qualified tables it reads
     row_limit: int
-    columns: tuple[str, ...] = ()     # schema.table.column it reads; schema.table.* for a star
+    columns: tuple[str, ...] = ()  # schema.table.column it reads; schema.table.* for a star
 
 
 def _table_name(t: exp.Table) -> tuple[str | None, str | None, str]:
@@ -89,13 +109,17 @@ def guard(sql: str, policy: Policy) -> Verdict:
     if isinstance(root, exp.Subquery):
         root = root.this
     if not isinstance(root, (exp.Select, exp.Union, exp.Except, exp.Intersect)):
-        raise Denied(f"only SELECT is allowed; this endpoint is read-only "
-                     f"(got {type(root).__name__.upper()})")
+        raise Denied(
+            f"only SELECT is allowed; this endpoint is read-only "
+            f"(got {type(root).__name__.upper()})"
+        )
 
     # 3. no forbidden node anywhere, including inside CTEs and subqueries
     for node in tree.walk():
         if isinstance(node, _FORBIDDEN_NODES):
-            raise Denied(f"{type(node).__name__.upper()} is not allowed; this endpoint is read-only")
+            raise Denied(
+                f"{type(node).__name__.upper()} is not allowed; this endpoint is read-only"
+            )
         if isinstance(node, exp.Select) and node.args.get("into"):
             raise Denied("SELECT … INTO writes a table; this endpoint is read-only")
 
@@ -124,7 +148,9 @@ def guard(sql: str, policy: Policy) -> Verdict:
         if catalog and not policy.database:
             raise Denied(f"three-part name {catalog}.{schema}.{name} is not allowed")
         if schema is None:
-            raise Denied(f"table {name} must be schema-qualified (e.g. {sorted(allowed)[0]}.{name})")
+            raise Denied(
+                f"table {name} must be schema-qualified (e.g. {sorted(allowed)[0]}.{name})"
+            )
         if schema.lower() not in allowed:
             raise Denied(f"schema {schema} is not queryable; allowed: {', '.join(sorted(allowed))}")
         tables.add(f"{schema}.{name}")
@@ -133,8 +159,12 @@ def guard(sql: str, policy: Policy) -> Verdict:
 
     # 6. row ceiling — rewrite rather than trust the caller
     limited, row_limit = _apply_limit(root, policy)
-    return Verdict(sql=limited.sql(dialect=policy.dialect), tables=tuple(sorted(tables)),
-                   row_limit=row_limit, columns=_columns_read(tree, tables))
+    return Verdict(
+        sql=limited.sql(dialect=policy.dialect),
+        tables=tuple(sorted(tables)),
+        row_limit=row_limit,
+        columns=_columns_read(tree, tables),
+    )
 
 
 def _columns_read(tree: exp.Expression, tables: set[str]) -> tuple[str, ...]:
@@ -157,8 +187,11 @@ def _columns_read(tree: exp.Expression, tables: set[str]) -> tuple[str, ...]:
     for star in tree.find_all(exp.Star):
         parent = star.parent
         qualifier = getattr(parent, "table", "") if parent is not None else ""
-        targets = [by_alias[qualifier.lower()]] if qualifier and qualifier.lower() in by_alias \
+        targets = (
+            [by_alias[qualifier.lower()]]
+            if qualifier and qualifier.lower() in by_alias
             else sorted(tables)
+        )
         out.update(f"{t}.*" for t in targets)
     for column in tree.find_all(exp.Column):
         name = column.name

@@ -14,6 +14,7 @@ One entry per data source, from `DAS_SOURCES` (JSON). A source names its
 Adding a warehouse is a config change. Adding an ENGINE is a new adapter with
 the same `SourceBackend` shape; nothing above this module changes.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -64,8 +65,12 @@ class Source:
         return self.scope or SQL_SCOPE
 
     def policy(self, max_rows: int) -> Policy:
-        return Policy(dialect=self.dialect, allowed_schemas=self.schemas,
-                      max_rows=max_rows, database=self.database or self.item or None)
+        return Policy(
+            dialect=self.dialect,
+            allowed_schemas=self.schemas,
+            max_rows=max_rows,
+            database=self.database or self.item or None,
+        )
 
 
 class SourceBackend(Protocol):
@@ -110,15 +115,20 @@ class TdsBackend:
             f"Server={server};Database={src.database or src.item};"
             f"Encrypt={encrypt};TrustServerCertificate=yes",
             attrs_before={1256: struct.pack("<i", len(enc)) + enc},
-            timeout=int(os.environ.get("DAS_SQL_TIMEOUT_S", "30")))
+            timeout=int(os.environ.get("DAS_SQL_TIMEOUT_S", "30")),
+        )
 
     def list_tables(self, src: Source, principal_token: str) -> list[dict]:
-        sql = ("SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES "
-               "WHERE TABLE_SCHEMA IN (" + ",".join("?" * len(src.schemas)) + ") ORDER BY 1,2")
+        sql = (
+            "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES "
+            "WHERE TABLE_SCHEMA IN (" + ",".join("?" * len(src.schemas)) + ") ORDER BY 1,2"
+        )
         with self._connect(src, principal_token) as conn:
             rows = conn.cursor().execute(sql, *src.schemas).fetchall()
-        return [{"schema": r[0], "name": r[1], "type": r[2],
-                 "qualifiedName": f"{r[0]}.{r[1]}"} for r in rows]
+        return [
+            {"schema": r[0], "name": r[1], "type": r[2], "qualifiedName": f"{r[0]}.{r[1]}"}
+            for r in rows
+        ]
 
     def describe(self, src: Source, table: str, principal_token: str) -> dict:
         schema, _, name = table.rpartition(".")
@@ -128,12 +138,14 @@ class TdsBackend:
         cols_sql = (
             "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, "
             "NUMERIC_SCALE, IS_NULLABLE, ORDINAL_POSITION FROM INFORMATION_SCHEMA.COLUMNS "
-            "WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY ORDINAL_POSITION")
+            "WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY ORDINAL_POSITION"
+        )
         keys_sql = (
             "SELECT k.COLUMN_NAME, c.CONSTRAINT_TYPE FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE k "
             "JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS c "
             "  ON c.CONSTRAINT_NAME = k.CONSTRAINT_NAME AND c.TABLE_SCHEMA = k.TABLE_SCHEMA "
-            "WHERE k.TABLE_SCHEMA=? AND k.TABLE_NAME=?")
+            "WHERE k.TABLE_SCHEMA=? AND k.TABLE_NAME=?"
+        )
         with self._connect(src, principal_token) as conn:
             cur = conn.cursor()
             cols = cur.execute(cols_sql, schema, name).fetchall()
@@ -146,11 +158,15 @@ class TdsBackend:
         key_of = {k[0]: k[1] for k in keys}
         return {
             "qualifiedName": f"{schema}.{name}",
-            "columns": [{
-                "name": c[0], "type": _display_type(c[1], c[2], c[3], c[4]),
-                "nullable": c[5] == "YES",
-                "key": key_of.get(c[0]),
-            } for c in cols],
+            "columns": [
+                {
+                    "name": c[0],
+                    "type": _display_type(c[1], c[2], c[3], c[4]),
+                    "nullable": c[5] == "YES",
+                    "key": key_of.get(c[0]),
+                }
+                for c in cols
+            ],
         }
 
     def run(self, src: Source, verdict: Verdict, principal_token: str) -> dict:
@@ -158,8 +174,12 @@ class TdsBackend:
             cur = conn.cursor().execute(verdict.sql)
             columns = [d[0] for d in (cur.description or [])]
             rows = cur.fetchmany(verdict.row_limit)
-        return {"columns": columns, "rows": [[_jsonable(v) for v in r] for r in rows],
-                "rowCount": len(rows), "truncated": len(rows) >= verdict.row_limit}
+        return {
+            "columns": columns,
+            "rows": [[_jsonable(v) for v in r] for r in rows],
+            "rowCount": len(rows),
+            "truncated": len(rows) >= verdict.row_limit,
+        }
 
 
 def _display_type(dtype: str, clen, prec, scale) -> str:
@@ -206,13 +226,17 @@ class PostgresBackend:
         return psycopg.connect(src.dsn, connect_timeout=15)
 
     def list_tables(self, src: Source, principal_token: str) -> list[dict]:
-        sql = ("SELECT table_schema, table_name, table_type FROM information_schema.tables "
-               "WHERE table_schema = ANY(%s) ORDER BY 1, 2")
+        sql = (
+            "SELECT table_schema, table_name, table_type FROM information_schema.tables "
+            "WHERE table_schema = ANY(%s) ORDER BY 1, 2"
+        )
         with self._connect(src, principal_token) as conn, conn.cursor() as cur:
             cur.execute(sql, (list(src.schemas),))
             rows = cur.fetchall()
-        return [{"schema": r[0], "name": r[1], "type": r[2],
-                 "qualifiedName": f"{r[0]}.{r[1]}"} for r in rows]
+        return [
+            {"schema": r[0], "name": r[1], "type": r[2], "qualifiedName": f"{r[0]}.{r[1]}"}
+            for r in rows
+        ]
 
     def describe(self, src: Source, table: str, principal_token: str) -> dict:
         schema, _, name = table.rpartition(".")
@@ -222,13 +246,15 @@ class PostgresBackend:
         cols_sql = (
             "SELECT column_name, data_type, character_maximum_length, numeric_precision, "
             "numeric_scale, is_nullable FROM information_schema.columns "
-            "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position")
+            "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position"
+        )
         keys_sql = (
             "SELECT k.column_name, c.constraint_type "
             "FROM information_schema.key_column_usage k "
             "JOIN information_schema.table_constraints c "
             "  ON c.constraint_name = k.constraint_name AND c.table_schema = k.table_schema "
-            "WHERE k.table_schema = %s AND k.table_name = %s")
+            "WHERE k.table_schema = %s AND k.table_name = %s"
+        )
         with self._connect(src, principal_token) as conn, conn.cursor() as cur:
             cur.execute(cols_sql, (schema, name))
             cols = cur.fetchall()
@@ -237,18 +263,30 @@ class PostgresBackend:
         if not cols:
             raise LookupError(f"table {schema}.{name} not found")
         key_of = {k[0]: k[1] for k in keys}
-        return {"qualifiedName": f"{schema}.{name}",
-                "columns": [{"name": c[0], "type": _display_type(c[1], c[2], c[3], c[4]),
-                             "nullable": c[5] == "YES", "key": key_of.get(c[0])}
-                            for c in cols]}
+        return {
+            "qualifiedName": f"{schema}.{name}",
+            "columns": [
+                {
+                    "name": c[0],
+                    "type": _display_type(c[1], c[2], c[3], c[4]),
+                    "nullable": c[5] == "YES",
+                    "key": key_of.get(c[0]),
+                }
+                for c in cols
+            ],
+        }
 
     def run(self, src: Source, verdict: Verdict, principal_token: str) -> dict:
         with self._connect(src, principal_token) as conn, conn.cursor() as cur:
             cur.execute(verdict.sql)
             columns = [d.name for d in (cur.description or [])]
             rows = cur.fetchmany(verdict.row_limit)
-        return {"columns": columns, "rows": [[_jsonable(v) for v in r] for r in rows],
-                "rowCount": len(rows), "truncated": len(rows) >= verdict.row_limit}
+        return {
+            "columns": columns,
+            "rows": [[_jsonable(v) for v in r] for r in rows],
+            "rowCount": len(rows),
+            "truncated": len(rows) >= verdict.row_limit,
+        }
 
 
 # -------------------------------------------------------------- Databricks --
@@ -281,11 +319,15 @@ class DatabricksBackend:
             ctx.check_hostname = False
             ctx.verify_mode = _ssl.CERT_NONE
         req = urllib.request.Request(
-            src.host.rstrip("/") + self.API, data=_json.dumps(body).encode(), method="POST",
-            headers={"Content-Type": "application/json", "Authorization": "Bearer " + token})
+            src.host.rstrip("/") + self.API,
+            data=_json.dumps(body).encode(),
+            method="POST",
+            headers={"Content-Type": "application/json", "Authorization": "Bearer " + token},
+        )
         try:
-            with urllib.request.urlopen(req, context=ctx,
-                                        timeout=int(os.environ.get("DAS_SQL_TIMEOUT_S", "30"))) as r:
+            with urllib.request.urlopen(
+                req, context=ctx, timeout=int(os.environ.get("DAS_SQL_TIMEOUT_S", "30"))
+            ) as r:
                 return _json.loads(r.read())
         except urllib.error.HTTPError as e:
             detail = e.read().decode()[:400]
@@ -294,8 +336,12 @@ class DatabricksBackend:
             raise RuntimeError(f"{e.code}: {detail}") from None
 
     def _statement(self, src: Source, token: str, sql: str, row_limit: int) -> dict:
-        body = {"statement": sql, "warehouse_id": src.warehouse_id,
-                "wait_timeout": "30s", "on_wait_timeout": "CANCEL"}
+        body = {
+            "statement": sql,
+            "warehouse_id": src.warehouse_id,
+            "wait_timeout": "30s",
+            "on_wait_timeout": "CANCEL",
+        }
         if src.catalog:
             body["catalog"] = src.catalog
         if src.database:
@@ -310,20 +356,29 @@ class DatabricksBackend:
     @staticmethod
     def _rows(out: dict) -> tuple[list[str], list[list]]:
         manifest = out.get("manifest") or {}
-        schema = (manifest.get("schema") or {})
+        schema = manifest.get("schema") or {}
         columns = [c.get("name", "") for c in (schema.get("columns") or [])]
         data = ((out.get("result") or {}).get("data_array")) or []
         return columns, [list(r) for r in data]
 
     def list_tables(self, src: Source, principal_token: str) -> list[dict]:
         out = self._statement(
-            src, principal_token,
+            src,
+            principal_token,
             "SELECT table_schema, table_name, table_type FROM information_schema.tables "
             f"WHERE table_schema IN ({','.join(repr(s) for s in src.schemas)}) ORDER BY 1, 2",
-            1000)
+            1000,
+        )
         _, rows = self._rows(out)
-        return [{"schema": r[0], "name": r[1], "type": r[2] if len(r) > 2 else "TABLE",
-                 "qualifiedName": f"{r[0]}.{r[1]}"} for r in rows]
+        return [
+            {
+                "schema": r[0],
+                "name": r[1],
+                "type": r[2] if len(r) > 2 else "TABLE",
+                "qualifiedName": f"{r[0]}.{r[1]}",
+            }
+            for r in rows
+        ]
 
     def describe(self, src: Source, table: str, principal_token: str) -> dict:
         schema, _, name = table.rpartition(".")
@@ -331,24 +386,39 @@ class DatabricksBackend:
         if schema.lower() not in {s.lower() for s in src.schemas}:
             raise PermissionError(f"schema {schema} is not queryable")
         out = self._statement(
-            src, principal_token,
+            src,
+            principal_token,
             "SELECT column_name, data_type, is_nullable FROM information_schema.columns "
             f"WHERE table_schema = {schema!r} AND table_name = {name!r} "
-            "ORDER BY ordinal_position", 1000)
+            "ORDER BY ordinal_position",
+            1000,
+        )
         _, rows = self._rows(out)
         if not rows:
             raise LookupError(f"table {schema}.{name} not found")
-        return {"qualifiedName": f"{schema}.{name}",
-                "columns": [{"name": r[0], "type": r[1],
-                             "nullable": (r[2] if len(r) > 2 else "YES") == "YES",
-                             "key": None} for r in rows]}
+        return {
+            "qualifiedName": f"{schema}.{name}",
+            "columns": [
+                {
+                    "name": r[0],
+                    "type": r[1],
+                    "nullable": (r[2] if len(r) > 2 else "YES") == "YES",
+                    "key": None,
+                }
+                for r in rows
+            ],
+        }
 
     def run(self, src: Source, verdict: Verdict, principal_token: str) -> dict:
         out = self._statement(src, principal_token, verdict.sql, verdict.row_limit)
         columns, rows = self._rows(out)
-        rows = rows[:verdict.row_limit]
-        return {"columns": columns, "rows": [[_jsonable(v) for v in r] for r in rows],
-                "rowCount": len(rows), "truncated": len(rows) >= verdict.row_limit}
+        rows = rows[: verdict.row_limit]
+        return {
+            "columns": columns,
+            "rows": [[_jsonable(v) for v in r] for r in rows],
+            "rowCount": len(rows),
+            "truncated": len(rows) >= verdict.row_limit,
+        }
 
 
 BACKENDS: dict[str, SourceBackend] = {
@@ -363,18 +433,27 @@ BACKENDS: dict[str, SourceBackend] = {
 def load_sources() -> dict[str, Source]:
     raw = json.loads(os.environ.get("DAS_SOURCES", "[]"))
     default_schemas = tuple(
-        s.strip() for s in os.environ.get("DAS_SQL_ALLOWED_SCHEMAS", "dbo").split(",") if s.strip())
+        s.strip() for s in os.environ.get("DAS_SQL_ALLOWED_SCHEMAS", "dbo").split(",") if s.strip()
+    )
     out: dict[str, Source] = {}
     for r in raw:
         out[r["name"]] = Source(
-            name=r["name"], kind=r.get("kind", "fabric"), dialect=r.get("dialect", "tsql"),
-            authz_tier=r.get("authz_tier", "user"), om_service_fqn=r.get("om_service_fqn", ""),
-            workspace=r.get("workspace", ""), item=r.get("item", ""),
-            tds_server=r.get("tds_server", ""), database=r.get("database") or r.get("item", ""),
+            name=r["name"],
+            kind=r.get("kind", "fabric"),
+            dialect=r.get("dialect", "tsql"),
+            authz_tier=r.get("authz_tier", "user"),
+            om_service_fqn=r.get("om_service_fqn", ""),
+            workspace=r.get("workspace", ""),
+            item=r.get("item", ""),
+            tds_server=r.get("tds_server", ""),
+            database=r.get("database") or r.get("item", ""),
             schemas=tuple(r.get("schemas") or default_schemas),
-            dsn=r.get("dsn", ""), host=r.get("host", ""),
-            warehouse_id=r.get("warehouse_id", ""), catalog=r.get("catalog", ""),
-            scope=r.get("scope", ""))
+            dsn=r.get("dsn", ""),
+            host=r.get("host", ""),
+            warehouse_id=r.get("warehouse_id", ""),
+            catalog=r.get("catalog", ""),
+            scope=r.get("scope", ""),
+        )
     return out
 
 
@@ -384,7 +463,8 @@ def backend_for(src: Source) -> SourceBackend:
     except KeyError:
         raise LookupError(
             f"source {src.name} has kind {src.kind!r}, for which no adapter is built. "
-            f"Available: {', '.join(sorted(BACKENDS))}") from None
+            f"Available: {', '.join(sorted(BACKENDS))}"
+        ) from None
 
 
 __all__ = [

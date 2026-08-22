@@ -4,6 +4,7 @@ Discipline rule 2: everything here is a STANDARD protocol a real tenant serves â
 OAuth2 client_credentials, Microsoft Graph, the Fabric REST API (with LROs), TDS
 with an Entra access token. Nothing calls an emulator's own control surface.
 """
+
 from __future__ import annotations
 
 import json
@@ -109,9 +110,16 @@ def token(audience: str) -> str:
     exp, t = _TOK.get(audience, (0.0, ""))
     if exp - 60 > time.time():
         return t
-    st, _, body = http("POST", f"{AUTHORITY}/oauth2/v2.0/token", form={
-        "grant_type": "client_credentials", "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET, "scope": f"{audience}/.default"})
+    st, _, body = http(
+        "POST",
+        f"{AUTHORITY}/oauth2/v2.0/token",
+        form={
+            "grant_type": "client_credentials",
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "scope": f"{audience}/.default",
+        },
+    )
     if st != 200:
         raise SystemExit(f"token for {audience}: {st} {body}")
     r = json.loads(body)
@@ -133,21 +141,34 @@ def graph_ensure_resource_app(identifier_uri: str, display_name: str) -> str:
     would make for any API. Postcondition-driven: skip if present, create if not.
     """
     q = urllib.parse.quote(f"identifierUris/any(u:u eq '{identifier_uri}')")
-    st, _, body = http("GET", f"{LOGIN_ORIGIN}/graph/v1.0/applications?$filter={q}&$select=appId",
-                       headers=bearer(GRAPH_AUD))
+    st, _, body = http(
+        "GET",
+        f"{LOGIN_ORIGIN}/graph/v1.0/applications?$filter={q}&$select=appId",
+        headers=bearer(GRAPH_AUD),
+    )
     if st == 200:
         vals = json.loads(body).get("value", [])
         if vals:
             return vals[0]["appId"]
     # A Graph that does not support the lambda filter (400) or found nothing: scan.
-    st, _, body = must("GET", f"{LOGIN_ORIGIN}/graph/v1.0/applications?$select=appId,identifierUris",
-                       headers=bearer(GRAPH_AUD))
+    st, _, body = must(
+        "GET",
+        f"{LOGIN_ORIGIN}/graph/v1.0/applications?$select=appId,identifierUris",
+        headers=bearer(GRAPH_AUD),
+    )
     for a in body.get("value", []):
         if identifier_uri in (a.get("identifierUris") or []):
             return a["appId"]
-    st, _, body = must("POST", f"{LOGIN_ORIGIN}/graph/v1.0/applications", headers=bearer(GRAPH_AUD),
-                       json_body={"displayName": display_name, "identifierUris": [identifier_uri],
-                                  "signInAudience": "AzureADMyOrg"})
+    st, _, body = must(
+        "POST",
+        f"{LOGIN_ORIGIN}/graph/v1.0/applications",
+        headers=bearer(GRAPH_AUD),
+        json_body={
+            "displayName": display_name,
+            "identifierUris": [identifier_uri],
+            "signInAudience": "AzureADMyOrg",
+        },
+    )
     log(f"registered resource app {identifier_uri} ({body['appId']})")
     return body["appId"]
 
@@ -225,7 +246,9 @@ def tds_connect(server: str, database: str, access_token: str | None = None, tim
     encrypt = CFG.get("DAS_TDS_ENCRYPT", "no")
     return mssql_python.connect(
         f"Server={server};Database={database};Encrypt={encrypt};TrustServerCertificate=yes",
-        attrs_before={1256: struct.pack("<i", len(enc)) + enc}, timeout=timeout)
+        attrs_before={1256: struct.pack("<i", len(enc)) + enc},
+        timeout=timeout,
+    )
 
 
 def sources() -> list[dict]:
@@ -291,5 +314,7 @@ def save_state(**kv) -> dict:
 
 
 if __name__ == "__main__":
-    print(json.dumps({k: v for k, v in CFG.items() if "SECRET" not in k and "KEY" not in k}, indent=1))
+    print(
+        json.dumps({k: v for k, v in CFG.items() if "SECRET" not in k and "KEY" not in k}, indent=1)
+    )
     sys.exit(0)

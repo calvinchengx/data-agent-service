@@ -16,6 +16,7 @@ Two APIs, both `type: mcp`, so any MCP client sees one endpoint per concern:
 Everything is created through the ARM management plane exactly as `az apim`
 would; policy documents are the same XML a portal paste would contain.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,8 +29,9 @@ API_VERSION = "2024-05-01"
 SUB = c.CFG.get("DAS_APIM_SUBSCRIPTION", "00000000-0000-0000-0000-000000000000")
 RG = c.CFG.get("DAS_APIM_RESOURCE_GROUP", "emulator-rg")
 SERVICE = c.CFG.get("DAS_APIM_SERVICE", "emulator")
-BASE = (f"/subscriptions/{SUB}/resourceGroups/{RG}/providers/Microsoft.ApiManagement"
-        f"/service/{SERVICE}")
+BASE = (
+    f"/subscriptions/{SUB}/resourceGroups/{RG}/providers/Microsoft.ApiManagement/service/{SERVICE}"
+)
 
 EXECUTOR = c.CFG.get("DAS_EXECUTOR_URL", "http://warehouse-query:8090")
 # The executor speaks MCP itself, so the gateway PROXIES it rather than
@@ -47,7 +49,9 @@ RATE_WINDOW = c.CFG.get("DAS_RATE_WINDOW_S", "60")
 LLM_BACKEND = c.CFG.get("DAS_LLM_BACKEND", "http://llm-stub:8095")
 LLM_TPM = c.CFG.get("DAS_LLM_TOKENS_PER_MINUTE", "2000")
 LLM_CALLS = c.CFG.get("DAS_LLM_CALLS_PER_MINUTE", "60")
-OPENID_CONFIG = c.CFG.get("DAS_OPENID_CONFIG") or f"{c.AUTHORITY}/v2.0/.well-known/openid-configuration"
+OPENID_CONFIG = (
+    c.CFG.get("DAS_OPENID_CONFIG") or f"{c.AUTHORITY}/v2.0/.well-known/openid-configuration"
+)
 # Gateway-side token validation. TRUE is the production shape and the default.
 # The local stack sets it false because the pinned emulator's validate-jwt can
 # only accept ARM-audience tokens (docs/upstream-issues.md #7); the executor
@@ -57,9 +61,12 @@ VALIDATE_JWT = c.CFG.get("DAS_APIM_VALIDATE_JWT", "true").lower() in ("1", "true
 
 def arm(method: str, path: str, body=None, ok=(200, 201, 202, 204)):
     url = f"{APIM}{path}{'&' if '?' in path else '?'}api-version={API_VERSION}"
-    st, _hd, txt = c.http(method, url, headers={"Host": "management.azure.localhost",
-                                              **c.bearer("https://management.azure.com")},
-                         json_body=body)
+    st, _hd, txt = c.http(
+        method,
+        url,
+        headers={"Host": "management.azure.localhost", **c.bearer("https://management.azure.com")},
+        json_body=body,
+    )
     if st not in ok:
         raise c.HttpError(st, txt, url)
     return json.loads(txt) if txt.strip().startswith(("{", "[")) else txt
@@ -77,20 +84,26 @@ def jwt_policy(extra_inbound: str = "") -> str:
     # Inner quotes are &quot; — a policy expression lives inside an XML
     # attribute, so its string literals must be escaped or the document is not
     # well-formed. Same text a portal paste would carry.
-    caller = ("@(context.Request.Headers.GetValueOrDefault(&quot;Authorization&quot;,"
-              "&quot;anonymous&quot;))")
-    validate = f"""<validate-jwt header-name="Authorization" failed-validation-httpcode="401"
+    caller = (
+        "@(context.Request.Headers.GetValueOrDefault(&quot;Authorization&quot;,"
+        "&quot;anonymous&quot;))"
+    )
+    validate = (
+        f"""<validate-jwt header-name="Authorization" failed-validation-httpcode="401"
                   failed-validation-error-message="Unauthorized. Sign in and retry.">
       <issuers><issuer>{c.ISSUER}</issuer></issuers>
       <audiences><audience>{AUDIENCE}</audience></audiences>
       <required-claims>
         <claim name="scp" match="any" separator=" "><value>{SCOPE}</value></claim>
       </required-claims>
-    </validate-jwt>""" if VALIDATE_JWT else f"""<!-- Gateway-side token validation is off here (docs/upstream-issues.md #7).
+    </validate-jwt>"""
+        if VALIDATE_JWT
+        else f"""<!-- Gateway-side token validation is off here (docs/upstream-issues.md #7).
          The executor validates the same bearer against the tenant's JWKS —
          issuer, audience {AUDIENCE}, scope {SCOPE} — before any data is read,
          and the OpenMetadata route additionally requires a subscription key
          because its own credential is applied at the gateway. -->"""
+    )
     return f"""<policies>
   <inbound>
     <base />
@@ -116,11 +129,22 @@ OM_SWAP = """<!-- The user is authenticated above; OpenMetadata is then reached 
 
 
 # ------------------------------------------------------------------- apis --
-def put_api(name: str, display: str, path: str, service_url: str, mcp_mode: str | None,
-            subscription_required: bool = False) -> None:
-    props = {"displayName": display, "path": path, "protocols": ["https"],
-             "serviceUrl": service_url, "subscriptionRequired": subscription_required,
-             "type": "mcp"}
+def put_api(
+    name: str,
+    display: str,
+    path: str,
+    service_url: str,
+    mcp_mode: str | None,
+    subscription_required: bool = False,
+) -> None:
+    props = {
+        "displayName": display,
+        "path": path,
+        "protocols": ["https"],
+        "serviceUrl": service_url,
+        "subscriptionRequired": subscription_required,
+        "type": "mcp",
+    }
     if mcp_mode:
         props["mcpMode"] = mcp_mode
     arm("PUT", f"{BASE}/apis/{name}", {"properties": props})
@@ -128,14 +152,29 @@ def put_api(name: str, display: str, path: str, service_url: str, mcp_mode: str 
 
 
 def put_policy(scope_path: str, xml: str) -> None:
-    arm("PUT", f"{BASE}/{scope_path}/policies/policy",
-        {"properties": {"format": "xml", "value": xml}})
+    arm(
+        "PUT",
+        f"{BASE}/{scope_path}/policies/policy",
+        {"properties": {"format": "xml", "value": xml}},
+    )
 
 
-def put_operation(api: str, op_id: str, display: str, method: str, url_template: str,
-                  description: str, template_params=(), query_params=()) -> None:
-    props = {"displayName": display, "method": method, "urlTemplate": url_template,
-             "description": description}
+def put_operation(
+    api: str,
+    op_id: str,
+    display: str,
+    method: str,
+    url_template: str,
+    description: str,
+    template_params=(),
+    query_params=(),
+) -> None:
+    props = {
+        "displayName": display,
+        "method": method,
+        "urlTemplate": url_template,
+        "description": description,
+    }
     if template_params:
         props["templateParameters"] = list(template_params)
     if query_params:
@@ -144,16 +183,22 @@ def put_operation(api: str, op_id: str, display: str, method: str, url_template:
 
 
 def named_value(name: str, value: str, secret=True) -> None:
-    arm("PUT", f"{BASE}/namedValues/{name}",
-        {"properties": {"displayName": name, "value": value, "secret": secret}})
+    arm(
+        "PUT",
+        f"{BASE}/namedValues/{name}",
+        {"properties": {"displayName": name, "value": value, "secret": secret}},
+    )
     c.log(f"named value {name} set")
 
 
 def om_bot_token() -> str:
     kv = c.CFG.get("DAS_KEYVAULT_URL", "").rstrip("/")
     bot = c.load_state().get("om_reader_bot", "das-reader")
-    st, _, b = c.http("GET", f"{kv}/secrets/om-bot-{bot}?api-version=7.5",
-                      headers=c.bearer("https://vault.azure.net"))
+    st, _, b = c.http(
+        "GET",
+        f"{kv}/secrets/om-bot-{bot}?api-version=7.5",
+        headers=c.bearer("https://vault.azure.net"),
+    )
     if st != 200:
         raise SystemExit(f"OM bot token not in Key Vault (run seed.govern): {st}")
     return json.loads(b)["value"]
@@ -162,9 +207,17 @@ def om_bot_token() -> str:
 def om_subscription_key() -> str:
     """A subscription for the OpenMetadata route, and its key. Standard APIM:
     the key is only readable through listSecrets, never echoed on create."""
-    arm("PUT", f"{BASE}/subscriptions/das-agent",
-        {"properties": {"displayName": "data-agent-service", "scope": f"{BASE}/apis/om",
-                        "state": "active"}})
+    arm(
+        "PUT",
+        f"{BASE}/subscriptions/das-agent",
+        {
+            "properties": {
+                "displayName": "data-agent-service",
+                "scope": f"{BASE}/apis/om",
+                "state": "active",
+            }
+        },
+    )
     secrets = arm("POST", f"{BASE}/subscriptions/das-agent/listSecrets", {})
     key = secrets.get("primaryKey") or secrets.get("properties", {}).get("primaryKey", "")
     c.log("om subscription key issued")
@@ -204,12 +257,22 @@ def publish_llm() -> None:
         looks for. See docs/09-llm-governance.md: this is not the same for every
         provider, and the difference decides which control you actually get.
     """
-    caller = ("@(context.Request.Headers.GetValueOrDefault(&quot;Authorization&quot;,"
-              "&quot;anonymous&quot;))")
+    caller = (
+        "@(context.Request.Headers.GetValueOrDefault(&quot;Authorization&quot;,"
+        "&quot;anonymous&quot;))"
+    )
     put_api("llm", "Model", "llm", LLM_BACKEND, mcp_mode=None)
-    put_operation("llm", "messages", "Messages", "POST", "/*",
-                  "The model API, proxied so spend is capped and attributed per caller.")
-    put_policy("apis/llm", f"""<policies>
+    put_operation(
+        "llm",
+        "messages",
+        "Messages",
+        "POST",
+        "/*",
+        "The model API, proxied so spend is capped and attributed per caller.",
+    )
+    put_policy(
+        "apis/llm",
+        f"""<policies>
   <inbound>
     <base />
     <rate-limit-by-key calls="{LLM_CALLS}" renewal-period="60" counter-key="{caller}" />
@@ -223,7 +286,8 @@ def publish_llm() -> None:
   <backend><base /></backend>
   <outbound><base /></outbound>
   <on-error><base /></on-error>
-</policies>""")
+</policies>""",
+    )
     c.log(f"llm: {LLM_BACKEND} — {LLM_CALLS} calls/min and {LLM_TPM} tokens/min per caller")
 
 
@@ -242,25 +306,49 @@ def publish_discovery() -> None:
     which newer clients construct by inserting the well-known segment after the
     host.
     """
-    put_api("discovery", "OAuth discovery", ".well-known",
-            EXECUTOR.rstrip("/") + "/.well-known", mcp_mode=None)
-    put_operation("discovery", "protected-resource", "Protected resource", "GET",
-                  "/oauth-protected-resource",
-                  "OAuth metadata for the governed data API; no credential required.")
+    put_api(
+        "discovery",
+        "OAuth discovery",
+        ".well-known",
+        EXECUTOR.rstrip("/") + "/.well-known",
+        mcp_mode=None,
+    )
+    put_operation(
+        "discovery",
+        "protected-resource",
+        "Protected resource",
+        "GET",
+        "/oauth-protected-resource",
+        "OAuth metadata for the governed data API; no credential required.",
+    )
     # The AUTHORIZATION SERVER's metadata is deliberately not republished here.
     # A client follows `authorization_servers` from the document above and asks
     # the issuer directly, which is both the RFC 9728 flow and the only version
     # that cannot go stale. (The gateway also answers this path itself — see
     # docs/upstream-issues.md #10 — so publishing ours would be shadowed.)
     for op, template, target in (
-            ("protected-resource-scoped", "/oauth-protected-resource/warehouse/mcp",
-             "/oauth-protected-resource"),
-            ("protected-resource-scoped-om", "/oauth-protected-resource/om/mcp",
-             "/oauth-protected-resource")):
-        put_operation("discovery", op, "Protected resource (scoped)", "GET", template,
-                      "The same document, at the path-aware location a client may construct.")
-        put_policy(f"apis/discovery/operations/{op}",
-                   f"""<policies>
+        (
+            "protected-resource-scoped",
+            "/oauth-protected-resource/warehouse/mcp",
+            "/oauth-protected-resource",
+        ),
+        (
+            "protected-resource-scoped-om",
+            "/oauth-protected-resource/om/mcp",
+            "/oauth-protected-resource",
+        ),
+    ):
+        put_operation(
+            "discovery",
+            op,
+            "Protected resource (scoped)",
+            "GET",
+            template,
+            "The same document, at the path-aware location a client may construct.",
+        )
+        put_policy(
+            f"apis/discovery/operations/{op}",
+            f"""<policies>
   <inbound><base />
     <!-- The path carries the resource being asked about; the document is the
          same one, so the suffix is stripped rather than proxied through. -->
@@ -269,15 +357,19 @@ def publish_discovery() -> None:
   <backend><base /></backend>
   <outbound><base /></outbound>
   <on-error><base /></on-error>
-</policies>""")
+</policies>""",
+        )
     # Discovery must be readable WITHOUT a credential: a client that has to
     # authenticate to learn how to authenticate cannot start.
-    put_policy("apis/discovery", """<policies>
+    put_policy(
+        "apis/discovery",
+        """<policies>
   <inbound><base /></inbound>
   <backend><base /></backend>
   <outbound><base /></outbound>
   <on-error><base /></on-error>
-</policies>""")
+</policies>""",
+    )
     c.log("discovery: OAuth metadata published at the gateway's well-known location")
 
 
@@ -288,27 +380,64 @@ def main() -> dict:
     c.log("warehouse: MCP passthrough, rate limit applied, caller identity forwarded")
 
     # 1b. the same operations as REST, for non-MCP clients and the load driver
-    put_api("warehouse-rest", "Governed data query (REST)", "warehouse-rest", EXECUTOR,
-            mcp_mode=None)
-    put_operation("warehouse-rest", "list_tables", "List tables", "GET", "/tables",
-                  "List the tables of a data source that the asking user may see. "
-                  "Call this before writing SQL.",
-                  query_params=[{"name": "source", "type": "string", "required": False,
-                                 "description": "Source name; omit when there is only one."}])
-    put_operation("warehouse-rest", "describe_table", "Describe table", "GET", "/tables/{qualified_name}",
-                  "Columns, types, nullability and keys of one table, e.g. dbo.fct_revenue_summary. "
-                  "Always describe a table before writing SQL against it.",
-                  template_params=[{"name": "qualified_name", "type": "string", "required": True,
-                                    "description": "schema.table"}],
-                  query_params=[{"name": "source", "type": "string", "required": False}])
-    put_operation("warehouse-rest", "run_query", "Run query", "POST", "/query",
-                  "Run ONE read-only SELECT and return rows. The statement is parsed and "
-                  "refused unless it is a single read-only SELECT within the allowed schemas; "
-                  "a row ceiling is applied. Body: {\"sql\": \"...\", \"source\": \"...\", "
-                  "\"maxRows\": 100}.")
-    put_operation("warehouse-rest", "list_sources", "List sources", "GET", "/sources",
-                  "The data sources this agent can query, with their SQL dialect and the "
-                  "OpenMetadata service that holds their business context.")
+    put_api(
+        "warehouse-rest", "Governed data query (REST)", "warehouse-rest", EXECUTOR, mcp_mode=None
+    )
+    put_operation(
+        "warehouse-rest",
+        "list_tables",
+        "List tables",
+        "GET",
+        "/tables",
+        "List the tables of a data source that the asking user may see. "
+        "Call this before writing SQL.",
+        query_params=[
+            {
+                "name": "source",
+                "type": "string",
+                "required": False,
+                "description": "Source name; omit when there is only one.",
+            }
+        ],
+    )
+    put_operation(
+        "warehouse-rest",
+        "describe_table",
+        "Describe table",
+        "GET",
+        "/tables/{qualified_name}",
+        "Columns, types, nullability and keys of one table, e.g. dbo.fct_revenue_summary. "
+        "Always describe a table before writing SQL against it.",
+        template_params=[
+            {
+                "name": "qualified_name",
+                "type": "string",
+                "required": True,
+                "description": "schema.table",
+            }
+        ],
+        query_params=[{"name": "source", "type": "string", "required": False}],
+    )
+    put_operation(
+        "warehouse-rest",
+        "run_query",
+        "Run query",
+        "POST",
+        "/query",
+        "Run ONE read-only SELECT and return rows. The statement is parsed and "
+        "refused unless it is a single read-only SELECT within the allowed schemas; "
+        'a row ceiling is applied. Body: {"sql": "...", "source": "...", '
+        '"maxRows": 100}.',
+    )
+    put_operation(
+        "warehouse-rest",
+        "list_sources",
+        "List sources",
+        "GET",
+        "/sources",
+        "The data sources this agent can query, with their SQL dialect and the "
+        "OpenMetadata service that holds their business context.",
+    )
     put_policy("apis/warehouse-rest", jwt_policy())
     c.log("warehouse-rest: 4 REST operations published")
 
@@ -318,19 +447,30 @@ def main() -> dict:
     # read-only bot), so it must not be reachable unauthenticated. With
     # gateway-side JWT validation available that is the gate; without it, an
     # APIM subscription key is — standard APIM authentication either way.
-    put_api("om", "Business context (OpenMetadata)", "om", OM_MCP, mcp_mode="passthrough",
-            subscription_required=not VALIDATE_JWT)
+    put_api(
+        "om",
+        "Business context (OpenMetadata)",
+        "om",
+        OM_MCP,
+        mcp_mode="passthrough",
+        subscription_required=not VALIDATE_JWT,
+    )
     put_policy("apis/om", jwt_policy(OM_SWAP))
     c.log("om: passthrough with read-only bot swap")
 
     publish_discovery()
     publish_llm()
 
-    out = {"gateway": c.CFG["DAS_APIM_BASE"], "warehouse_mcp": "/warehouse/mcp",
-           "discovery": "/.well-known/oauth-protected-resource",
-           "warehouse_rest": "/warehouse-rest",
-           "om_mcp": "/om/mcp", "llm": "/llm", "gateway_validates_jwt": VALIDATE_JWT,
-           "om_subscription_required": not VALIDATE_JWT}
+    out = {
+        "gateway": c.CFG["DAS_APIM_BASE"],
+        "warehouse_mcp": "/warehouse/mcp",
+        "discovery": "/.well-known/oauth-protected-resource",
+        "warehouse_rest": "/warehouse-rest",
+        "om_mcp": "/om/mcp",
+        "llm": "/llm",
+        "gateway_validates_jwt": VALIDATE_JWT,
+        "om_subscription_required": not VALIDATE_JWT,
+    }
     if not VALIDATE_JWT:
         out["om_subscription_key"] = om_subscription_key()
     c.save_state(apim=out)
@@ -341,8 +481,12 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default="contoso")
     ap.add_argument("--reset", action="store_true")
-    ap.add_argument("--rate-calls", type=int, default=None,
-                    help="re-apply the policies with this allowance and exit")
+    ap.add_argument(
+        "--rate-calls",
+        type=int,
+        default=None,
+        help="re-apply the policies with this allowance and exit",
+    )
     a = ap.parse_args()
     if a.rate_calls is not None:
         set_rate_limit(a.rate_calls)

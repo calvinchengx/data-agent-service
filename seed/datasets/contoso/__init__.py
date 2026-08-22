@@ -12,6 +12,7 @@ mirror contoso-data-product's gold schema.yml. They are restated here only to
 GENERATE data; the agent learns them from OpenMetadata (seed/govern.py), never
 from this module.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -30,9 +31,15 @@ WAREHOUSE = "contoso_warehouse"
 # T-SQL types for the bare kinds in columns.json. varchar lengths are a seed
 # choice; OpenMetadata requires dataLength for varchar, so every one is sized.
 _VARCHAR = {
-    "email": 200, "name": 120, "product_name": 120, "country_name": 80,
-    "fiscal_year_label": 12, "fiscal_quarter_label": 12, "order_date": 10,
-    "country": 2, "currency": 3,
+    "email": 200,
+    "name": 120,
+    "product_name": 120,
+    "country_name": 80,
+    "fiscal_year_label": 12,
+    "fiscal_quarter_label": 12,
+    "order_date": 10,
+    "country": 2,
+    "currency": 3,
 }
 
 
@@ -53,12 +60,18 @@ def ddl(table: str) -> str:
 # ------------------------------------------------------------- generation --
 COUNTRIES = [("US", "United States"), ("GB", "United Kingdom"), ("SG", "Singapore")]
 CURRENCY = {"US": "USD", "GB": "GBP", "SG": "SGD"}
-RATE = {"USD": decimal.Decimal("1.000000"), "GBP": decimal.Decimal("1.270000"),
-        "SGD": decimal.Decimal("0.740000")}
+RATE = {
+    "USD": decimal.Decimal("1.000000"),
+    "GBP": decimal.Decimal("1.270000"),
+    "SGD": decimal.Decimal("0.740000"),
+}
 MARKETING = ["value", "mainstream", "premium", "lapsed", "new"]
 LOYALTY = ["bronze", "silver", "gold"]
-DEPARTMENTS = {"Electronics": ["Audio", "Computing", "Phones"],
-               "Home": ["Kitchen", "Furniture"], "Sport": ["Outdoor", "Fitness"]}
+DEPARTMENTS = {
+    "Electronics": ["Audio", "Computing", "Phones"],
+    "Home": ["Kitchen", "Furniture"],
+    "Sport": ["Outdoor", "Fitness"],
+}
 PRODUCT_SEGMENT = ["Core", "Peripheral", "Unallocated"]
 CHANNEL_SYSTEM = ["POS", "WEB"]
 STATUS = ["settled", "settled", "settled", "cancelled", "pending"]
@@ -78,7 +91,9 @@ def money(x: float) -> decimal.Decimal:
     return decimal.Decimal(f"{x:.4f}")
 
 
-def generate(n_customers=400, n_products=40, n_orders=6000, seed=20260822) -> dict[str, list[tuple]]:
+def generate(
+    n_customers=400, n_products=40, n_orders=6000, seed=20260822
+) -> dict[str, list[tuple]]:
     rnd = random.Random(seed)
     out: dict[str, list[tuple]] = {}
 
@@ -88,8 +103,9 @@ def generate(n_customers=400, n_products=40, n_orders=6000, seed=20260822) -> di
     d = START
     while d <= END:
         fy, fq, fp = fiscal(d)
-        dates.append((d, d.year, d.month, (d.month - 1) // 3 + 1, fy, fq, fp,
-                      f"FY{fy}", f"FY{fy}-Q{fq}"))
+        dates.append(
+            (d, d.year, d.month, (d.month - 1) // 3 + 1, fy, fq, fp, f"FY{fy}", f"FY{fy}-Q{fq}")
+        )
         d += dt.timedelta(days=1)
     out["dim_date"] = dates
 
@@ -97,16 +113,31 @@ def generate(n_customers=400, n_products=40, n_orders=6000, seed=20260822) -> di
     for i in range(n_products):
         dept = rnd.choice(list(DEPARTMENTS))
         cat = rnd.choice(DEPARTMENTS[dept])
-        products.append((f"P{i+1:04d}", f"{cat} item {i+1}", cat, dept,
-                         rnd.choices(PRODUCT_SEGMENT, [6, 3, 1])[0],
-                         money(rnd.uniform(8, 900))))
+        products.append(
+            (
+                f"P{i + 1:04d}",
+                f"{cat} item {i + 1}",
+                cat,
+                dept,
+                rnd.choices(PRODUCT_SEGMENT, [6, 3, 1])[0],
+                money(rnd.uniform(8, 900)),
+            )
+        )
     out["dim_product"] = products
 
     customers = []
     for i in range(n_customers):
         country = rnd.choice(COUNTRIES)[0]
-        customers.append((f"C{i+1:05d}", f"Customer {i+1}", f"customer{i+1}@example.com",
-                          country, rnd.choices(MARKETING, [3, 4, 2, 1, 2])[0], rnd.choice(LOYALTY)))
+        customers.append(
+            (
+                f"C{i + 1:05d}",
+                f"Customer {i + 1}",
+                f"customer{i + 1}@example.com",
+                country,
+                rnd.choices(MARKETING, [3, 4, 2, 1, 2])[0],
+                rnd.choice(LOYALTY),
+            )
+        )
     out["dim_customer"] = customers
 
     # Party = conformed customer across POS and web. Keep it 1:1 with customers
@@ -116,8 +147,9 @@ def generate(n_customers=400, n_products=40, n_orders=6000, seed=20260822) -> di
         in_pos, in_web = rnd.random() < 0.8, rnd.random() < 0.6
         if not (in_pos or in_web):
             in_pos = True
-        parties.append((f"PK-{c[0]}", c[2], c[0] if in_pos else None, in_pos, in_web,
-                        c[3], c[4], c[5]))
+        parties.append(
+            (f"PK-{c[0]}", c[2], c[0] if in_pos else None, in_pos, in_web, c[3], c[4], c[5])
+        )
     out["dim_party"] = parties
     party_by_customer = {c[0]: p for c, p in zip(customers, parties, strict=False)}
 
@@ -137,10 +169,39 @@ def generate(n_customers=400, n_products=40, n_orders=6000, seed=20260822) -> di
         status = rnd.choice(STATUS)
         party = party_by_customer[c[0]]
         channel = "POS" if (party[3] and (not party[4] or rnd.random() < 0.6)) else "WEB"
-        orders.append((f"O{i+1:07d}", c[0], p[0], od.isoformat(), channel, status, cur, qty,
-                       price, amount, rate, carried, amount_usd))
-        sales.append((party[0], f"S{i+1:07d}", p[0], od.isoformat(), channel,
-                      status == "cancelled", qty, amount, cur, rate, carried, amount_usd))
+        orders.append(
+            (
+                f"O{i + 1:07d}",
+                c[0],
+                p[0],
+                od.isoformat(),
+                channel,
+                status,
+                cur,
+                qty,
+                price,
+                amount,
+                rate,
+                carried,
+                amount_usd,
+            )
+        )
+        sales.append(
+            (
+                party[0],
+                f"S{i + 1:07d}",
+                p[0],
+                od.isoformat(),
+                channel,
+                status == "cancelled",
+                qty,
+                amount,
+                cur,
+                rate,
+                carried,
+                amount_usd,
+            )
+        )
     out["fct_orders"] = orders
     out["fct_sales"] = sales
 
@@ -156,7 +217,9 @@ def generate(n_customers=400, n_products=40, n_orders=6000, seed=20260822) -> di
         p = prod_by_id[pid]
         pt = party_by_key[party]
         key = (fy, f"FY{fy}", fq, f"FY{fy}-Q{fq}", channel, p[3], p[4], pt[6], pt[5])
-        row = summary.setdefault(key, [0, 0, decimal.Decimal(0), decimal.Decimal(0), decimal.Decimal(0)])
+        row = summary.setdefault(
+            key, [0, 0, decimal.Decimal(0), decimal.Decimal(0), decimal.Decimal(0)]
+        )
         row[0] += 1  # sale_lines counts every line, cancelled included (as the product does)
         if cancelled:
             row[3] += amount_usd

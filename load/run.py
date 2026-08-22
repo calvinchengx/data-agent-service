@@ -27,6 +27,7 @@ Fabric capacity. What transfers is the SHAPE: the gateway's overhead, whether
 the executor's token cache holds under concurrency, and regressions between two
 commits of this repo.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,20 +45,34 @@ K6_IMAGE = os.environ.get("DAS_K6_IMAGE", "grafana/k6:latest")
 NETWORK = os.environ.get("DAS_COMPOSE_NETWORK", "data-agent-service_default")
 
 SCENARIOS = {
-    "query": {"script": "query.js", "env": {"DAS_LOAD_TARGET": "gateway"},
-              "what": "MCP tool calls through the gateway"},
-    "query-direct": {"script": "query.js", "env": {"DAS_LOAD_TARGET": "direct"},
-                     "what": "the same calls straight at the executor (gateway cost)"},
-    "catalog": {"script": "catalog.js", "env": {},
-                "what": "catalog search through the gateway"},
-    "ratelimit": {"script": "ratelimit.js", "env": {},
-                  "what": "the gateway's rate limit refusing the excess"},
+    "query": {
+        "script": "query.js",
+        "env": {"DAS_LOAD_TARGET": "gateway"},
+        "what": "MCP tool calls through the gateway",
+    },
+    "query-direct": {
+        "script": "query.js",
+        "env": {"DAS_LOAD_TARGET": "direct"},
+        "what": "the same calls straight at the executor (gateway cost)",
+    },
+    "catalog": {"script": "catalog.js", "env": {}, "what": "catalog search through the gateway"},
+    "ratelimit": {
+        "script": "ratelimit.js",
+        "env": {},
+        "what": "the gateway's rate limit refusing the excess",
+    },
 }
 
 PASSTHROUGH = (
-    "DAS_APIM_BASE", "DAS_EXECUTOR_URL", "DAS_AGENT_CLIENT_ID", "DAS_AGENT_AUDIENCE",
-    "DAS_WAREHOUSE_MCP_PATH", "DAS_OM_MCP_PATH", "DAS_OM_SUBSCRIPTION_KEY",
-    "DAS_TEST_PASSWORD", "DAS_RATE_CALLS",
+    "DAS_APIM_BASE",
+    "DAS_EXECUTOR_URL",
+    "DAS_AGENT_CLIENT_ID",
+    "DAS_AGENT_AUDIENCE",
+    "DAS_WAREHOUSE_MCP_PATH",
+    "DAS_OM_MCP_PATH",
+    "DAS_OM_SUBSCRIPTION_KEY",
+    "DAS_TEST_PASSWORD",
+    "DAS_RATE_CALLS",
 )
 
 
@@ -69,8 +84,19 @@ def compose(*args: str, quiet: bool = True) -> subprocess.CompletedProcess:
     answer to "where does this run" rather than two.
     """
     envfile = os.environ.get("ENVFILE", ".env")
-    cmd = ["docker", "compose", "--env-file", envfile, "--profile", "tools",
-           "run", "--rm", "-T", "tools", *args]
+    cmd = [
+        "docker",
+        "compose",
+        "--env-file",
+        envfile,
+        "--profile",
+        "tools",
+        "run",
+        "--rm",
+        "-T",
+        "tools",
+        *args,
+    ]
     proc = subprocess.run(cmd, cwd=REPO, capture_output=quiet, text=True, check=False)
     if proc.returncode != 0 and quiet:
         print((proc.stdout or "") + (proc.stderr or ""))
@@ -92,6 +118,7 @@ def env_for(scenario: dict, args) -> dict[str, str]:
     # and handed to the generator.
     if os.environ.get("DAS_HARNESS_AUTH", "password").lower() != "password":
         from agent import identity
+
         env["DAS_LOAD_TOKEN"] = identity.token_for(args.user)
     env["DAS_LOAD_VUS_LOW"] = str(max(1, args.vus // 4))
     env["DAS_LOAD_VUS_HIGH"] = str(args.vus)
@@ -111,12 +138,27 @@ def run_scenario(name: str, args) -> dict:
     scenario = SCENARIOS[name]
     env = env_for(scenario, args)
     summary = REPORTS / f"{name}.summary.json"
-    cmd = ["docker", "run", "--rm", "--network", NETWORK,
-           "-v", f"{REPO}/load/k6:/scripts:ro", "-v", f"{REPORTS}:/out"]
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        NETWORK,
+        "-v",
+        f"{REPO}/load/k6:/scripts:ro",
+        "-v",
+        f"{REPORTS}:/out",
+    ]
     for key, value in env.items():
         cmd += ["-e", f"{key}={value}"]
-    cmd += [K6_IMAGE, "run", "--quiet", "--summary-export", f"/out/{name}.summary.json",
-            f"/scripts/{scenario['script']}"]
+    cmd += [
+        K6_IMAGE,
+        "run",
+        "--quiet",
+        "--summary-export",
+        f"/out/{name}.summary.json",
+        f"/scripts/{scenario['script']}",
+    ]
 
     print(f"\n{name}: {scenario['what']}", flush=True)
     started = time.time()
@@ -156,10 +198,16 @@ def run_scenario(name: str, args) -> dict:
         out["refusal_rate"] = stat("refusals", "rate")
 
     mark = "\033[32mok\033[0m" if out["passed"] else "\033[31mFAIL\033[0m"
-    print(f"  {mark}  {out['requests']} requests at {out['rps']}/s · "
-          f"p50 {out['p50_ms']}ms · p95 {out['p95_ms']}ms · p99 {out['p99_ms']}ms"
-          + (f" · throttled {out.get('throttled')}/{_int(out.get('served')) + _int(out.get('throttled'))}"
-             if "throttled" in out else ""), flush=True)
+    print(
+        f"  {mark}  {out['requests']} requests at {out['rps']}/s · "
+        f"p50 {out['p50_ms']}ms · p95 {out['p95_ms']}ms · p99 {out['p99_ms']}ms"
+        + (
+            f" · throttled {out.get('throttled')}/{_int(out.get('served')) + _int(out.get('throttled'))}"
+            if "throttled" in out
+            else ""
+        ),
+        flush=True,
+    )
     if not out["passed"]:
         for line in (proc.stdout or "").splitlines():
             if "threshold" in line.lower() or "✗" in line:
@@ -193,21 +241,28 @@ def main() -> int:
     set_rate_limit(configured)
     by_name = {r["scenario"]: r for r in results}
 
-    report = {"vus": args.vus, "stage": args.stage, "p95_threshold_ms": args.p95,
-              "scenarios": results}
+    report = {
+        "vus": args.vus,
+        "stage": args.stage,
+        "p95_threshold_ms": args.p95,
+        "scenarios": results,
+    }
 
     if "query" in by_name and "query-direct" in by_name:
         gateway, direct = by_name["query"], by_name["query-direct"]
         tax = {
             "p50_ms": round((gateway["p50_ms"] or 0) - (direct["p50_ms"] or 0), 1),
             "p95_ms": round((gateway["p95_ms"] or 0) - (direct["p95_ms"] or 0), 1),
-            "rps_change_pct": round(100 * ((gateway["rps"] or 0) - (direct["rps"] or 1))
-                                    / (direct["rps"] or 1), 1),
+            "rps_change_pct": round(
+                100 * ((gateway["rps"] or 0) - (direct["rps"] or 1)) / (direct["rps"] or 1), 1
+            ),
         }
         report["gateway_cost"] = tax
-        print(f"\ngateway cost (through APIM − direct): "
-              f"p50 +{tax['p50_ms']}ms · p95 +{tax['p95_ms']}ms · "
-              f"throughput {tax['rps_change_pct']}%")
+        print(
+            f"\ngateway cost (through APIM − direct): "
+            f"p50 +{tax['p50_ms']}ms · p95 +{tax['p95_ms']}ms · "
+            f"throughput {tax['rps_change_pct']}%"
+        )
 
     stamp = os.environ.get("DAS_REPORT_STAMP") or str(int(time.time()))
     out = REPORTS / f"load-{stamp}.json"

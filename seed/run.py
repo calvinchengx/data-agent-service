@@ -1,4 +1,5 @@
 """`make seed` — run the seed steps that exist so far, in order."""
+
 from __future__ import annotations
 
 import argparse
@@ -32,7 +33,8 @@ if __name__ == "__main__":
         for mod, what in PER_DATASET:
             print(f"\n### {dataset}: {what} ({mod})", flush=True)
             args = [sys.executable, "-m", mod, "--dataset", dataset] + (
-                ["--reset"] if a.reset else [])
+                ["--reset"] if a.reset else []
+            )
             subprocess.run(args, check=True, env=env)
     for mod, what in ONCE:
         print(f"\n### {what} ({mod})", flush=True)

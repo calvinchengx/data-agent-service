@@ -19,6 +19,7 @@ rather than asserting — see docs/09-llm-governance.md.
 This is a TEST DOUBLE. It is never in the request path of the service; the
 `llm` API points at it only when `DAS_LLM_BACKEND` says so.
 """
+
 from __future__ import annotations
 
 import json
@@ -60,29 +61,46 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if self.path.startswith("/anthropic"):
-            self._send(200, {
-                "id": "msg_stub", "type": "message", "role": "assistant",
-                "model": request.get("model", "stub"),
-                "content": [{"type": "text", "text": ANSWER}],
-                "stop_reason": "end_turn",
-                # Anthropic's own field names — deliberately NOT the OpenAI ones.
-                "usage": {"input_tokens": PROMPT_TOKENS, "output_tokens": COMPLETION_TOKENS},
-            })
+            self._send(
+                200,
+                {
+                    "id": "msg_stub",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": request.get("model", "stub"),
+                    "content": [{"type": "text", "text": ANSWER}],
+                    "stop_reason": "end_turn",
+                    # Anthropic's own field names — deliberately NOT the OpenAI ones.
+                    "usage": {"input_tokens": PROMPT_TOKENS, "output_tokens": COMPLETION_TOKENS},
+                },
+            )
             return
 
-        self._send(200, {
-            "id": "chatcmpl-stub", "object": "chat.completion",
-            "model": request.get("model", "stub"),
-            "choices": [{"index": 0, "finish_reason": "stop",
-                         "message": {"role": "assistant", "content": ANSWER}}],
-            "usage": {"prompt_tokens": PROMPT_TOKENS,
-                      "completion_tokens": COMPLETION_TOKENS,
-                      "total_tokens": PROMPT_TOKENS + COMPLETION_TOKENS},
-        })
+        self._send(
+            200,
+            {
+                "id": "chatcmpl-stub",
+                "object": "chat.completion",
+                "model": request.get("model", "stub"),
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": ANSWER},
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": PROMPT_TOKENS,
+                    "completion_tokens": COMPLETION_TOKENS,
+                    "total_tokens": PROMPT_TOKENS + COMPLETION_TOKENS,
+                },
+            },
+        )
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8095"))
-    print(f"llm-stub on :{port} "
-          f"({PROMPT_TOKENS}+{COMPLETION_TOKENS} tokens per answer)", flush=True)
+    print(
+        f"llm-stub on :{port} ({PROMPT_TOKENS}+{COMPLETION_TOKENS} tokens per answer)", flush=True
+    )
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()

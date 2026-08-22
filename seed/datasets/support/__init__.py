@@ -22,6 +22,7 @@ on wall-clock and FIRST on resolution) — so a question about
 resolution time is a question you cannot answer correctly from the column names
 alone.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -70,11 +71,16 @@ KEYS = {
     "customers": {"pk": ["customer_id"]},
     "agents": {"pk": ["agent_id"]},
     "sla": {"pk": ["priority"]},
-    "tickets": {"pk": ["ticket_id"],
-                "fk": [("customer_id", "customers.customer_id"),
-                       ("agent_id", "agents.agent_id"),
-                       ("priority", "sla.priority")]},
+    "tickets": {
+        "pk": ["ticket_id"],
+        "fk": [
+            ("customer_id", "customers.customer_id"),
+            ("agent_id", "agents.agent_id"),
+            ("priority", "sla.priority"),
+        ],
+    },
 }
+
 
 class TeamProfile(NamedTuple):
     """How a team's work behaves.
@@ -84,9 +90,9 @@ class TeamProfile(NamedTuple):
     values makes every use of them unprovable.
     """
 
-    elapsed: float          # scales wall-clock duration
-    waits: float            # chance a ticket ever waits on the customer
-    share: tuple[float, float]   # fraction of elapsed time it waits for
+    elapsed: float  # scales wall-clock duration
+    waits: float  # chance a ticket ever waits on the customer
+    share: tuple[float, float]  # fraction of elapsed time it waits for
 
 
 # Billing is slow on the clock and fast on the work: its tickets sit waiting on
@@ -121,8 +127,13 @@ def generate(n_customers=120, n_agents=18, n_tickets=3000, seed=20260822) -> dic
     out["sla"] = [(p, minutes) for p, minutes in PRIORITIES]
 
     customers = [
-        (f"C{i + 1:05d}", f"Support customer {i + 1}", rnd.choice(COUNTRIES),
-         rnd.choices(PLANS, [4, 5, 2])[0], f"support{i + 1}@example.com")
+        (
+            f"C{i + 1:05d}",
+            f"Support customer {i + 1}",
+            rnd.choice(COUNTRIES),
+            rnd.choices(PLANS, [4, 5, 2])[0],
+            f"support{i + 1}@example.com",
+        )
         for i in range(n_customers)
     ]
     out["customers"] = customers
@@ -154,15 +165,28 @@ def generate(n_customers=120, n_agents=18, n_tickets=3000, seed=20260822) -> dic
         # wrong magnitude.
         profile = TEAM_DELAY[agent[2]]
         elapsed = max(5, int(rnd.lognormvariate(5.2, 0.9) * profile.elapsed))
-        waiting = 0 if rnd.random() > profile.waits else min(
-            elapsed - 1, int(elapsed * rnd.uniform(*profile.share)))
+        waiting = (
+            0
+            if rnd.random() > profile.waits
+            else min(elapsed - 1, int(elapsed * rnd.uniform(*profile.share)))
+        )
         status = rnd.choices(["resolved", "resolved", "resolved", "open"], [6, 3, 3, 2])[0]
         resolved = opened + dt.timedelta(minutes=elapsed) if status == "resolved" else None
-        tickets.append((
-            f"T{i + 1:07d}", customer[0], agent[0], priority, rnd.choice(CHANNELS), status,
-            opened, resolved, waiting, elapsed if resolved else None,
-            (elapsed - waiting) if resolved else None,
-        ))
+        tickets.append(
+            (
+                f"T{i + 1:07d}",
+                customer[0],
+                agent[0],
+                priority,
+                rnd.choice(CHANNELS),
+                status,
+                opened,
+                resolved,
+                waiting,
+                elapsed if resolved else None,
+                (elapsed - waiting) if resolved else None,
+            )
+        )
     out["tickets"] = tickets
     return out
 
