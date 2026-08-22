@@ -55,6 +55,11 @@ h2{font-size:1.7rem;margin:0 0 8px}
   font-weight:600;font-size:.94rem;border:1px solid var(--line)}
 .btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent)}
 .btn.ghost{color:var(--ink)}
+.release-pill{display:inline-flex;align-items:center;gap:9px;margin:0 0 20px;padding:6px 14px;
+  border:1px solid var(--line);border-radius:999px;background:var(--panel);
+  text-decoration:none;color:var(--muted);font-size:.86rem}
+.release-pill span{background:var(--accent-soft);color:var(--accent);font-weight:700;
+  border-radius:999px;padding:2px 9px;font-size:.78rem}
 
 /* stats */
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;
@@ -117,6 +122,7 @@ footer a{text-decoration:none}
   <div class="wrap">
     <a class="brand" href="./">data-agent-service</a>
     <div class="links">
+      <a href="./#release">Get it</a>
       <a href="./#start">Run it locally</a>
       <a href="./#status">Status</a>
       <a href="https://github.com/calvinchengx/data-agent-service">GitHub</a>
@@ -129,6 +135,7 @@ footer a{text-decoration:none}
 <header class="hero">
   <div class="wrap">
     <p class="eyebrow">data-agent-service</p>
+    <a class="release-pill" href="https://github.com/calvinchengx/data-agent-service/releases/tag/v0.1.0"><span>v0.1.0</span> first release — both executors on GHCR &rarr;</a>
     <h1>Ask your warehouse a question. Get an answer you can defend.</h1>
     <p>Natural-language questions over Microsoft Fabric Warehouses and other sources — grounded in the
        glossary, metrics and schema held in OpenMetadata, fronted by Azure API Management. Each query
@@ -145,7 +152,7 @@ footer a{text-decoration:none}
     </div>
     <div class="stats">
       <div class="stat"><b>88</b><span>end-to-end witnesses</span></div>
-      <div class="stat"><b>27</b><span>contract checks, 2 implementations</span></div>
+      <div class="stat"><b>28</b><span>contract checks, both executors</span></div>
       <div class="stat"><b>31</b><span>eval questions, 5 tiers</span></div>
       <div class="stat"><b>3</b><span>source adapters shipped</span></div>
       <div class="stat"><b>+1.6<small>ms</small></b><span>gateway cost at p95</span></div>
@@ -372,7 +379,8 @@ footer a{text-decoration:none}
       <table class="tbl">
         <thead><tr><th>Capability</th><th>Status</th><th>What backs it</th></tr></thead>
         <tbody>
-          <tr><td>Fabric, PostgreSQL, Databricks adapters</td><td><span class="tag t-ship">shipped</span></td><td>Two datasets live in two engines; contract green against both executors</td></tr>
+          <tr><td>Fabric + PostgreSQL, both executors</td><td><span class="tag t-ship">shipped</span></td><td>28/28 contract against each; two datasets live in two engines</td></tr>
+          <tr><td>Databricks adapter</td><td><span class="tag t-ship">Python only</span></td><td>Shipped in <code>executor-py</code>; the Go executor has no Databricks driver</td></tr>
           <tr><td>MCP, client-agnostic</td><td><span class="tag t-ship">witnessed</span></td><td>28 checks; two independent official SDKs</td></tr>
           <tr><td>OBO per-user authorization</td><td><span class="tag t-ship">witnessed</span></td><td>Three personas, including a denial</td></tr>
           <tr><td>Guardrails on the parse tree</td><td><span class="tag t-ship">shipped</span></td><td>Unit corpus shared by both implementations</td></tr>
@@ -386,6 +394,35 @@ footer a{text-decoration:none}
           <tr><td>REST / GraphQL adapters</td><td><span class="tag t-plan">designed</span></td><td>Plan §15 only</td></tr>
         </tbody>
       </table>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="release">
+  <div class="wrap">
+    <h2>Get it</h2>
+    <p class="lede">Two executor images, same contract, same version. Pick either — nothing above the
+      executor changes, and both now serve every configured source.</p>
+<pre><code>docker pull ghcr.io/calvinchengx/data-agent-service/executor-py:0.1.0
+docker pull ghcr.io/calvinchengx/data-agent-service/executor-go:0.1.0</code></pre>
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr><th>Image</th><th>Size</th><th>Platforms</th><th>Engines it serves</th></tr></thead>
+        <tbody>
+          <tr><td><code>executor-go</code></td><td>19.5&nbsp;MB</td><td>linux/amd64 · linux/arm64</td><td>Fabric (T-SQL over TDS), PostgreSQL</td></tr>
+          <tr><td><code>executor-py</code></td><td>290&nbsp;MB</td><td>linux/amd64 · linux/arm64</td><td>Fabric, PostgreSQL, Databricks</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lede" style="margin-top:24px">Choose with <code>DAS_EXECUTOR=py|go</code>. The Go image is
+      a static binary on distroless — no ODBC driver, no Kerberos libraries — which is most of the
+      difference in size. Why both exist, and what the comparison measured, is in
+      <a href="docs/adr/0001-two-executors/">ADR&nbsp;0001</a>.</p>
+    <div class="note">
+      <b>What this version does not yet do.</b>
+      <p>The Go executor has no Databricks adapter, and REST/GraphQL sources are designed rather than
+        built. An unknown source <code>kind</code> is refused outright rather than guessed at, so a
+        source no adapter handles fails loudly instead of being answered from the wrong engine.</p>
     </div>
   </div>
 </section>

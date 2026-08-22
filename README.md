@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/calvinchengx/data-agent-service/actions/workflows/ci.yml/badge.svg)](https://github.com/calvinchengx/data-agent-service/actions/workflows/ci.yml)
 [![Docs](https://github.com/calvinchengx/data-agent-service/actions/workflows/docs-site.yml/badge.svg)](https://calvinchengx.github.io/data-agent-service/docs/)
+[![release](https://img.shields.io/github/v/release/calvinchengx/data-agent-service)](https://github.com/calvinchengx/data-agent-service/releases/latest)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 [![python coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fcalvinchengx.github.io%2Fdata-agent-service%2Fcoverage-python.json)](https://calvinchengx.github.io/data-agent-service/docs/13-testing/)
