@@ -1,0 +1,52 @@
+version: 2
+
+# Security ALERTS arrive without any configuration; scheduled version updates
+# do not. Without this file the npm dependencies added with the docs site were
+# watched by nothing at all, and the Python and Go updates only ever arrived
+# when something was already vulnerable.
+#
+# Grouped per ecosystem so one PR carries a coherent set for CI to verify,
+# rather than a queue of individually-plausible bumps nobody reviews together.
+updates:
+  # The pnpm workspace: root + website, one lockfile. Astro and Starlight move
+  # as a pair -- Starlight peers a specific Astro major -- so a split upgrade
+  # produces a build that resolves and then fails.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      docs-site:
+        patterns: ['astro', '@astrojs/*', 'sharp']
+      docs-tooling:
+        patterns: ['tsx', 'typescript', '@types/*']
+
+  # The Python executor, agent, seeds and harnesses (uv.lock).
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python:
+        patterns: ['*']
+
+  # The Go executor. Its module lives beside its source, not at the root.
+  - package-ecosystem: gomod
+    directory: /services/warehouse-query-go
+    schedule:
+      interval: weekly
+    groups:
+      go:
+        patterns: ['*']
+
+  # The workflows themselves: a pinned action is a dependency like any other,
+  # and CI, the docs site and the release all run on them.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
