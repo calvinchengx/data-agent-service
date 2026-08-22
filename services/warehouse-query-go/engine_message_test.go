@@ -58,3 +58,29 @@ func TestEngineMessageLeavesNothingBehindWhenTheMessageIsOnlyLayers(t *testing.T
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestAPermissionRefusalKeepsTheEnginesWords(t *testing.T) {
+	denial := errors.New("The SELECT permission was denied on the object 'dim_customer'")
+	if !isDenial(denial) {
+		t.Fatal("a permission refusal was not recognised as one")
+	}
+	if got := clientError(denial); !strings.Contains(got, "SELECT permission was denied") {
+		t.Fatalf("the refusal did not survive: %q", got)
+	}
+}
+
+func TestAnUnrecognisedFailureTellsTheCallerNothing(t *testing.T) {
+	// Whatever a driver puts in an error, none of it reaches a caller. The
+	// audit line keeps it for whoever has to debug this.
+	leaky := errors.New(
+		"connect failed: /opt/app/secrets/conn.ini server=contoso.internal;Pwd=hunter2")
+	got := clientError(leaky)
+	for _, secret := range []string{"hunter2", "/opt/app", "contoso.internal"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("%q leaked in %q", secret, got)
+		}
+	}
+	if got != "the source could not complete this query" {
+		t.Fatalf("unexpected message: %q", got)
+	}
+}

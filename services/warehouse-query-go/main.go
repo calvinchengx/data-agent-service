@@ -300,6 +300,21 @@ func isDenial(err error) bool {
 
 // engineMessage keeps the engine's own words — they usually name the real
 // problem — without the driver's framing.
+// clientError is what a caller is told about a failure the engine raised.
+//
+// A PERMISSION REFUSAL keeps the engine's own words: the database is the
+// authority on what a user may see, and the agent has to be able to report
+// "you personally lack access" rather than retry. Anything else is our bug or
+// the driver's, and its text can carry paths and connection state that tell
+// the agent nothing it can act on -- so the detail goes to the audit line and
+// the caller gets a sentence. The Python executor decides this identically.
+func clientError(err error) string {
+	if isDenial(err) {
+		return engineMessage(err)
+	}
+	return "the source could not complete this query"
+}
+
 // driverLayers matches the chain a driver wraps its message in:
 // [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]The real message.
 var driverLayers = regexp.MustCompile(`^(\s*\[[^\]]*\]\s*)+`)
@@ -372,7 +387,7 @@ func handleTables(w http.ResponseWriter, r *http.Request) {
 		}
 		audit("op", "list_tables", "user", p.Name, "source", src.Name, "verdict", verdict,
 			"reason", truncate(err.Error(), 300))
-		writeError(w, status, engineMessage(err))
+		writeError(w, status, clientError(err))
 		return
 	}
 	audit("op", "list_tables", "user", p.Name, "source", src.Name, "verdict", "ok",
@@ -392,7 +407,7 @@ func handleDescribe(w http.ResponseWriter, r *http.Request) {
 	}
 	described, status, err := describe(r.Context(), src, r.PathValue("name"), p)
 	if err != nil {
-		writeError(w, status, engineMessage(err))
+		writeError(w, status, clientError(err))
 		return
 	}
 	payload := map[string]any{"source": src.Name}
@@ -512,7 +527,7 @@ func runQuery(ctx context.Context, src Source, sqlText string, requested int,
 		}
 		audit("op", "run_query", "user", p.Name, "source", src.Name, "verdict", outcome,
 			"reason", truncate(err.Error(), 300), "sql", truncate(verdict.SQL, 500))
-		return nil, nil, status, errors.New(engineMessage(err))
+		return nil, nil, status, errors.New(clientError(err))
 	}
 	audit("op", "run_query", "user", p.Name, "oid", p.OID, "client", p.Client, "roles", p.Roles, "source", src.Name,
 		"verdict", "ok", "tables", verdict.Tables, "rows", result.RowCount,

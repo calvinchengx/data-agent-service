@@ -614,3 +614,65 @@ def test_both_surfaces_sanitise_the_same_failure(client, signing_key, backend, m
 
     assert "ODBC Driver 18" not in rest.text
     assert "ODBC Driver 18" not in mcp.text
+
+
+# ------------------------------------- what an UNRECOGNISED failure may say --
+def test_a_permission_refusal_still_speaks_in_the_engines_words():
+    """Load-bearing, and documented: the database is the authority on what a
+    user may see, so the agent must be able to report the refusal."""
+    denial = Exception("The SELECT permission was denied on the object 'dim_customer'")
+    assert app_mod._is_denial(denial)
+    assert "SELECT permission was denied" in app_mod._client_error(denial, True)
+
+
+def test_an_unrecognised_failure_does_not_reach_the_caller():
+    """Code scanning flagged exception text reaching a response. A refusal is
+    worth passing through; an arbitrary exception is our bug or the driver's,
+    and its text can carry paths and connection state."""
+    leaky = Exception(
+        "connect failed: /opt/app/secrets/conn.ini line 3, "
+        "server=contoso.internal;Pwd=hunter2;Trusted_Connection=no"
+    )
+    message = app_mod._client_error(leaky, False)
+    assert "hunter2" not in message
+    assert "/opt/app" not in message
+    assert "contoso.internal" not in message
+    assert message == "the source could not complete this query"
+
+
+def test_an_unrecognised_failure_leaks_on_neither_surface(
+    client, signing_key, backend, monkeypatch
+):
+    """REST and MCP make the same decision, in the same place."""
+    leak = "server=contoso.internal;Pwd=hunter2 at /opt/app/secrets/conn.ini"
+
+    def blow_up(*_a, **_k):
+        raise RuntimeError(leak)
+
+    monkeypatch.setattr(backend, "run", blow_up)
+    sql = {"sql": "SELECT 1 AS n FROM dbo.fct_sales"}
+
+    rest = client.post("/query", json=sql, headers=auth(signing_key))
+    mcp = rpc(client, signing_key, "tools/call", {"name": "run_query", "arguments": sql})
+
+    for surface, response in (("REST", rest.text), ("MCP", mcp.text)):
+        assert "hunter2" not in response, f"{surface} leaked a password"
+        assert "/opt/app" not in response, f"{surface} leaked a path"
+        assert "contoso.internal" not in response, f"{surface} leaked a hostname"
+
+
+def test_the_operator_still_gets_the_detail(client, signing_key, backend, monkeypatch, caplog):
+    """Nothing is lost -- it moves to the audit line, where it belongs."""
+    import logging
+
+    def blow_up(*_a, **_k):
+        raise RuntimeError("server=contoso.internal;Pwd=hunter2")
+
+    monkeypatch.setattr(backend, "run", blow_up)
+    with caplog.at_level(logging.INFO, logger="warehouse-query"):
+        client.post(
+            "/query",
+            json={"sql": "SELECT 1 AS n FROM dbo.fct_sales"},
+            headers=auth(signing_key),
+        )
+    assert any("contoso.internal" in record.getMessage() for record in caplog.records)

@@ -319,7 +319,7 @@ def list_tables(
             verdict="denied" if denied else "error",
             reason=str(e)[:300],
         )
-        raise HTTPException(403 if denied else 502, _engine_message(e)) from None
+        raise HTTPException(403 if denied else 502, _client_error(e, denied)) from None
     audit(
         op="list_tables",
         user=p.name,
@@ -368,7 +368,7 @@ def describe_table(
             verdict="denied" if denied else "error",
             reason=str(e)[:300],
         )
-        raise HTTPException(403 if denied else 502, _engine_message(e)) from None
+        raise HTTPException(403 if denied else 502, _client_error(e, denied)) from None
     # Describe only what the caller may read. This is the same filtering the
     # MCP path applies, and it belongs on BOTH surfaces: the Go executor has
     # always done it in its shared handler, and this route returning the raw
@@ -450,7 +450,7 @@ def run_query(
             reason=str(e)[:300],
             sql=verdict.sql[:500],
         )
-        raise HTTPException(403 if denied else 502, _engine_message(e)) from None
+        raise HTTPException(403 if denied else 502, _client_error(e, denied)) from None
 
     ms = int((time.time() - t0) * 1000)
     audit(
@@ -659,7 +659,7 @@ def _op_call(p: Principal, body: dict) -> dict:
             verdict="denied" if denied else "error",
             reason=str(e)[:300],
         )
-        raise HTTPException(403 if denied else 502, _engine_message(e)) from None
+        raise HTTPException(403 if denied else 502, _client_error(e, denied)) from None
 
     items, withheld = httpguard.filter_response(result["items"], denied_fields)
     ms = int((time.time() - t0) * 1000)
@@ -698,6 +698,28 @@ def _is_denial(e: Exception) -> bool:
     reported as one — the agent must be able to tell "you may not" from "the
     query broke"."""
     return any(m in str(e).lower() for m in _DENIAL_MARKERS)
+
+
+def _client_error(e: Exception, denied: bool) -> str:
+    """What a caller is told about a failure the engine raised.
+
+    A PERMISSION REFUSAL is passed through in the engine's own words. That is
+    deliberate and documented (docs/05-authorization.md): the database is the
+    authority on what a user may see, and the agent has to be able to report
+    "you personally lack access" rather than retry.
+
+    ANYTHING ELSE is not that. An unrecognised exception is our bug or the
+    driver's, and its text can carry paths, connection state and internals
+    that tell the agent nothing it can act on. `_engine_message` caps and
+    strips, but it cannot make arbitrary exception text safe -- so the detail
+    goes to the audit line, where an operator can read it, and the caller gets
+    a sentence.
+
+    The cost, stated plainly: an agent no longer sees "invalid column name".
+    `describe_table` is the sanctioned way to learn a column name, and the
+    audit record keeps what was lost.
+    """
+    return _engine_message(e) if denied else "the source could not complete this query"
 
 
 def _engine_message(e: Exception | str) -> str:
@@ -936,7 +958,7 @@ def _dispatch(p: Principal, name: str, args: dict) -> dict:
         )
         return mcpproto.text_content(
             ("you do not have access: " if denied else "the source returned an error: ")
-            + _engine_message(e),
+            + _client_error(e, denied),
             is_error=True,
         )
 

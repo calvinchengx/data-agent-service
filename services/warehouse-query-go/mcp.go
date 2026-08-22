@@ -287,7 +287,7 @@ func callTool(r *http.Request, p *Principal, name string, raw json.RawMessage) m
 			if status == http.StatusForbidden {
 				return textContent(refusedPrefix(err), true)
 			}
-			return textContent("the source returned an error: "+engineMessage(err), true)
+			return textContent("the source returned an error: "+clientError(err), true)
 		}
 		return textContent(map[string]any{
 			"source": src.Name, "sql": verdict.SQL, "tables": verdict.Tables,
@@ -303,13 +303,13 @@ func callTool(r *http.Request, p *Principal, name string, raw json.RawMessage) m
 // made the decision.
 func refusalText(err error) string {
 	if isDenial(err) {
-		return "you do not have access: " + engineMessage(err)
+		return "you do not have access: " + clientError(err)
 	}
 	var missing *notFoundError
 	if ok := asNotFound(err, &missing); ok {
 		return missing.Error()
 	}
-	return "the source returned an error: " + engineMessage(err)
+	return "the source returned an error: " + clientError(err)
 }
 
 func refusedPrefix(err error) string {
@@ -318,7 +318,7 @@ func refusedPrefix(err error) string {
 		return text
 	}
 	if isDenial(err) {
-		return "you do not have access: " + engineMessage(err)
+		return "you do not have access: " + clientError(err)
 	}
 	return "refused: " + text
 }
