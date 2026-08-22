@@ -158,7 +158,10 @@ def _principal_token(src, p: Principal) -> str:
         return CRED.managed_identity_token(os.environ.get("DAS_SQL_AUDIENCE",
                                                           "https://database.windows.net"))
     try:
-        return CRED.on_behalf_of(p.token, SQL_SCOPE, cache_key=p.key)
+        # The scope the SOURCE needs, not one global setting: a Databricks
+        # warehouse will not accept a token minted for Azure SQL, and the
+        # failure surfaces at sign-in where it reads as an outage.
+        return CRED.on_behalf_of(p.token, src.obo_scope(), cache_key=f"{p.key}:{src.name}")
     except TokenError as e:
         raise HTTPException(502, f"could not obtain a data-plane token for you: {e}") from None
 

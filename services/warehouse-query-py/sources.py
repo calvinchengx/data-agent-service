@@ -47,6 +47,21 @@ class Source:
     host: str = ""
     warehouse_id: str = ""
     catalog: str = ""
+    # The delegated scope to ask for when acting on the caller's behalf. Per
+    # SOURCE, not global: every engine has its own resource, and a single
+    # setting silently hands one engine another engine's token — which fails at
+    # sign-in rather than at the query, so it reads as an outage instead of a
+    # misconfiguration.
+    scope: str = ""
+
+    def obo_scope(self) -> str:
+        """What to ask for on the caller's behalf.
+
+        Falls back to the global setting so a single-source deployment needs no
+        extra configuration, but a Databricks or Snowflake source must name its
+        own — see docs/09-adding-a-source.md.
+        """
+        return self.scope or SQL_SCOPE
 
     def policy(self, max_rows: int) -> Policy:
         return Policy(dialect=self.dialect, allowed_schemas=self.schemas,
@@ -237,6 +252,12 @@ class PostgresBackend:
 
 
 # -------------------------------------------------------------- Databricks --
+# The Azure Databricks application. A first-party id, the same in every
+# tenant, and the resource a delegated token must name to reach a workspace.
+DATABRICKS_RESOURCE = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d"
+DATABRICKS_SCOPE = f"{DATABRICKS_RESOURCE}/user_impersonation"
+
+
 class DatabricksBackend:
     """Databricks SQL warehouses, over the Statement Execution API.
 
@@ -352,7 +373,8 @@ def load_sources() -> dict[str, Source]:
             tds_server=r.get("tds_server", ""), database=r.get("database") or r.get("item", ""),
             schemas=tuple(r.get("schemas") or default_schemas),
             dsn=r.get("dsn", ""), host=r.get("host", ""),
-            warehouse_id=r.get("warehouse_id", ""), catalog=r.get("catalog", ""))
+            warehouse_id=r.get("warehouse_id", ""), catalog=r.get("catalog", ""),
+            scope=r.get("scope", ""))
     return out
 
 
