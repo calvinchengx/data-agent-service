@@ -12,4 +12,8 @@ RUN uv sync --frozen --no-install-project --no-dev
 ENV PATH="/app/.venv/bin:${PATH}" PYTHONUNBUFFERED=1
 COPY services/warehouse-query-py/ /app/
 EXPOSE 8090
+# Declared here rather than in compose: the two executors ship different
+# runtimes, so each image is what knows how to probe itself.
+HEALTHCHECK --interval=10s --timeout=5s --retries=12 \
+  CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8090/health',timeout=5).status==200 else 1)"]
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8090", "--no-access-log"]
