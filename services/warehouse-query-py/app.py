@@ -998,10 +998,16 @@ async def mcp_endpoint(request: Request, authorization: str | None = Header(defa
     #   the engine's own denial  passed through deliberately (docs/05-…)
     #
     # An unrecognised exception no longer reaches here at all — `_client_error`
-    # returns a fixed sentence and the detail goes to the audit line. So this
-    # suppression covers the case the query cannot distinguish, not the case it
-    # was right about.
-    return JSONResponse(out if batch else out[0])  # codeql[py/stack-trace-exposure]
+    # returns a fixed sentence and the detail goes to the audit line. What is
+    # left is the case the query cannot distinguish, not the case it was right
+    # about.
+    #
+    # An inline `# codeql[py/stack-trace-exposure]` marker was tried here and
+    # is NOT honoured: the alert re-anchored to this exact line, comment and
+    # all. Leaving a suppression that suppresses nothing would read as handled
+    # when it is not, so the alert is dismissed in the repository's security
+    # tab instead, and this comment is the reasoning behind that dismissal.
+    return JSONResponse(out if batch else out[0])
 
 
 @app.get("/mcp", include_in_schema=False)
