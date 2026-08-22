@@ -135,6 +135,19 @@ def guard(sql: str, policy: Policy) -> Verdict:
         if name in _DENIED_CALLS or name.startswith(_DENIED_PREFIXES):
             raise Denied(f"function {name} is not allowed")
 
+    # 4b. APPLY / LATERAL over a FUNCTION is a relation the schema check never
+    #     sees: `CROSS APPLY other.f(1)` produces rows from a callable in a
+    #     schema this source does not allow, and `find_all(exp.Table)` finds
+    #     no Table in it. A subquery there is legitimate and its own tables are
+    #     checked normally, so only the function form is refused.
+    for lateral in tree.find_all(exp.Lateral):
+        inner = lateral.this
+        if inner is not None and not isinstance(inner, (exp.Subquery, exp.Select)):
+            raise Denied(
+                f"{inner.sql(dialect=policy.dialect)[:60]} is a function used as a table; "
+                f"only tables in {sorted(policy.allowed_schemas)} may be read"
+            )
+
     # 5. table references must live in an allowed schema of this source
     tables: set[str] = set()
     allowed = {s.lower() for s in policy.allowed_schemas}

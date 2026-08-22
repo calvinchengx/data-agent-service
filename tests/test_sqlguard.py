@@ -168,6 +168,36 @@ def test_a_file_reading_function_is_not_a_table(sql):
         guard(sql, D)
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # APPLY over a FUNCTION produces a relation the schema check never
+        # sees: there is no Table node in it at all.
+        "SELECT * FROM dbo.fct_sales CROSS APPLY other.f(1)",
+        "SELECT * FROM dbo.fct_sales OUTER APPLY other.g(1)",
+        # Even in an allowed schema: a callable is not a table, and what it
+        # reads is not something this guard can see.
+        "SELECT * FROM dbo.fct_sales CROSS APPLY dbo.f(1)",
+    ],
+)
+def test_apply_over_a_function_is_not_a_table(sql):
+    with pytest.raises(Denied, match="function used as a table"):
+        guard(sql, P)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM dbo.fct_sales CROSS APPLY (SELECT product_id FROM dbo.dim_product) t",
+        "SELECT * FROM dbo.fct_sales OUTER APPLY (SELECT product_id FROM dbo.dim_product) t",
+    ],
+)
+def test_apply_over_a_subquery_is_still_allowed(sql):
+    """The legitimate form. Its tables are checked like any others."""
+    v = guard(sql, P)
+    assert "dbo.dim_product" in v.tables
+
+
 def test_a_table_function_is_refused_in_every_dialect():
     # Discriminated on the node type rather than a list of names, so an engine
     # whose file reader nobody here has heard of is covered too.

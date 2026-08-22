@@ -106,6 +106,9 @@ REFUSED = {
     "SELECT * FROM dbo.fct_sales, other.secrets": "not queryable",
     "SELECT * FROM dbo.fct_sales, master.dbo.sysdatabases": "cross-database",
     "SELECT * FROM dbo.fct_sales, unqualified": "schema-qualified",
+    # APPLY over a function: a relation with no Table node in it, so the
+    # schema check never saw it. Both implementations allowed it.
+    "SELECT * FROM dbo.fct_sales CROSS APPLY other.f(1)": "",
     "SELECT * FROM other_schema.secrets": "not queryable",
     "SELECT * FROM fct_sales": "schema-qualified",
     "SELECT 1": "reads no table",

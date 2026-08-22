@@ -334,7 +334,12 @@ func tableRefs(toks []token, ctes map[string]bool, p Policy) ([]string, map[stri
 	var tables []string
 
 	for i, t := range toks {
-		if t.kind != tokWord || (t.up != "FROM" && t.up != "JOIN") {
+		// APPLY and LATERAL introduce a relation too. `CROSS APPLY other.f(1)`
+		// produces rows from a callable in a schema this source does not
+		// allow, and it follows neither FROM nor JOIN. A subquery there --
+		// `CROSS APPLY (SELECT …)` -- reads as no name at all and is scanned
+		// normally by its own tokens.
+		if t.kind != tokWord || (t.up != "FROM" && t.up != "JOIN" && t.up != "APPLY" && t.up != "LATERAL") {
 			continue
 		}
 		// `FROM a, b, c` names three tables and only the first follows the
