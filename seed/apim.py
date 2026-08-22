@@ -204,9 +204,15 @@ def om_bot_token() -> str:
     return json.loads(b)["value"]
 
 
-# The name the subscription key is stored under, and therefore the only part
+# The vault entry the subscription key lives in -- a NAME, and the only part
 # of it that reaches a settings file.
-OM_KEY_SECRET = "das-om-subscription-key"
+#
+# Not called OM_KEY_SECRET, which is what it was: that reads as "a secret",
+# and it is the opposite, the identifier that exists so no secret has to be
+# written down. Code scanning classified the constant as sensitive on its name
+# alone and followed it to disk, which is a false positive it was right to
+# raise -- a reader would have made the same mistake.
+OM_VAULT_ENTRY = "das-om-subscription-key"
 
 
 def om_subscription_key() -> str:
@@ -484,8 +490,8 @@ def main() -> dict:
         # The agent and the client-config generator both send this header, so
         # the value has to be reachable -- but it does not have to be on disk.
         # It goes to the vault, and the settings file gets its NAME.
-        c.store_secret(OM_KEY_SECRET, subscription_key)
-        c.write_env(DAS_OM_SUBSCRIPTION_KEY=f"keyvault:{OM_KEY_SECRET}")
+        c.store_secret(OM_VAULT_ENTRY, subscription_key)
+        c.write_env(DAS_OM_SUBSCRIPTION_KEY=f"keyvault:{OM_VAULT_ENTRY}")
     return out
 
 
