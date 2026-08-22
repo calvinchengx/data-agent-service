@@ -81,14 +81,6 @@ HTTP_SOURCE = sources_mod.Source(
 SQL_SOURCE = sources_mod.Source(name="warehouse", kind="fabric", surface="sql", schemas=("dbo",))
 
 
-class _FakeCred:
-    def secret(self, name):
-        return f"secret-{name}"
-
-    def managed_identity_token(self, audience):
-        return "mi-token"
-
-
 @pytest.fixture(autouse=True)
 def _wire(monkeypatch):
     """Both sources configured, the network faked, the token trivially resolved."""
@@ -96,8 +88,9 @@ def _wire(monkeypatch):
     monkeypatch.setattr(app_mod, "DEFAULT_SOURCE", "", raising=False)
     monkeypatch.setattr(app_mod, "_principal_token", lambda src, p: "service-token")
     # `_http_token` runs for real, so the credential branch is exercised rather
-    # than mocked away; only the vault behind it is faked.
-    monkeypatch.setattr(app_mod, "CRED", _FakeCred())
+    # than mocked away; only the vault behind it is faked. The resolver is the
+    # SHARED one (`vaultref`), not a second implementation in the executor.
+    monkeypatch.setattr(app_mod.vaultref, "resolve", lambda v, **kw: f"secret-{v}")
     # Permissive by default. The tests that are ABOUT authorization set their
     # own rules; leaving whatever `.env` says ambient would make every other
     # test here depend on deployment configuration.
@@ -294,20 +287,45 @@ def test_the_base_url_falls_back_to_the_specs_own_server(monkeypatch):
     assert backend.policy(src).base_url == "https://from-the-spec.example.com"
 
 
-def test_an_unknown_credential_kind_is_a_configuration_error():
+def test_a_mistyped_credential_scheme_is_refused_rather_than_sent(monkeypatch):
+    # `vaultref` treats a non-reference as a literal, which is right for a key
+    # a person pastes in. A source credential that looks like a mistyped
+    # scheme is not that: sent as a bearer it would fail at the API with an
+    # error about the header rather than about the typo.
     src = sources_mod.Source(
         name="x", kind="rest", surface="http", authz_tier="service", credential="vault:s"
     )
     with pytest.raises(app_mod.HTTPException) as e:
         app_mod._http_token(src, _principal())
-    assert "unknown credential kind" in e.value.detail
+    assert "not recognised" in e.value.detail
 
 
-def test_a_stored_credential_is_used_as_the_bearer():
+def test_a_literal_with_no_scheme_is_passed_through(monkeypatch):
+    monkeypatch.setattr(app_mod.vaultref, "resolve", lambda v, **kw: v)
+    src = sources_mod.Source(
+        name="x", kind="rest", surface="http", authz_tier="service", credential="a-pasted-key"
+    )
+    assert app_mod._http_token(src, _principal()) == "a-pasted-key"
+
+
+def test_an_unresolvable_reference_is_reported_not_sent(monkeypatch):
+    def boom(value, **kw):
+        raise LookupError(f"cannot resolve {value}: DAS_KEYVAULT_URL is not set")
+
+    monkeypatch.setattr(app_mod.vaultref, "resolve", boom)
+    src = sources_mod.Source(
+        name="x", kind="rest", surface="http", authz_tier="service", credential="keyvault:s"
+    )
+    with pytest.raises(app_mod.HTTPException) as e:
+        app_mod._http_token(src, _principal())
+    assert "cannot resolve" in e.value.detail
+
+
+def test_a_stored_credential_is_resolved_and_used_as_the_bearer():
     src = sources_mod.Source(
         name="x", kind="rest", surface="http", authz_tier="service", credential="keyvault:om-bot"
     )
-    assert app_mod._http_token(src, _principal()) == "secret-om-bot"
+    assert app_mod._http_token(src, _principal()) == "secret-keyvault:om-bot"
 
 
 def test_a_non_json_response_is_refused_by_the_route(client, signing_key, monkeypatch):

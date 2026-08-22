@@ -37,6 +37,7 @@ from jwt import PyJWKSet
 import access
 import httpguard
 import mcp as mcpproto
+import vaultref
 from credential import Credential, Settings, TokenError
 from sources import backend_for, guard, http_backend_for, load_sources
 from sqlguard import Denied
@@ -261,13 +262,22 @@ def _http_token(src, p: Principal) -> str:
                 f"source {src.name} has a stored credential but claims authz_tier=user; "
                 "a shared credential cannot carry the caller's permissions",
             )
-        kind, _, name = src.credential.partition(":")
-        if kind != "keyvault":
-            raise HTTPException(500, f"source {src.name}: unknown credential kind {kind!r}")
-        value = CRED.secret(name)
-        if not value:
-            raise HTTPException(502, f"source {src.name}: credential {name} is not readable")
-        return value
+        scheme, sep, _ = src.credential.partition(":")
+        if sep and not vaultref.is_reference(src.credential):
+            # `vaultref` treats a non-reference as a literal, which is right
+            # for a subscription key a person pastes in. A source credential
+            # that looks like a mistyped scheme is not that: sending
+            # `vault:name` as a bearer token would fail at the API with an
+            # error about the header rather than about the typo.
+            raise HTTPException(
+                500,
+                f"source {src.name}: credential scheme {scheme!r} is not recognised; "
+                f"use `{vaultref.PREFIX}<name>` or a literal with no scheme",
+            )
+        try:
+            return vaultref.resolve(src.credential)
+        except LookupError as e:
+            raise HTTPException(502, f"source {src.name}: {e}") from None
     return _principal_token(src, p)
 
 

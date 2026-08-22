@@ -12,6 +12,11 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project --no-dev
 ENV PATH="/app/.venv/bin:${PATH}" PYTHONUNBUFFERED=1
+# The `keyvault:` resolver is shared with the seeds and the agent rather than
+# reimplemented here. One implementation of a syntax an OPERATOR writes into
+# configuration matters more than keeping this image to a single directory:
+# two resolvers would eventually disagree about what a reference means.
+COPY vaultref.py /app/
 COPY services/warehouse-query-py/ /app/
 EXPOSE 8090
 # Declared here rather than in compose: the two executors ship different

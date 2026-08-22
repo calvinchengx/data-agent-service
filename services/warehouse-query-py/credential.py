@@ -107,7 +107,6 @@ class Credential:
         self._lock = threading.Lock()
         self._cache: dict[tuple[str, str], tuple[float, str]] = {}
         self._secret: str | None = None
-        self._secrets: dict[str, str] = {}
 
     # -- 1. the service's own identity ------------------------------------
     def managed_identity_token(self, resource: str) -> str:
@@ -148,32 +147,6 @@ class Credential:
             return self._secret
         except (TokenError, KeyError):
             return None
-
-    def secret(self, name: str) -> str | None:
-        """Any secret from the vault, by name.
-
-        HTTP sources need this: an API that does not federate with Entra
-        cannot take an on-behalf-of token, so a stored credential is the only
-        way to reach it — and a stored credential is exactly why such a source
-        is `authz_tier=service` and says so in every audit line.
-        """
-        if not self.s.keyvault_url or not name:
-            return None
-        cached = self._secrets.get(name)
-        if cached is not None:
-            return cached
-        try:
-            tok = self.managed_identity_token("https://vault.azure.net")
-            r = _get_json(
-                f"{self.s.keyvault_url}/secrets/{name}?api-version=7.5",
-                {"Authorization": "Bearer " + tok},
-            )
-        except (TokenError, KeyError):
-            return None
-        value = r.get("value")
-        if value:
-            self._secrets[name] = value
-        return value
 
     # -- 2. the user's identity, on their behalf ---------------------------
     def on_behalf_of(self, user_assertion: str, scope: str, cache_key: str = "") -> str:
