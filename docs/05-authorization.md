@@ -133,18 +133,29 @@ issued the token to. `DAS_ALLOWED_CLIENT_IDS` refuses anything else:
 The wording is deliberate. A person who reads "unauthorized" goes and resets a
 password that was never the problem.
 
-This is enforceable rather than advisory because **Entra has no dynamic client
-registration**. MCP's auth specification expects clients to self-register
-(RFC 7591), and clients such as Claude support it; Entra deliberately does not,
-because DCR bypasses admin consent, produces credentials with no rotation
-policy or provenance, and creates client objects no Conditional Access policy
-is bound to. So no application can appear in the tenant without an
-administrator — which is exactly what makes a list of permitted ones
-meaningful.
+This is enforceable rather than advisory because of one property of Entra:
+**an application cannot register itself.**
 
-**Caveat:** the common workaround for that gap is an OAuth proxy that adds DCR
-in front of Entra. Where one is deployed, self-registration is effectively back
-and this control is only as strong as whatever that proxy admits.
+OAuth normally assumes an application was registered in advance by an
+administrator, who gave it a `client_id`. **Dynamic Client Registration** (DCR,
+RFC 7591) lets an application skip that step and mint its own identity at
+runtime by calling a `/register` endpoint. MCP's auth specification expects it,
+and clients such as Claude support it — it is what lets you paste the URL of a
+server nobody has ever configured and have it work.
+
+Entra deliberately does not implement it. A self-registered application has no
+admin consent, no Conditional Access policy bound to it, no credential rotation
+policy, and no record of who introduced it. `docs/09-mcp-clients.md` covers what
+that means for connecting a client; what it means *here* is the useful part:
+**every client id in the tenant was put there by an administrator**, which is
+precisely what makes a list of permitted ones worth enforcing. A control that
+listed identities anyone could mint would be decoration.
+
+**Caveat, and it matters:** the common workaround for that gap is an OAuth
+proxy that adds DCR in front of Entra. Deploy one and applications can mint
+their own identities again — this control is then only as strong as whatever
+that proxy admits. Closing the connection gap and keeping this control are the
+same decision, taken twice.
 
 ### What it does not do
 

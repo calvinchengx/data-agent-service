@@ -39,11 +39,40 @@ OAuth support does not fit. `make client-config ARGS="--auth token"` emits it.
 
 ### The one gap worth knowing: no dynamic client registration
 
-Microsoft Entra implements no RFC 7591 registration endpoint, so a client
-**cannot invent its own identity** against this resource — it must use a client
-id registered in the tenant. This is a property of Entra, not of this service,
-and it is the single thing most likely to surprise someone connecting a client
-that expects to self-register.
+**What dynamic client registration is.** OAuth normally assumes an application
+already has an identity at the identity provider: someone registered it in
+advance and it came away with a `client_id`, perhaps a secret, and a set of
+permissions. Registration is a deliberate administrative act. **Dynamic Client
+Registration** (DCR, RFC 7591) lets an application skip that: it POSTs to a
+`/register` endpoint at runtime and gets back a fresh `client_id`, with no
+person involved.
+
+**Why MCP clients want it.** A desktop AI client cannot be pre-registered at
+every MCP server in the world. You paste a URL for a server it has never heard
+of, and it needs an identity at *that* server's authorization provider. DCR is
+what makes "paste a URL and it works" possible. Without it, an administrator
+has to register something first.
+
+**Why Entra does not offer it.** An application that registers itself has no
+admin consent, no Conditional Access policy bound to it, no credential rotation
+policy, and no record of who introduced it. Microsoft treats this as a
+deliberate trade — governance over convenience — rather than a missing feature.
+The analogy: DCR is a lobby machine that prints a building pass to anyone who
+asks; Entra insists every pass comes from facilities.
+
+So a client **cannot invent its own identity** against this resource — it must
+use a client id registered in the tenant. This is a property of Entra, not of
+this service, and it is the single thing most likely to surprise someone
+connecting a client that expects to self-register.
+
+**The same fact reads two ways, and both are true.** Here it is a *gap*: some
+clients cannot connect without an administrator doing something first. In
+[authorization](05-authorization.md#which-application-may-act-for-a-user) it is
+the *foundation* of a control — because no application can reach the tenant
+without an administrator, a list of permitted client ids is enforceable rather
+than advisory. A deployment that closes the gap with an OAuth proxy that adds
+DCR in front of Entra also removes that foundation, and should know it is
+making both trades at once.
 
 Two consequences, both handled rather than hidden:
 
