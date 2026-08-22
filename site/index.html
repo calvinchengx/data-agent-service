@@ -153,7 +153,7 @@ footer a{text-decoration:none}
     <div class="stats">
       <div class="stat"><b>103</b><span>end-to-end witnesses</span></div>
       <div class="stat"><b>28</b><span>contract checks, both executors</span></div>
-      <div class="stat"><b>31</b><span>eval questions, 5 tiers</span></div>
+      <div class="stat"><b>44</b><span>eval questions, 5 tiers</span></div>
       <div class="stat"><b>3</b><span>source adapters shipped</span></div>
       <div class="stat"><b>+1.6<small>ms</small></b><span>gateway cost at p95</span></div>
     </div>
@@ -390,7 +390,7 @@ footer a{text-decoration:none}
           <tr><td>Guardrails on the parse tree</td><td><span class="tag t-ship">shipped</span></td><td>Unit corpus shared by both implementations</td></tr>
           <tr><td>Load testing</td><td><span class="tag t-ship">measured</span></td><td>Four k6 scenarios with gating thresholds</td></tr>
           <tr><td>Eval harness and gold baseline</td><td><span class="tag t-ship">shipped</span></td><td>31 questions, five tiers, result-set scoring</td></tr>
-          <tr><td>Live model accuracy score</td><td><span class="tag t-wip">measured, small n</span></td><td>Through Claude Code, not the SDK. Catalog vs none: pass 71% vs 50%, semantics 100% vs 40%, L3 +60 points. 14 questions &mdash; directional, not statistically strong</td></tr>
+          <tr><td>Live model accuracy score</td><td><span class="tag t-wip">measured, small n</span></td><td>Through Claude Code, not the SDK. Catalog vs none: pass 71% vs 50%, semantics 100% vs 40%, L3 +60 points. That run covered 14 support questions on one repeat &mdash; directional, not statistically strong, and predates the L3 expansion</td></tr>
           <tr><td>Audit trail</td><td><span class="tag t-ship">shipped</span></td><td>Structured line per operation, authz tier recorded</td></tr>
           <tr><td>Production parity (real Azure)</td><td><span class="tag t-wip">gated, unwitnessed</span></td><td>Terraform validates, runbook and preflight exist; not yet run against a tenant</td></tr>
           <tr><td>Dashboard promotion</td><td><span class="tag t-ship">shipped</span></td><td>Templates counted by pseudonymous user, k-threshold, catalog-derived titles; no question stored</td></tr>
