@@ -1,0 +1,74 @@
+# CodeQL — advanced (in-repo) setup rather than the repository's Default setup,
+# so the language list is a decision recorded here rather than something
+# inferred.
+#
+# Everything scanned is first-party code we author and ship:
+#   - python                 the executor, agent, seeds, evals, harnesses
+#   - go                     the second executor
+#   - javascript-typescript  the docs site and its build scripts
+#   - actions                these workflows
+#
+# Python matters most here and is the reason this is worth running: it is the
+# default executor, and it is the code that validates a bearer token, performs
+# the on-behalf-of exchange and parses caller-supplied SQL.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '17 6 * * 1' # weekly, Monday 06:17 UTC
+
+# Superseding a pull-request run costs nothing. Superseding a run on main does:
+# a cancelled CodeQL job still uploads its SARIF, flagged as an unsuccessful
+# execution with zero results, and that errored analysis then becomes the most
+# recent one for its category. A burst of commits would quietly replace real
+# findings with empty ones. So main runs to completion; only PR pushes cancel.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: python
+            build-mode: none
+          - language: go
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v4
+      # The Go module lives beside its source rather than at the repository
+      # root, which autobuild does not find. A manual build in the right
+      # directory is deterministic; autobuild here would be a guess.
+      - if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: services/warehouse-query-go/go.mod
+          cache-dependency-path: services/warehouse-query-go/go.sum
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - if: matrix.language == 'go'
+        run: go build ./...
+        working-directory: services/warehouse-query-go
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
