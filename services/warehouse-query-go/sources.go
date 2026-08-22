@@ -33,6 +33,8 @@ type Source struct {
 	TDSServer string   `json:"tds_server"`
 	Database  string   `json:"database"`
 	Schemas   []string `json:"schemas"`
+	// postgres
+	DSN string `json:"dsn"`
 }
 
 func (s Source) policy(maxRows int) Policy {

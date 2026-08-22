@@ -67,6 +67,16 @@ wrong the moment the executor is fast. This is the argument for measuring both.
   Go port followed the same day and mirrored that module's eight tests
   (`role_source_test.go`) — because the conformance suite can only see such a
   divergence once a persona's outcome changes, which is too late.
+* **"One contract" was true of one source for longer than anyone noticed.**
+  Phase 13 added a PostgreSQL source to the Python executor; the Go executor
+  kept a single mssql driver and a `kind` field nothing dispatched on, so a
+  postgres source was handed to the TDS driver and failed like an outage. The
+  contract stayed green throughout, because `make conformance` runs against
+  whichever executor happens to be up and that was always Python. Running it
+  deliberately against Go scored **13/28**. The gap closed when the Go
+  PostgreSQL adapter landed (28/28), and the lesson is the one the suite was
+  built to teach: a contract only covers what someone actually ran it against.
+
 * **Two implementations is a real cost.** It is justified here because this
   repo's purpose is to answer questions like this one with measurements. A
   product would pick one — and, on these numbers, would pick Go for the
