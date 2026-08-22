@@ -77,6 +77,17 @@ wrong the moment the executor is fast. This is the argument for measuring both.
   PostgreSQL adapter landed (28/28), and the lesson is the one the suite was
   built to teach: a contract only covers what someone actually ran it against.
 
+* **The REST surface is Python-only, and this is the exception being
+  recorded rather than discovered.** `list_operations`, `describe_operation`
+  and `call_operation` exist in the Python executor and not in the Go one, so
+  a source with `surface: "http"` is served by one implementation. The
+  PostgreSQL gap above was the same shape and went unnoticed for two phases
+  because nothing said it out loud; `docs/15-http-sources.md` asked for the
+  exception to be written down **before** the Python half landed, and this is
+  that entry. `DAS_EXECUTOR=go` with an HTTP source configured will fail on
+  those operations — loudly, since the Go router refuses an unknown `kind`
+  rather than guessing.
+
 * **Two implementations is a real cost.** It is justified here because this
   repo's purpose is to answer questions like this one with measurements. A
   product would pick one — and, on these numbers, would pick Go for the

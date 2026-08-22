@@ -47,6 +47,7 @@ same check has been watched passing against a real tenant.
 | Model spend capped and attributed per caller | 🟢 request rate + token ceiling | `e2e.run` phase12, against a stub | not yet |
 | Token governance for an Anthropic-shaped API | 🔴 counted as zero (upstream #11) | phase12 holds the constraint | not yet — unverified against real APIM |
 | No development-only code path | 🟢 | `scripts/check_prod_paths.py --strict` | n/a — the check is the claim |
+| REST sources (`surface: http`) | 🟡 **Python executor only** — the Go executor has no REST adapter | `tests/test_httpguard.py`, `tests/test_rest_backend.py` | not yet |
 
 Legend: 🟢 witnessed · 🟡 partially · 🟠 deliberately off here · 🔴 blocked upstream
 

@@ -18,12 +18,16 @@ the same `SourceBackend` shape; nothing above this module changes.
 from __future__ import annotations
 
 import dataclasses
+import fnmatch
 import json
 import os
 import struct
 import threading
+import urllib.request
 from typing import Any, Protocol
 
+import httpguard
+from credential import _SSL  # the family's documented TLS switch, already resolved
 from sqlguard import Policy, Verdict, guard
 
 SQL_AUDIENCE = os.environ.get("DAS_SQL_AUDIENCE", "https://database.windows.net")
@@ -44,6 +48,13 @@ class Source:
     schemas: tuple[str, ...] = ("dbo",)
     # postgres
     dsn: str = ""
+    # rest
+    surface: str = "sql"  # sql | http — which contract operations apply
+    spec: str = ""  # the OpenAPI document; without one there is nothing to guard against
+    base_url: str = ""
+    collections: tuple[str, ...] = ()
+    max_items: int = 500
+    max_bytes: int = 200_000
     # databricks
     host: str = ""
     warehouse_id: str = ""
@@ -421,12 +432,142 @@ class DatabricksBackend:
         }
 
 
-BACKENDS: dict[str, SourceBackend] = {
+class HttpBackend(Protocol):
+    """What an HTTP adapter provides.
+
+    A separate protocol rather than extra methods on `SourceBackend`, because
+    the two surfaces are genuinely different: a SQL source has tables and
+    statements, an HTTP source has operations and calls, and a type that
+    claimed both would let either be called on either.
+    """
+
+    def list_operations(self, src: Source, principal_token: str) -> list[dict]: ...
+    def describe_operation(self, src: Source, operation: str, principal_token: str) -> dict: ...
+    def operations(self, src: Source, token: str) -> dict[str, httpguard.Operation]: ...
+    def policy(self, src: Source) -> httpguard.Policy: ...
+    def call(self, src: Source, verdict: httpguard.Verdict, principal_token: str) -> dict: ...
+
+
+# ------------------------------------------------------------------ REST --
+class RestBackend:
+    """A REST API, reached through its OpenAPI document.
+
+    The document is the allow-list: `httpguard` indexes only the operations it
+    could ever permit, checks every parameter against the declared schema, and
+    writes the item ceiling into the request. This class does no checking of
+    its own — it executes a `Verdict` and nothing else, which is the same
+    contract the SQL backends have with `sqlguard`.
+
+    `authz_tier` keeps its meaning. `user` sends the caller's on-behalf-of
+    token, so the API authorises the person who asked; `service` sends the
+    service's own, so it cannot, and every audit line says so.
+    """
+
+    def __init__(self) -> None:
+        self._specs: dict[str, dict] = {}
+
+    def _fetch(self, url: str, token: str, *, max_bytes: int) -> bytes:
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
+        if token:
+            request.add_header("Authorization", "Bearer " + token)
+        with urllib.request.urlopen(request, timeout=30, context=_SSL) as response:
+            return response.read(max_bytes + 1)
+
+    def operations(self, src: Source, token: str) -> dict[str, httpguard.Operation]:
+        """The spec, fetched once per source and kept.
+
+        Cached because it is configuration rather than data: a spec that
+        changed between two calls in one answer would mean the guard checked
+        one API and the executor called another.
+        """
+        if src.name not in self._specs:
+            raw = self._fetch(src.spec, token, max_bytes=4_000_000)
+            self._specs[src.name] = json.loads(raw.decode())
+        return httpguard.load_spec(self._specs[src.name])
+
+    def policy(self, src: Source) -> httpguard.Policy:
+        base = src.base_url or ""
+        if not base:
+            servers = self._specs.get(src.name, {}).get("servers") or []
+            base = (servers[0] or {}).get("url", "") if servers else ""
+        return httpguard.Policy(
+            collections=src.collections,
+            max_items=src.max_items,
+            max_bytes=src.max_bytes,
+            base_url=base,
+        )
+
+    def list_operations(self, src: Source, principal_token: str) -> list[dict]:
+        ops = self.operations(src, principal_token)
+        allowed = [
+            o
+            for o in ops.values()
+            if not src.collections
+            or any(fnmatch.fnmatchcase(o.collection, p) for p in src.collections)
+        ]
+        return [
+            {
+                "operation": o.operation_id,
+                "method": o.method.upper(),
+                "collection": o.collection,
+                "path": o.path,
+                "summary": o.summary,
+                "qualifiedName": f"{o.collection}.{o.operation_id}",
+            }
+            for o in sorted(allowed, key=lambda o: (o.collection, o.operation_id))
+        ]
+
+    def describe_operation(self, src: Source, operation: str, principal_token: str) -> dict:
+        ops = self.operations(src, principal_token)
+        op = ops.get(operation)
+        if op is None:
+            raise LookupError(f"operation {operation} not found")
+        if src.collections and not any(
+            fnmatch.fnmatchcase(op.collection, p) for p in src.collections
+        ):
+            raise PermissionError(f"collection {op.collection} is not queryable")
+        return {
+            "operation": op.operation_id,
+            "qualifiedName": f"{op.collection}.{op.operation_id}",
+            "method": op.method.upper(),
+            "collection": op.collection,
+            "summary": op.summary,
+            "parameters": [
+                {
+                    "name": p.name,
+                    "in": p.location,
+                    "required": p.required,
+                    "type": p.kind,
+                    "enum": list(p.enum) or None,
+                }
+                for p in op.parameters
+            ],
+            "fields": list(op.fields),
+        }
+
+    def call(self, src: Source, verdict: httpguard.Verdict, principal_token: str) -> dict:
+        raw = self._fetch(verdict.url, principal_token, max_bytes=verdict.max_bytes)
+        payload, _ = httpguard.truncate(raw, verdict.max_bytes)
+        items = payload if isinstance(payload, list) else [payload]
+        truncated = len(items) > verdict.item_limit
+        return {
+            "operation": verdict.operation,
+            "url": verdict.url,
+            "items": items[: verdict.item_limit],
+            "itemCount": min(len(items), verdict.item_limit),
+            "truncated": truncated,
+        }
+
+
+HTTP_KINDS = ("rest",)
+
+BACKENDS: dict[str, Any] = {
     "fabric": TdsBackend(),
     "azuresql": TdsBackend(),
     "synapse": TdsBackend(),
     "postgres": PostgresBackend(),
     "databricks": DatabricksBackend(),
+    "rest": RestBackend(),
 }
 
 
@@ -453,8 +594,35 @@ def load_sources() -> dict[str, Source]:
             warehouse_id=r.get("warehouse_id", ""),
             catalog=r.get("catalog", ""),
             scope=r.get("scope", ""),
+            surface=r.get("surface", "http" if r.get("kind") in HTTP_KINDS else "sql"),
+            spec=r.get("spec", ""),
+            base_url=r.get("base_url", ""),
+            collections=tuple(r.get("collections") or ()),
+            max_items=int(r.get("max_items") or 500),
+            max_bytes=int(r.get("max_bytes") or 200_000),
         )
+    for src in out.values():
+        # A spec is the allow-list, not documentation. Refusing at start-up is
+        # the only honest option: a source loaded without one would answer
+        # calls the guard could not have checked.
+        if src.surface == "http" and not src.spec:
+            raise ValueError(f"source {src.name} is an http source with no `spec` to guard against")
     return out
+
+
+def http_backend_for(src: Source) -> HttpBackend:
+    """The adapter for an HTTP source, typed as such.
+
+    Refuses a SQL source loudly rather than returning something whose methods
+    do not exist — the same reason the Go router refuses an unknown `kind`
+    instead of falling back to Fabric.
+    """
+    if src.surface != "http":
+        raise LookupError(f"source {src.name} is a {src.surface} source, not an http one")
+    backend = BACKENDS.get(src.kind)
+    if backend is None or not isinstance(backend, RestBackend):
+        raise LookupError(f"source {src.name} has kind {src.kind!r}, for which no adapter is built")
+    return backend
 
 
 def backend_for(src: Source) -> SourceBackend:

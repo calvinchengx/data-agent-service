@@ -35,9 +35,10 @@ from fastapi.responses import JSONResponse, Response
 from jwt import PyJWKSet
 
 import access
+import httpguard
 import mcp as mcpproto
 from credential import Credential, Settings, TokenError
-from sources import backend_for, guard, load_sources
+from sources import backend_for, guard, http_backend_for, load_sources
 from sqlguard import Denied
 
 LOG = logging.getLogger("warehouse-query")
@@ -263,7 +264,12 @@ def list_sources(authorization: str | None = Header(default=None)):
                 "dialect": s.dialect,
                 "authzTier": s.authz_tier,
                 "openMetadataService": s.om_service_fqn,
-                "schemas": list(s.schemas),
+                "surface": s.surface,
+                **(
+                    {"collections": list(s.collections)}
+                    if s.surface == "http"
+                    else {"schemas": list(s.schemas)}
+                ),
             }
             for s in SOURCES.values()
         ]
@@ -452,6 +458,192 @@ def run_query(
     }
 
 
+# ----------------------------------------------------------- http sources --
+# A second surface rather than an overload of the first. `run_query` takes SQL,
+# and an HTTP source has no SQL; passing a JSON body pretending to be a
+# statement would keep the contract's shape and lose its meaning. Sources
+# declare which surface they offer, and `list_sources` reports it.
+
+
+def _http_source(name: str | None):
+    src = _source(name)
+    if src.surface != "http":
+        raise HTTPException(400, f"source {src.name} is a {src.surface} source; use run_query")
+    return src
+
+
+@app.get(
+    "/operations",
+    operation_id="list_operations",
+    summary="List the operations an HTTP source exposes",
+)
+def list_operations(
+    source: str | None = Query(default=None),
+    authorization: str | None = Header(default=None),
+):
+    p = principal(authorization)
+    src = _http_source(source)
+    token = _principal_token(src, p)
+    t0 = time.time()
+    try:
+        ops = http_backend_for(src).list_operations(src, token)
+    except Exception as e:  # noqa: BLE001 — any engine failure is reported, never swallowed
+        audit(op="list_operations", user=p.name, source=src.name, verdict="error", reason=str(e))
+        raise HTTPException(502, _engine_message(e)) from None
+    allowed = []
+    for op in ops:
+        try:
+            RULES.check(p.roles, (op["qualifiedName"],), ())
+            allowed.append(op)
+        except access.Denied:
+            continue
+    audit(
+        op="list_operations",
+        user=p.name,
+        source=src.name,
+        verdict="ok",
+        count=len(allowed),
+        ms=int((time.time() - t0) * 1000),
+        authz_tier=src.authz_tier,
+    )
+    return {"source": src.name, "operations": allowed}
+
+
+@app.get(
+    "/operations/{operation}",
+    operation_id="describe_operation",
+    summary="Parameters and response fields of one operation",
+)
+def describe_operation(
+    operation: str,
+    source: str | None = Query(default=None),
+    authorization: str | None = Header(default=None),
+):
+    p = principal(authorization)
+    src = _http_source(source)
+    token = _principal_token(src, p)
+    try:
+        described = http_backend_for(src).describe_operation(src, operation, token)
+    except PermissionError as e:
+        audit(
+            op="describe_operation", user=p.name, source=src.name, verdict="denied", reason=str(e)
+        )
+        raise HTTPException(403, str(e)) from None
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from None
+    try:
+        RULES.check(p.roles, (described["qualifiedName"],), ())
+    except access.Denied as e:
+        audit(
+            op="describe_operation", user=p.name, source=src.name, verdict="denied", reason=str(e)
+        )
+        raise HTTPException(403, str(e)) from None
+    out, hidden = _filter_fields(p, described)
+    audit(
+        op="describe_operation",
+        user=p.name,
+        source=src.name,
+        verdict="ok",
+        operation=operation,
+        withheld=len(hidden),
+        authz_tier=src.authz_tier,
+    )
+    return {"source": src.name, **out}
+
+
+@app.post(
+    "/call",
+    operation_id="call_operation",
+    summary="Call one read-only operation and return its items",
+)
+def call_operation(
+    body: dict = Body(  # noqa: B008 — FastAPI dependency declaration
+        ...,
+        examples=[{"operation": "listInvoices", "arguments": {"limit": 10}, "source": "billing"}],
+    ),
+    authorization: str | None = Header(default=None),
+):
+    p = principal(authorization)
+    src = _http_source(body.get("source"))
+    operation = body.get("operation") or ""
+    arguments = body.get("arguments") or {}
+    token = _principal_token(src, p)
+    backend = http_backend_for(src)
+    t0 = time.time()
+
+    try:
+        ops = backend.operations(src, token)
+        verdict = httpguard.guard(operation, arguments, ops, backend.policy(src))
+    except Denied as e:
+        audit(
+            op="call_operation",
+            user=p.name,
+            source=src.name,
+            verdict="blocked",
+            reason=str(e),
+            operation=operation,
+        )
+        raise HTTPException(400, f"call refused: {e}") from None
+
+    # The same two-part authorization as a query: may this role reach the
+    # operation at all, and may it read the fields the response carries.
+    try:
+        RULES.check(p.roles, (f"{verdict.collection}.{verdict.operation}",), verdict.fields)
+        denied_fields: set[str] = set()
+    except access.Denied:
+        denied_fields = set()
+        for dotted in verdict.fields:
+            try:
+                RULES.check(p.roles, (f"{verdict.collection}.{verdict.operation}",), (dotted,))
+            except access.Denied as e:
+                if dotted.count(".") < 2:
+                    audit(
+                        op="call_operation",
+                        user=p.name,
+                        source=src.name,
+                        verdict="denied",
+                        reason=str(e),
+                    )
+                    raise HTTPException(403, str(e)) from None
+                denied_fields.add(dotted.rsplit(".", 1)[-1])
+
+    try:
+        result = backend.call(src, verdict, token)
+    except Denied as e:
+        audit(op="call_operation", user=p.name, source=src.name, verdict="blocked", reason=str(e))
+        raise HTTPException(400, f"call refused: {e}") from None
+    except Exception as e:  # noqa: BLE001 — as above: reported with its verdict
+        denied = _is_denial(e)
+        audit(
+            op="call_operation",
+            user=p.name,
+            source=src.name,
+            verdict="denied" if denied else "error",
+            reason=str(e)[:300],
+        )
+        raise HTTPException(403 if denied else 502, _engine_message(e)) from None
+
+    items, withheld = httpguard.filter_response(result["items"], denied_fields)
+    ms = int((time.time() - t0) * 1000)
+    audit(
+        op="call_operation",
+        user=p.name,
+        source=src.name,
+        verdict="ok",
+        operation=verdict.operation,
+        url=verdict.url[:300],
+        items=result["itemCount"],
+        withheld=withheld,
+        ms=ms,
+        authz_tier=src.authz_tier,
+    )
+    out = {**result, "items": items, "source": src.name, "elapsedMs": ms}
+    if withheld:
+        out["withheldFields"] = withheld
+        out["note"] = "Some fields were removed because your role may not read them."
+    return out
+
+
 _DENIAL_MARKERS = (
     "access denied",
     "permission was denied",
@@ -522,6 +714,31 @@ def _filter_columns(p: Principal, described: dict) -> tuple[dict, list[str]]:
         out["withheldColumns"] = len(hidden)
         out["note"] = (
             "Some columns are not available to your role and are not listed; do not select them."
+        )
+    return out, hidden
+
+
+def _filter_fields(p: Principal, described: dict) -> tuple[dict, list[str]]:
+    """The HTTP counterpart of `_filter_columns`.
+
+    Same rule, same reason: naming a field the caller may not read is itself a
+    disclosure, and it sends the model down a path that can only end in a
+    refusal. The rules engine is shared — `collection.operation.field` is just
+    another dotted name to it.
+    """
+    qualified = described.get("qualifiedName", "")
+    kept, hidden = [], []
+    for field in described.get("fields", []):
+        try:
+            RULES.check(p.roles, (qualified,), (f"{qualified}.{field}",))
+            kept.append(field)
+        except access.Denied:
+            hidden.append(field)
+    out = {**described, "fields": kept}
+    if hidden:
+        out["withheldFields"] = len(hidden)
+        out["note"] = (
+            "Some fields are not available to your role and are not listed; do not request them."
         )
     return out, hidden
 
