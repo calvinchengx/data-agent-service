@@ -191,11 +191,23 @@ def evaluate(
         w in question["question"].lower()
         for w in ("first", "order", "rank", "top", "highest", "lowest")
     )
+    # Did the query produce the right answer? Extra columns are how a careful
+    # client explores; they are not a wrong answer. Row count and every gold
+    # value still have to match, and the prose still has to carry a gold
+    # number, so a query that returns more is accepted and one that returns
+    # something else is not.
     s.execution = bool(
         actual is not None
         and gold is not None
-        and scoring.rows_match(actual, gold, ordered=ordered)
+        and scoring.rows_contain(actual, gold, ordered=ordered)
         and scoring.answer_states_a_gold_number(answer.text, gold)
+    )
+    # The stricter question, kept because it is the right check for OUR agent
+    # and the one that would notice a query drifting into a different shape.
+    s.result_set = bool(
+        actual is not None
+        and gold is not None
+        and scoring.rows_match(actual, gold, ordered=ordered)
     )
     s.grounding = scoring.grounding(set(answer.tables), question.get("gold_tables", []))
     if question.get("required_semantics") or question.get("forbidden_semantics"):
@@ -295,6 +307,7 @@ def summarise(results: list[Result]) -> dict:
         "grounding": rate("grounding"),
         "semantic_fidelity": rate("semantics"),
         "behaviour": rate("behaviour"),
+        "result_set_exact": rate("result_set"),
         "by_tier": by_tier,
         "tool_calls_median": statistics.median([r.tool_calls for r in results]) if results else 0,
         "tokens_out_total": sum(r.tokens_out for r in results),

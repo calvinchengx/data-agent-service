@@ -11,7 +11,8 @@ make eval ARGS="--tier L3"             # only the catalog-dependent questions
 
 | Metric | How | Why not something simpler |
 |---|---|---|
-| **Execution accuracy** | the agent's last statement is re-run and its **result set** compared with the reference query's, order-insensitively unless the question asked for an order, with a numeric tolerance | comparing SQL text would fail every correct query written differently |
+| **Execution accuracy** | the agent's last statement is re-run and must **carry** the reference result: the same number of rows, and every reference value present in the row it corresponds to. Order-insensitive unless the question asked for an order; numeric tolerance applied | comparing SQL text would fail every correct query written differently — and demanding an identical SELECT list fails a client that selects one extra column for context, which is how a careful analyst explores |
+| **Result set (exact)** | the same comparison, but strict equality | reported rather than gating. It is the right check for this repository's own agent, and the one that would notice a query drifting into a different shape — but it is a question about how a query was written, not whether the answer was right |
 | **Answer carries the figure** | a number from the reference result must appear in the prose (allowing rounding and rescaling) | a query can be right while the sentence reports something else |
 | **Grounding** | the tables the executor reported must equal the expected set | catches an answer that reached the right number from the wrong place |
 | **Semantic fidelity** | the definition must appear in the SQL that ran — `fiscal_year` and not `YEAR(...)`, `revenue_usd` and not gross | prose can claim a definition the query never applied |

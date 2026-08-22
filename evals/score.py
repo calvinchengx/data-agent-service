@@ -25,6 +25,10 @@ class Score:
     grounding: bool | None = None  # used the expected tables, no extras
     semantics: bool | None = None  # applied the definition the catalog holds
     behaviour: bool | None = None  # answered / abstained / reported a refusal, as required
+    # Strict set equality with the reference query. Reported, not gating: two
+    # queries can differ in their SELECT list and agree on the answer, and
+    # `execution` is the question of whether the answer was right.
+    result_set: bool | None = None
     # Not a pass and not a failure: the client refused to attempt the question,
     # so nothing was returned AND nothing was refused. Kept out of the
     # pass/fail denominator rather than folded into either, because both
@@ -72,12 +76,74 @@ def rows_match(actual: list[list], gold: list[list], *, ordered: bool, tol=0.02)
         if len(row_a) != len(row_g):
             return False
         for x, y in zip(row_a, row_g, strict=False):
-            if x.startswith("~") and y.startswith("~"):
-                fx, fy = float(x[1:]), float(y[1:])
-                if not math.isclose(fx, fy, rel_tol=tol, abs_tol=tol):
-                    return False
-            elif x != y:
+            if not _same_cell(x, y, tol):
                 return False
+    return True
+
+
+def _same_cell(x: str, y: str, tol: float) -> bool:
+    if x.startswith("~") and y.startswith("~"):
+        return math.isclose(float(x[1:]), float(y[1:]), rel_tol=tol, abs_tol=tol)
+    return x == y
+
+
+def _row_carries(row_a: tuple, row_g: tuple, tol: float) -> bool:
+    """Is every value of the gold row present in the agent's row?
+
+    Matches are consumed, so a gold row needing two 3s is not satisfied by an
+    actual row holding one.
+    """
+    pool = list(row_a)
+    for cell in row_g:
+        for i, candidate in enumerate(pool):
+            if _same_cell(candidate, cell, tol):
+                pool.pop(i)
+                break
+        else:
+            return False
+    return True
+
+
+def rows_contain(actual: list[list], gold: list[list], *, ordered: bool, tol=0.02) -> bool:
+    """Does the agent's result set CARRY the gold answer?
+
+    Strict equality asks whether two SELECT lists match, which is a question
+    about how a query was written rather than whether it was right. A client
+    that selects an extra column for context -- a count beside an average, the
+    id beside the name -- returns a different result set and the same answer.
+    Judged strictly, seven demonstrably correct answers in the first live model
+    run scored zero.
+
+    So: the same number of ROWS, and every value of each gold row present in
+    the row it corresponds to. Extra columns are tolerated. A missing value, a
+    wrong value, or a different number of rows is not -- those are the ways an
+    answer is actually wrong.
+
+    Strict equality is still measured, as `result_set`. This is the looser of
+    two named properties rather than a relaxation of one.
+    """
+    if actual is None or gold is None:
+        return False
+    if len(actual) != len(gold):
+        return False
+
+    def normalise(rows):
+        return [tuple(_cell(c) for c in row) for row in rows]
+
+    a, g = normalise(actual), normalise(gold)
+    if ordered:
+        return all(_row_carries(ra, rg, tol) for ra, rg in zip(a, g, strict=False))
+    # Unordered: the two sides cannot simply be sorted and zipped, because rows
+    # of different widths do not sort comparably. Each gold row claims an
+    # actual row, and a claimed row cannot be reused.
+    remaining = list(a)
+    for row_g in g:
+        for i, row_a in enumerate(remaining):
+            if _row_carries(row_a, row_g, tol):
+                remaining.pop(i)
+                break
+        else:
+            return False
     return True
 
 
