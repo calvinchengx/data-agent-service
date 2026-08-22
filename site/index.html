@@ -151,7 +151,7 @@ footer a{text-decoration:none}
       <a class="btn ghost" href="#status">Honest status</a>
     </div>
     <div class="stats">
-      <div class="stat"><b>88</b><span>end-to-end witnesses</span></div>
+      <div class="stat"><b>95</b><span>end-to-end witnesses</span></div>
       <div class="stat"><b>28</b><span>contract checks, both executors</span></div>
       <div class="stat"><b>31</b><span>eval questions, 5 tiers</span></div>
       <div class="stat"><b>3</b><span>source adapters shipped</span></div>
@@ -324,11 +324,13 @@ footer a{text-decoration:none}
       </div>
 
       <div class="card">
-        <h3>Power BI generation <span class="tag t-plan">designed</span></h3>
-        <p>The intended end of the promotion path: a promoted template becomes a generated Power&nbsp;BI
-           dashboard, so the answer to "should this be a report?" produces the report. Designed in the
-           plan; not built.</p>
-        <span class="ev">docs/00-plan.md §18</span>
+        <h3>Power BI generation <span class="tag t-ship">shipped</span></h3>
+        <p>The end of the promotion path: a promoted template becomes a semantic model and a report in
+           Fabric, created under the identity of the person who asked. The DAX measure is evaluated and
+           compared against the SQL it came from, and only a dashboard whose two answers agree reaches
+           the catalog. Rendering is prod-only — the emulator persists a report definition and does not
+           interpret it.</p>
+        <span class="ev">7 witnesses · a viewer is refused, a contributor publishes, lineage recorded</span>
       </div>
 
     </div>
@@ -389,8 +391,8 @@ footer a{text-decoration:none}
           <tr><td>Live model accuracy score</td><td><span class="tag t-wip">not yet run</span></td><td>Needs an API key; no model report exists</td></tr>
           <tr><td>Audit trail</td><td><span class="tag t-ship">shipped</span></td><td>Structured line per operation, authz tier recorded</td></tr>
           <tr><td>Production parity (real Azure)</td><td><span class="tag t-wip">gated, unwitnessed</span></td><td>Terraform validates, runbook and preflight exist; not yet run against a tenant</td></tr>
-          <tr><td>Dashboard promotion</td><td><span class="tag t-wip">in progress</span></td><td>Canonicaliser landed; scoring and witnesses being built</td></tr>
-          <tr><td>Power BI generation</td><td><span class="tag t-plan">designed</span></td><td>Plan §18 only</td></tr>
+          <tr><td>Dashboard promotion</td><td><span class="tag t-ship">shipped</span></td><td>Templates counted by pseudonymous user, k-threshold, catalog-derived titles; no question stored</td></tr>
+          <tr><td>Power BI generation</td><td><span class="tag t-ship">shipped</span></td><td>Published under OBO and verified against its own SQL; rendering prod-only</td></tr>
           <tr><td>REST / GraphQL adapters</td><td><span class="tag t-plan">designed</span></td><td>Plan §15 only</td></tr>
         </tbody>
       </table>
