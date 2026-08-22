@@ -30,6 +30,7 @@ from typing import Any
 from agent import agent as agent_mod
 from agent import identity
 from agent import skills as skills_mod
+from evals import claude_code_agent
 from evals import score as scoring
 from seed import common as c
 
@@ -225,6 +226,10 @@ def run(
             t0 = time.time()
             if agent_kind == "gold":
                 answer = GoldAgent(token).ask(question)
+            elif agent_kind == "claude-code":
+                answer = claude_code_agent.ask(
+                    question["question"], token, om=om, model=model, effort=effort
+                )
             else:
                 answer = agent_mod.ask(
                     question["question"], token, om=om, model=model, effort=effort
@@ -305,7 +310,14 @@ def fingerprint(usecase: str, model: str, effort: str, om: bool, agent_kind: str
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--usecase", default="contoso")
-    ap.add_argument("--agent", default="claude", choices=("claude", "gold"))
+    ap.add_argument(
+        "--agent",
+        default="claude",
+        choices=("claude", "gold", "claude-code"),
+        help="claude: the Anthropic SDK (needs ANTHROPIC_API_KEY). "
+        "claude-code: the same questions through the `claude` CLI, which measures "
+        "Claude Code's loop over our MCP servers rather than ours. gold: the baseline.",
+    )
     ap.add_argument(
         "--ablation",
         action="store_true",
