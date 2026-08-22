@@ -50,11 +50,74 @@ one, so those fingerprints are part of the artefact.
 
 ## Running the model
 
-The agent needs an Anthropic API key in the environment it runs in:
+There are two backends, and a baseline. They are not interchangeable, and the
+scorecard records which produced it.
+
+| `--agent` | Credential | What it measures |
+|---|---|---|
+| `claude` | `ANTHROPIC_API_KEY` | **our** tool-use loop over **our** prompt |
+| `claude-code` | a Claude subscription, via the `claude` CLI | **Claude Code's** loop over **our** MCP servers |
+| `gold` | none | the harness itself: reference SQL through the real gateway |
+
+### With an API key
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
+make eval
 ```
 
 `make ask` and `make eval` pass `ANTHROPIC_API_KEY` (and `ANTHROPIC_AUTH_TOKEN`)
-into the container. Without one, only `--agent gold` can run.
+into the container.
+
+### With a Claude subscription and no API key
+
+```bash
+make eval-cli ARGS="--usecase support"
+```
+
+A subscription is a different credential and the SDK cannot use it, so a
+machine with Claude Code but no key could otherwise not score itself at all.
+This runs the same questions through `claude -p`, with our MCP servers and our
+system prompt.
+
+**It measures a different system, and that is the point rather than a
+compromise.** A person connecting Claude Desktop to the gateway is exactly this
+shape: our tools and our prompt, somebody else's loop. An ablation here says
+what the catalog is worth *to that client*.
+
+The CLI runs on the **host**, while the tenant and the databases live inside
+the compose network, so `scripts/eval-cli.sh` arranges three crossings:
+
+* **a token per persona**, minted inside the network and handed over
+  (`DAS_HARNESS_AUTH=token`) — every persona, not only the default one, because
+  an L5 question names its own and a missing token fails the run halfway;
+* **source addresses the host can reach**, because the scorer opens each source
+  directly to compare result sets;
+* **container addresses rather than `localhost`** — a host-local server that
+  already holds the port wins over docker's wildcard publish, so `localhost`
+  can silently reach the wrong database. That failure reports a missing role,
+  which reads as bad credentials rather than a wrong address.
+
+### What the two backends have shown
+
+Worth recording, because both are findings about *us* rather than about the
+model:
+
+**Our own prompt can cause an abstention the catalog should have prevented.**
+Asked which support team resolves tickets fastest, Claude Code found both
+duration columns, saw that they give opposite winners, and asked the human to
+choose. That is our prompt's own rule — *"if a term is ambiguous, ask rather
+than guessing"* — firing on a case the glossary explicitly disambiguates. The
+catalog is not ambiguous here; it defines Resolution Time and warns that
+`elapsed_minutes` is not the answer. The rule needs to distinguish "two
+candidates exist" from "the catalog does not decide between them".
+
+**`expect: block` scores whether a guardrail fired, not whether the data was
+protected.** An agent that reads the withheld-column note in `describe_table`,
+declines, and never obtains the data is scored as a *failure*, because
+`answer.refused` is false — no tool call errored. It did the right thing, and
+did it earlier than the rule expects. The strictness has a real motive (proving
+the *system* refuses, not merely that the model was well behaved), but the
+system-level proof belongs in the witnesses, which already hold it: phase6
+refuses alice the email column, and the guard refuses every write. See
+`docs/13-testing.md` for which suite carries which claim.

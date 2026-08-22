@@ -173,8 +173,14 @@ docs: ## Build the documentation site locally (pnpm on the host, not a container
 	pnpm install --frozen-lockfile
 	pnpm run docs:build
 
-eval: ## Accuracy evals per use case (Phase 7)
+eval: ## Accuracy evals per use case (Phase 7) — needs ANTHROPIC_API_KEY
 	$(TOOLS) python -m evals.runner $(ARGS)
+
+# The same questions on a Claude subscription instead of an API key. Runs on
+# the HOST because that is where `claude` and its credential are; the script
+# arranges the token and the source addresses that crossing implies.
+eval-cli: ## Accuracy evals through the `claude` CLI (no API key needed)
+	@sh scripts/eval-cli.sh $(ARGS)
 
 load: ## Load tests (Phase 8) — k6 in a container on the stack's network
 	$(PY) -m load.run $(ARGS)
