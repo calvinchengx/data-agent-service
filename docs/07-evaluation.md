@@ -269,6 +269,77 @@ was always this weak. What makes the catalog's importance credible today is not
 the ablation but the **flip itself** (item 2): a property of the data, verified
 across ten seeds, that needs no model to demonstrate.
 
+### The four arms, and what each one isolates
+
+| Arm | Catalog server | Descriptions | Prompt | Isolates |
+|---|---|---|---|---|
+| with catalog | yes | yes | ours | the deployed system |
+| schema only | yes | **emptied** | ours | what the PROSE is worth |
+| without catalog | no | — | ours | what the catalog as a whole is worth |
+| naive floor | no | — | minimal | what the score is when nothing helps |
+
+The middle arm is the one that took building. The original ablation removes the
+catalog *server*, which removes knowledge and tool surface together — so its
+delta cannot say which of the two mattered. The schema-only arm keeps every
+tool, name, schema and call sequence identical and empties only the fields
+carrying business meaning: descriptions, glossary definitions, metric
+expressions, units, synonyms. The redaction happens in the stdio bridge, which
+was already a transparent proxy.
+
+**Verified rather than assumed**, on both catalog tools:
+
+| Call | Arm | Definition text | Column names | Payload |
+|---|---|---|---|---|
+| `search_metadata` | full | present | present | 11,151 |
+| | stripped | **absent** | present | 4,037 |
+| `get_entity_details` (table) | full | present | present | 8,533 |
+| | stripped | **absent** | present | 4,192 |
+| `get_entity_details` (term) | full | present | present | 1,461 |
+| | stripped | **absent** | absent | 575 |
+
+A caution on that verification, because it nearly went the other way: the first
+probe passed `entity_type` where the tool wants `entityType`, got a 500, and
+was one step from being written up as an upstream OpenMetadata defect. Reading
+the tool's own `inputSchema` before believing an error is what caught it.
+
+### First result: support, L3, three repeats
+
+27 observations per arm — 9 questions × 3 repeats.
+
+| Arm | Pass | Execution | Grounding | Semantics |
+|---|---|---|---|---|
+| with catalog | 37.0% | 48.1% | **100%** | 88.9% |
+| schema only | 40.7% | 44.4% | **100%** | 96.3% |
+| without catalog | **0.0%** | 7.4% | 59.3% | 33.3% |
+
+Two things separate cleanly, and they behave nothing alike.
+
+**The catalog's vocabulary and tool surface carry almost everything.** Removing
+the server takes grounding from 100% to 59.3%: the agent stops finding the
+right tables. It is not blind — the warehouse still lists tables for it — it
+simply chooses wrong among plausible ones. Execution collapses with it, and
+nothing passes.
+
+**The written definitions carried nothing measurable here.** Emptying every
+description, glossary definition and metric expression cost nothing: 40.7%
+against 37.0% is one question in twenty-seven, and in the *stripped* arm's
+favour. So on this dataset the honest sentence is narrower than "the catalog
+matters":
+
+> The catalog is what lets the agent find the right data. Its written
+> definitions did not change what the agent did once it got there.
+
+**Why that is not yet the conclusion.** Support's definitions are unusually
+guessable from column names — `resolution_minutes` beside `elapsed_minutes`
+nearly explains itself, so a capable model can pick correctly from the
+vocabulary alone. Contoso is the harder test and is queued: a fiscal year
+starting in April, gross against net, and `Unallocated` meaning "never
+published to the hierarchy" cannot be inferred from a name. If the prose earns
+nothing there either, that is a finding about catalogs. If it earns its keep
+there, the support result is a finding about *well-named schemas*.
+
+*Floor arm running; contoso queued; paired statistics land with the report.*
+
 ### 4–6. What is still missing
 
 **Sample.** 31 questions against a documented target of 60–100 per use case,
