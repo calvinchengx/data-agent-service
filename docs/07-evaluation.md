@@ -60,6 +60,28 @@ scorecard records which produced it.
 | `claude-code` | a Claude subscription, via the `claude` CLI | **Claude Code's** loop over **our** MCP servers |
 | `gold` | none | the harness itself: reference SQL through the real gateway |
 
+### Before a live run: the gateway's rate limit
+
+The gateway allows `DAS_RATE_CALLS` per `DAS_RATE_WINDOW_S` — 60 a minute by
+default, which is a deliberate production-shaped ceiling and far below what a
+full pass needs. A suite of 26 questions makes several calls each, so a run
+throttles part-way through and fails with `HTTP 429` from the *warehouse*
+server, which reads as a model or a network problem and is neither.
+
+Raise it for the run and put it back afterwards:
+
+```bash
+docker compose --profile tools run --rm -T tools python -m seed.apim --rate-calls 1000000
+# ... run the eval ...
+docker compose --profile tools run --rm -T tools python -m seed.apim --rate-calls 60
+```
+
+Restore it in a `trap`/`finally`, not by remembering: a limit left open
+silently breaks the `ratelimit` load scenario and phase 12's cost-control
+witnesses, for whoever runs next. `make test` already does exactly this, after
+non-deterministic witness counts on an identical tree (86/86 against 80/86)
+were traced to nothing but throttling.
+
 ### With an API key
 
 ```bash
