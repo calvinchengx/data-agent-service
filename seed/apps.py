@@ -246,12 +246,21 @@ def ensure_data_plane_scope() -> None:
         "PATCH",
         f"{G}/applications/{app_id}",
         headers=c.bearer(c.GRAPH_AUD),
-        json_body={"api": {"oauth2PermissionScopes": [{
-            "value": value, "type": "User", "isEnabled": True,
-            "adminConsentDisplayName": display,
-            "adminConsentDescription": (
-                f"Allows the middle tier to reach {resource} on behalf of the user."),
-        }]}},
+        json_body={
+            "api": {
+                "oauth2PermissionScopes": [
+                    {
+                        "value": value,
+                        "type": "User",
+                        "isEnabled": True,
+                        "adminConsentDisplayName": display,
+                        "adminConsentDescription": (
+                            f"Allows the middle tier to reach {resource} on behalf of the user."
+                        ),
+                    }
+                ]
+            }
+        },
     )
     after = by_app_id(app_id)
     if not (after and has_scope(after, value)):
