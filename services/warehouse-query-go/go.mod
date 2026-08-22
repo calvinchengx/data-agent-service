@@ -1,6 +1,6 @@
 module github.com/calvinchengx/data-agent-service/warehouse-query
 
-go 1.26.0
+go 1.26.7
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
