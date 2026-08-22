@@ -95,13 +95,23 @@ fi
 #    calling an emulator-only surface would still be a finding, because it
 #    would mean the behaviour is only reachable one way.
 HARDCODED='https?://(localhost|127\.0\.0\.1|[a-z-]+-emulator)'
+# The exact literal `"redirectUris": ["http://localhost"]` is exempt, and
+# nothing looser: matching the KEY alone would exempt the whole line, so a real
+# endpoint sitting beside it would ride through. Verified with a canary. A public client's loopback
+# redirect is RFC 8252 §7.3: `http://localhost` is what Entra registers for a
+# native or desktop client IN PRODUCTION too, byte for byte. It is a protocol
+# constant rather than a deployment address, so it does not become wrong when
+# the target stops being an emulator -- which is the only thing this rule is
+# for. Nothing else about a redirect URI is exempted, and the emulator
+# hostnames still are not.
 # A comment is `path:line: #…` or `path:line: //…` — matching a bare "//"
 # would exclude every URL, which is every line this check exists to find.
 hits=$(grep -rnE "$HARDCODED" $SCOPE --include='*.py' --include='*.go' \
         2>/dev/null \
         | grep -vE '(^tests/|_test\.go:|/test_[a-z_]*\.py:|^[^:]*/tests?/)' \
         | grep -vE '^[^:]*:[0-9]+: *(#|//|\*)' \
-        | grep -vE '(getenv|environ\.get|os\.Getenv|CFG\.get)\(' || true)
+        | grep -vE '(getenv|environ\.get|os\.Getenv|CFG\.get)\(' \
+        | grep -vE '"redirectUris": \["http://localhost"\]' || true)
 if [ -n "$hits" ]; then
   report "an endpoint is hardcoded in code" \
          "addresses belong in .env; a default beside a getenv is fine" "$hits"

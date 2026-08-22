@@ -65,6 +65,14 @@ def compare(rows_dax: list[dict], rows_sql: list[list]) -> tuple[bool, str]:
     engines use different numeric types, and a comparison that fails on the
     fifteenth decimal would be a check nobody keeps.
     """
+    # Agreement has to be EVIDENCE of something. Two empty results agree
+    # perfectly and prove nothing: if the DAX ever evaluates to nothing -- an
+    # evaluator change, an error swallowed upstream, a model that builds and
+    # answers empty -- and the SQL is empty too, a vacuous True would publish a
+    # measure that answers nothing at all. The guard exists to catch a wrong
+    # number; an absent one must not slip past it.
+    if not rows_dax and not rows_sql:
+        return False, "both sides returned no rows, so nothing was verified"
     if len(rows_dax) != len(rows_sql):
         return False, f"{len(rows_dax)} rows from DAX, {len(rows_sql)} from SQL"
 
@@ -82,6 +90,11 @@ def compare(rows_dax: list[dict], rows_sql: list[list]) -> tuple[bool, str]:
     right = sorted(normalise_sql(r) for r in rows_sql)
     if left != right:
         return False, f"DAX {left[:2]} vs SQL {right[:2]}"
+    # The same argument one level down: rows that carry only labels compare
+    # equal without a single measure value having been checked. A dashboard is
+    # published for its numbers, so at least one has to have been compared.
+    if not any(values for _label, values in left):
+        return False, "the rows matched but carried no measure value to compare"
     return True, f"{len(left)} rows agree"
 
 

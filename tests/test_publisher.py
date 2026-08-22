@@ -142,3 +142,30 @@ def test_the_comparison_catches_answers_that_do_not(dax, sql):
     agrees, note = publish.compare(dax, sql)
     assert not agrees
     assert note
+
+
+# ------------------------------------------- agreement has to prove something --
+def test_two_empty_answers_do_not_agree():
+    """A vacuous True would publish a measure that answers nothing.
+
+    Two empty results match perfectly. If the DAX ever evaluates to nothing --
+    an evaluator change, an error swallowed upstream, a model that builds and
+    answers empty -- and the SQL is empty too, the guard would wave through
+    exactly the thing it exists to catch.
+    """
+    agrees, note = publish.compare([], [])
+    assert not agrees
+    assert "nothing was verified" in note
+
+
+def test_rows_that_carry_no_measure_do_not_agree():
+    """Labels can match without a single number having been compared."""
+    agrees, note = publish.compare([{"a[country]": "AU"}], [["AU"]])
+    assert not agrees
+    assert "no measure value" in note
+
+
+def test_a_real_comparison_still_agrees():
+    """The guard must refuse the empty cases without refusing the honest one."""
+    agrees, _note = publish.compare([{"a[c]": "AU", "[m]": 10.0}], [["AU", 10.0]])
+    assert agrees

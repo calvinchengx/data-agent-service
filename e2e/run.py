@@ -1599,6 +1599,18 @@ def phase16() -> None:
         "a wrong answer would have been published",
     )
 
+    # The other way a guard fails: agreeing about nothing. Two empty results
+    # match perfectly, so a comparator that only looks for a DIFFERENCE would
+    # publish a measure that answers nothing at all -- and the +1 perturbation
+    # above cannot see that, because there is nothing to perturb.
+    vacuous, vacuous_note = publish.compare([], [])
+    check(
+        "phase16",
+        "agreement about nothing is not agreement",
+        not vacuous,
+        vacuous_note,
+    )
+
     if done.agrees:
         publish.record_lineage(done, candidate)
     dash = om(
