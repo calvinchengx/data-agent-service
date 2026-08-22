@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -285,7 +286,7 @@ def list_tables(
         tables = backend_for(src).list_tables(src, _principal_token(src, p))
     except PermissionError as e:
         audit(op="list_tables", user=p.name, source=src.name, verdict="denied", reason=str(e))
-        raise HTTPException(403, str(e)) from None
+        raise HTTPException(403, _engine_message(e)) from None
     except Exception as e:  # noqa: BLE001 — surface the engine's own message
         denied = _is_denial(e)
         audit(
@@ -415,7 +416,7 @@ def run_query(
         result = backend_for(src).run(src, verdict, _principal_token(src, p))
     except PermissionError as e:
         audit(op="run_query", user=p.name, source=src.name, verdict="denied", reason=str(e))
-        raise HTTPException(403, str(e)) from None
+        raise HTTPException(403, _engine_message(e)) from None
     except Exception as e:  # noqa: BLE001
         denied = _is_denial(e)
         audit(
@@ -469,14 +470,28 @@ def _is_denial(e: Exception) -> bool:
     return any(m in str(e).lower() for m in _DENIAL_MARKERS)
 
 
-def _engine_message(e: Exception) -> str:
+def _engine_message(e: Exception | str) -> str:
     """The engine's own words, which usually name the real problem (a missing
-    role, a bad column), minus the driver's stack noise."""
-    msg = str(e)
-    for marker in ("DDBC Error: ", "] "):
-        if marker in msg:
-            msg = msg.split(marker)[-1]
-    return msg[:400]
+    role, a bad column), minus the driver's stack noise.
+
+    EVERY error string this service hands a caller goes through here. The REST
+    routes already did; the MCP dispatch returned two of them raw, so the same
+    failure was sanitised or not depending on which surface asked -- the same
+    split that let describe_table disclose withheld column names over REST
+    while filtering them over MCP.
+    """
+    msg = e if isinstance(e, str) else str(e)
+    if "DDBC Error: " in msg:
+        msg = msg.split("DDBC Error: ")[-1]
+    # A driver wraps its message in its own repr and then in a chain of
+    # bracketed layers -- ('42000', '[42000] [Microsoft][ODBC Driver 18 for SQL
+    # Server][SQL Server]The SELECT permission was denied'). The earlier version
+    # split on "] " WITH A SPACE, so it stripped nothing at all from the common
+    # form where the layers abut: `][`. It read as though it worked because the
+    # remaining text still ended with the engine's sentence.
+    msg = re.sub(r"^\(\s*'[^']*'\s*,\s*'", "", msg).strip()
+    msg = re.sub(r"^(\s*\[[^\]]*\]\s*)+", "", msg)
+    return msg.rstrip("')").strip()[:400]
 
 
 # ------------------------------------------------------------------- MCP --
@@ -625,9 +640,11 @@ def _dispatch(p: Principal, name: str, args: dict) -> dict:
             reason=str(e.detail)[:300],
             via="mcp",
         )
-        return mcpproto.text_content(f"{e.status_code}: {e.detail}", is_error=True)
+        return mcpproto.text_content(
+            f"{e.status_code}: {_engine_message(str(e.detail))}", is_error=True
+        )
     except LookupError as e:
-        return mcpproto.text_content(str(e), is_error=True)
+        return mcpproto.text_content(_engine_message(e), is_error=True)
     except Exception as e:  # noqa: BLE001
         denied = _is_denial(e)
         audit(

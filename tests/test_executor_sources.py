@@ -338,7 +338,11 @@ def test_each_source_asks_for_its_own_delegated_scope():
     here rather than assumed.
     """
     tds = tds_source().obo_scope()
-    assert "database.windows.net" in tds
+    # The WHOLE scope, not a substring of it. `"database.windows.net" in tds`
+    # also passes for https://database.windows.net.attacker.example/…, and the
+    # thing being asserted here is precisely which resource the token is
+    # addressed to.
+    assert tds == "https://database.windows.net/user_impersonation"
 
     lake = Source(
         name="l",

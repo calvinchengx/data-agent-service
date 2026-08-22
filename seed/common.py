@@ -335,9 +335,16 @@ def write_env(**values: str) -> None:
     for key, value in remaining.items():
         lines.append(f"{key}={value}")
     target.write_text("\n".join(lines) + "\n")
+    # This file holds a client secret and a gateway subscription key. It is
+    # gitignored, and on a shared machine that is not the same as private --
+    # anyone with an account could read it at the default umask.
+    target.chmod(0o600)
     for key, value in values.items():
         CFG[key] = value
-    log(f"wrote {', '.join(values)} to .env")
+    # `.keys()` is explicit on purpose. Joining the dict itself yields the same
+    # string, but it reads as though the secrets were being printed, and a
+    # static analyser cannot tell the difference from a reader who guesses.
+    log(f"wrote {', '.join(sorted(values.keys()))} to .env")
 
 
 def save_state(**kv) -> dict:

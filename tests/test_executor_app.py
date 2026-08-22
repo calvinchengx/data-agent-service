@@ -565,3 +565,52 @@ def test_a_token_naming_no_client_is_refused_when_a_list_is_set(client, signing_
     bare = jwt_mod.encode(claims, pem, algorithm="RS256", headers={"kid": "test-key"})
     response = client.get("/tables", headers={"Authorization": "Bearer " + bare})
     assert response.status_code == 403
+
+
+# --------------------------------------------------- error text a caller sees --
+def test_driver_noise_is_stripped_from_what_a_caller_is_told():
+    """The engine's words, not the driver's stack.
+
+    Code scanning flagged exception text reaching an HTTP response. Passing the
+    engine's own refusal through is deliberate -- the agent has to read it and
+    change course -- but the driver's prefixes carry paths and internals that
+    say nothing to anyone.
+    """
+    noisy = Exception(
+        "('42000', '[42000] [Microsoft][ODBC Driver 18 for SQL Server]"
+        "[SQL Server]The SELECT permission was denied on the object')"
+    )
+    message = app_mod._engine_message(noisy)
+    assert "The SELECT permission was denied" in message
+    assert "ODBC Driver 18" not in message
+
+
+def test_the_sanitiser_caps_what_it_returns():
+    assert len(app_mod._engine_message(Exception("x" * 5000))) <= 400
+
+
+def test_the_sanitiser_takes_a_string_too():
+    """Both surfaces funnel through one function, so it has to accept both."""
+    assert app_mod._engine_message("plain detail") == "plain detail"
+
+
+def test_both_surfaces_sanitise_the_same_failure(client, signing_key, backend, monkeypatch):
+    """REST and MCP must tell a caller the same thing about the same error.
+
+    They did not: the MCP dispatch returned two exception paths raw while every
+    REST route sanitised. A divergence between the surfaces is exactly how the
+    withheld-column disclosure happened.
+    """
+    noise = "[Microsoft][ODBC Driver 18 for SQL Server]The SELECT permission was denied"
+
+    def refuse(*_a, **_k):
+        raise PermissionError(noise)
+
+    monkeypatch.setattr(backend, "run", refuse)
+    sql = {"sql": "SELECT 1 AS n FROM dbo.fct_sales"}
+
+    rest = client.post("/query", json=sql, headers=auth(signing_key))
+    mcp = rpc(client, signing_key, "tools/call", {"name": "run_query", "arguments": sql})
+
+    assert "ODBC Driver 18" not in rest.text
+    assert "ODBC Driver 18" not in mcp.text
