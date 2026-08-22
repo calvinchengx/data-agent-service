@@ -1,0 +1,54 @@
+---
+// A back-link to the project's front page, beside the site title.
+//
+// It lives here rather than in the header's icon row because that row is
+// `sl-hidden md:sl-flex` -- anything placed in it vanishes on a narrow
+// viewport, which is exactly where a reader is most likely to be lost. The
+// title is rendered at every width, so a sibling of the title is too.
+//
+// It is not in the sidebar either: among a list of document titles, one more
+// link reads as one more document.
+import Default from '@astrojs/starlight/components/SiteTitle.astro';
+---
+
+<div class="title-row">
+  <a class="site-home" href="/data-agent-service/" aria-label="Back to the data-agent-service home page">
+    <span aria-hidden="true">&larr;</span><span class="label">Home</span>
+  </a>
+  <Default><slot /></Default>
+</div>
+
+<style>
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+  }
+  .site-home {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex-shrink: 0;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 999px;
+    color: var(--sl-color-white);
+    font-size: var(--sl-text-xs);
+    font-weight: 600;
+    line-height: 1.4;
+    text-decoration: none;
+  }
+  .site-home:hover {
+    background: var(--sl-color-gray-6);
+    border-color: var(--sl-color-accent);
+    color: var(--sl-color-accent-high);
+  }
+  /* On the narrowest screens the arrow alone carries it, so the site title
+     keeps the room it needs. */
+  @media (max-width: 30rem) {
+    .site-home .label {
+      display: none;
+    }
+  }
+</style>

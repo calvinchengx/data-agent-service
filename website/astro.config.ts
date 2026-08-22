@@ -13,6 +13,11 @@ export default defineConfig({
       description:
         'A governed data agent: natural-language questions over Fabric, PostgreSQL and more, ' +
         'grounded in OpenMetadata and answered as the asking user.',
+      components: {
+        // A back-link beside the site title; the component explains why it
+        // cannot live in the header icon row or the sidebar.
+        SiteTitle: './src/components/SiteTitle.astro',
+      },
       social: [
         {
           icon: 'github',
