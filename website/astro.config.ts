@@ -60,6 +60,7 @@ export default defineConfig({
             { slug: '10-production' },
             { slug: '09-llm-governance' },
             { slug: '12-promotion' },
+            { slug: '14-publishing' },
           ],
         },
         {
