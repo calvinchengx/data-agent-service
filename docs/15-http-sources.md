@@ -181,3 +181,189 @@ the conformance checks do not grow with them, the honest description of the
 result is not "three source types" but "one guarded source type and two
 unguarded ones" — and, on this project's record, nothing would say so until
 something mechanical disagreed.
+
+---
+
+# Configuration
+
+The generalisation claim is that pointing at a new source is **configuration,
+not a fork**. That has to hold for HTTP sources too, so nothing below invents a
+new settings family: an HTTP source is another entry in `DAS_SOURCES`, another
+few lines in `DAS_ACCESS_RULES`, and an asset registered in OpenMetadata —
+the same three places a PostgreSQL source lives today.
+
+## 1. The executor — `DAS_SOURCES`
+
+Today's entries carry `kind`, `dialect`, `authz_tier`, `om_service_fqn` and an
+engine-specific address (`tds_server`, `dsn`). An HTTP source keeps every one
+of those and swaps the address and the allow-list.
+
+### REST
+
+```json
+{
+  "name": "contoso_billing",
+  "kind": "rest",
+  "surface": "http",
+  "om_service_fqn": "rest_billing",
+  "authz_tier": "user",
+  "scope": "api://contoso-billing/user_impersonation",
+  "base_url": "https://billing.contoso.com",
+  "spec": "https://billing.contoso.com/openapi.json",
+  "collections": ["invoices", "customers"],
+  "max_items": 500,
+  "max_bytes": 200000
+}
+```
+
+| Field | Analogue today | Why |
+|---|---|---|
+| `surface: "http"` | *new* | tells a client which contract operations apply; SQL sources default to `"sql"` and no existing entry changes |
+| `spec` | *new* | the OpenAPI document. The guard validates against it, so **a source with no spec is refused at start-up** rather than guessed at |
+| `base_url` | `tds_server`, `dsn` | where the calls go; the spec's own `servers` entry is the default and this overrides it, which is the local port-remap escape hatch again |
+| `collections` | `schemas` | the allow-list. An operation outside it is refused the way an unlisted schema is |
+| `max_items`, `max_bytes` | `max_rows`, `max_length` | the ceilings, imposed by rewriting query parameters rather than a parse tree |
+| `scope` | `scope` | **already per-source** — added when the Databricks adapter needed its own resource. Nothing new is required for a third resource |
+| `authz_tier` | `authz_tier` | unchanged: `user` if the API authorises the caller, `service` if it cannot, recorded in every audit line either way |
+
+### GraphQL
+
+```json
+{
+  "name": "contoso_catalog_gql",
+  "kind": "graphql",
+  "surface": "http",
+  "om_service_fqn": "gql_catalog",
+  "authz_tier": "user",
+  "scope": "api://contoso-catalog/user_impersonation",
+  "endpoint": "https://catalog.contoso.com/graphql",
+  "schema_source": "introspection",
+  "allow_roots": ["Query.invoices", "Query.customers"],
+  "max_depth": 8,
+  "max_cost": 1000,
+  "max_items": 500
+}
+```
+
+The differences are the guard's inputs, not the plumbing: `allow_roots` is the
+allow-list at the only granularity GraphQL offers, and `max_depth` / `max_cost`
+are the two budgets that have no SQL analogue. `schema_source` is
+`introspection` or an SDL URL — and if introspection is disabled on the server
+and no SDL is given, the source is **refused at start-up**, because a guard
+with no schema to validate against is not a guard.
+
+## 2. Access rules — the same file, dotted names
+
+`access.Rules` matches with `fnmatch` over dotted names and does not care what
+the segments mean. `schema.table.column` becomes `collection.endpoint.field`,
+and the existing engine works unchanged:
+
+```json
+{ "role": "Data.Analyst",
+  "allow": ["invoices.*", "customers.listCustomers"],
+  "deny": ["customers.*.email", "customers.*.taxId"] }
+```
+
+One decision to make deliberately: the keys today are `allow_tables` and
+`deny_columns`, which read as nonsense for an HTTP source. **Accept `allow` and
+`deny` as aliases** and keep the old names working. Renaming them outright
+would be a breaking change to every existing deployment's configuration for a
+cosmetic gain, and this project's own discipline is that configuration should
+not churn.
+
+`deny` still has to do two jobs, as it does for SQL: refuse a call that reads a
+denied field, **and** hide that field from `describe_operation`. A name the
+caller may not read is itself a disclosure.
+
+## 3. OpenMetadata — registering the asset
+
+OpenMetadata models APIs as first-class assets, and the routes are live on the
+pinned 1.13.2 (`services/apiServices`, `apiCollections`, `apiEndpoints` all
+answer; **zero are registered today**). The hierarchy mirrors the database one
+exactly:
+
+| Database source | HTTP source |
+|---|---|
+| `databaseService` | `apiService` |
+| `database` → `databaseSchema` | `apiCollection` |
+| `table` | `apiEndpoint` |
+| `column` | request / response schema field |
+
+So `seed/govern.py` gains an `engine == "rest"` branch beside the existing
+`postgres` one, and everything downstream — glossary terms, metrics, domains,
+data products, the read-only bot — is unchanged, because they attach to
+entities rather than to tables specifically.
+
+**The join key does not change.** `DAS_SOURCES[].om_service_fqn` must equal the
+registered `apiService` name, exactly as it equals the `databaseService` name
+today, and the executor reports it as `openMetadataService` from
+`list_sources` so the agent knows where to look up meaning.
+
+```jsonc
+// PUT /api/v1/services/apiServices
+{ "name": "rest_billing", "serviceType": "Rest",
+  "connection": { "config": { "openAPISchemaURL": "https://billing.contoso.com/openapi.json" } } }
+
+// PUT /api/v1/apiCollections     -> service: rest_billing, name: invoices
+// PUT /api/v1/apiEndpoints       -> apiCollection: rest_billing.invoices,
+//                                   name: listInvoices, requestMethod: GET,
+//                                   responseSchema: { schemaFields: [...] }
+```
+
+Glossary terms tag `apiEndpoint` fields the same way they tag columns today, so
+the business meaning of `invoice.netAmount` lives in the catalog rather than in
+a prompt — which is the whole point, and the part the live eval showed matters
+most (semantic fidelity 40% → 100%).
+
+## 4. What an operator actually does
+
+1. **Register the asset** in OpenMetadata — `make seed` for a bundled dataset,
+   or the three `PUT`s above against a real catalog.
+2. **Add the source** to `DAS_SOURCES` with `surface: "http"` and its spec.
+3. **Expose the delegated scope** on the API's app registration and set
+   `authz_tier` to match what the API actually enforces. If it cannot
+   authorise the caller, say `service` and accept the weaker tier being
+   recorded — do not claim `user` because it sounds better.
+4. **Add access rules** for the roles that may reach it.
+5. **Restart the executor.** `list_sources` now reports the source and its
+   surface; `describe_operation` reports only the fields the caller may read.
+6. **Verify** with the conformance suite's `http` section, which asserts the
+   same properties for this source that the SQL section asserts for a warehouse.
+
+Nothing in `services/`, `agent/` or `policies/` is edited to add a source. That
+is the same invariant the plan states for SQL engines, and it is the thing to
+check has not quietly stopped being true.
+
+## 5. Local and production differ by configuration only
+
+The same rule as everywhere else: `.env` and `.env.prod` differ, code does not.
+For an HTTP source that means `base_url`/`endpoint` and `scope` change, and
+nothing else does — the spec URL, the collections allow-list, the ceilings and
+the access rules are properties of the API, not of where it runs.
+`scripts/check-discipline.sh` already fails a build that writes an endpoint
+into code, and it will cover these the moment they exist.
+
+## 6. Worked example — OpenMetadata as a REST source
+
+The recommended first target, because it is real, already running, and already
+authenticated:
+
+```json
+{
+  "name": "om_self",
+  "kind": "rest",
+  "surface": "http",
+  "om_service_fqn": "rest_openmetadata",
+  "authz_tier": "service",
+  "base_url": "http://openmetadata:8585",
+  "spec": "http://openmetadata:8585/swagger.json",
+  "collections": ["tables", "glossaryTerms", "metrics"],
+  "max_items": 200,
+  "max_bytes": 100000
+}
+```
+
+`authz_tier: service` is the honest setting here: OpenMetadata authorises the
+bot, not the asking user, so the gateway's roles and the access rules are the
+only per-user control — which is exactly the situation the tier exists to
+describe, and it will read that way in every audit line.
