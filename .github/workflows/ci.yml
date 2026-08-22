@@ -129,6 +129,11 @@ jobs:
       # drifting away from what the suite actually witnesses.
       - name: the witnesses badge matches this run
         run: make witnesses-check
+      - name: the coverage badges match a real run
+        # Needs both suites, so it belongs here rather than in `quality` or
+        # `go`: `make coverage-*` runs each through its own container, and this
+        # is the only job that has them.
+        run: python3 scripts/coverage_manifest.py --check
       # When the manifest IS stale, the useful thing is the correct one. This
       # runs only on failure and uploads what this run actually witnessed, so
       # refreshing the badge is downloading a file rather than reproducing a
