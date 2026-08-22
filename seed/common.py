@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import ssl
 import struct
 import sys
@@ -106,7 +107,18 @@ _TOK: dict[str, tuple[float, str]] = {}
 
 
 def token(audience: str) -> str:
-    """OAuth2 client_credentials for `<audience>/.default`, cached until near expiry."""
+    """OAuth2 client_credentials for `<audience>/.default`, cached until near expiry.
+
+    A supplied token wins, keyed by audience. That is what lets a harness run
+    OUTSIDE the compose network: the tenant answers on a hostname only the
+    network resolves, so a process on the host cannot sign in at all, even
+    though it can reach the engine itself on a published port. Minting inside
+    and handing the token over is the same arrangement the persona tokens
+    already use, and it changes nothing for a caller that can sign in.
+    """
+    supplied = os.environ.get("DAS_ACCESS_TOKEN_" + re.sub(r"[^A-Z0-9]+", "_", audience.upper()))
+    if supplied:
+        return supplied
     exp, t = _TOK.get(audience, (0.0, ""))
     if exp - 60 > time.time():
         return t

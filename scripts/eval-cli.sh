@@ -57,6 +57,27 @@ from seed import common as c
 print(c.setting('DAS_OM_SUBSCRIPTION_KEY'))" 2>/dev/null | tr -d '\r' | tail -1)
 [ -n "$OM_KEY" ] && export DAS_OM_SUBSCRIPTION_KEY="$OM_KEY"
 
+# The scorer signs in to each SOURCE as well, and the tenant is unreachable
+# from here. Minted inside and handed over, keyed by audience — the same
+# arrangement as the persona tokens, and what lets a TDS source be scored from
+# the host at all.
+SQL_TOKENS=$(docker compose --profile tools run --rm -T tools python -c "
+import re
+from seed import common as c
+for aud in {c.CFG.get('DAS_SQL_AUDIENCE', 'https://database.windows.net')}:
+    print('DAS_ACCESS_TOKEN_' + re.sub(r'[^A-Z0-9]+', '_', aud.upper()) + '=' + c.token(aud))
+" 2>/dev/null | tr -d '\r' | grep '^DAS_ACCESS_TOKEN_')
+if [ -n "$SQL_TOKENS" ]; then
+  while IFS= read -r line; do export "${line?}"; done <<< "$SQL_TOKENS"
+  echo "source tokens minted: $(echo "$SQL_TOKENS" | wc -l | tr -d ' ')"
+fi
+
+# The scorer's SQL runs inside the network. See evals/sqlproxy.py: the Fabric
+# warehouse is addressed by the workspace in its server name, which only the
+# compose network resolves, so an address rewrite reaches the engine and loses
+# the routing.
+export DAS_SQL_PROXY=1
+
 export DAS_HARNESS_AUTH=token
 while IFS= read -r line; do export "${line?}"; done <<< "$MINTED"
 echo "tokens minted: $(echo "$MINTED" | wc -l | tr -d ' ') personas"
@@ -104,7 +125,16 @@ issuer = urllib.parse.urlsplit(c.CFG["DAS_ENTRA_ISSUER"]).hostname or ""
 try:
     socket.gethostbyname(issuer)
 except OSError:
-    unreachable = sorted(n for n in needed if kinds.get(n, "fabric") != "postgres")
+    # A supplied token removes the reason a TDS source was unreachable: the
+    # scorer no longer has to sign in, only to connect.
+    import os, re as _re
+    aud = c.CFG.get("DAS_SQL_AUDIENCE", "https://database.windows.net")
+    have_token = bool(os.environ.get("DAS_ACCESS_TOKEN_" + _re.sub(r"[^A-Z0-9]+", "_", aud.upper())))
+    unreachable = (
+        []
+        if have_token
+        else sorted(n for n in needed if kinds.get(n, "fabric") != "postgres")
+    )
     if unreachable:
         print(f"cannot score {usecase} from the host: it needs {', '.join(unreachable)},")
         print(f"which signs in through the tenant ({issuer}) for the reference SQL, and that")

@@ -17,12 +17,14 @@ a scorecard whose inputs are unknown cannot be compared with another one.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import hashlib
 import json
 import os
 import pathlib
 import statistics
+import subprocess
 import sys
 import time
 from typing import Any
@@ -67,6 +69,88 @@ def gold_rows(question: dict, conn) -> list[list] | None:
     return [list(r) for r in cur.fetchall()]
 
 
+class ProxyCursor:
+    """A cursor whose statements run inside the compose network."""
+
+    def __init__(self, proxy: ProxyConnection, source: str):
+        self._proxy, self._source = proxy, source
+        self.description: list[tuple] | None = None
+        self._rows: list[list] = []
+
+    def execute(self, sql: str, *_args):
+        answer = self._proxy.send({"source": self._source, "sql": sql})
+        if "error" in answer:
+            # Raised, because that is what a driver does and the scorer already
+            # knows how to treat a statement that will not run.
+            raise RuntimeError(answer["error"])
+        self.description = [(name,) for name in answer.get("columns", [])]
+        self._rows = answer.get("rows", [])
+        return self
+
+    def fetchall(self) -> list[list]:
+        return self._rows
+
+    def fetchmany(self, n: int) -> list[list]:
+        return self._rows[:n]
+
+    def close(self) -> None:
+        pass
+
+
+class ProxyConnection:
+    """The scorer's connection to a source it cannot dial directly.
+
+    Started once and kept open. See evals/sqlproxy.py for why this exists at
+    all: the Fabric warehouse is addressed by the workspace in its server name,
+    which only the compose network resolves, so rewriting that name to an
+    address reaches the engine and loses the routing.
+    """
+
+    def __init__(self, source: str):
+        self._source = source
+        self._proc = subprocess.Popen(
+            [
+                "docker",
+                "compose",
+                "--profile",
+                "tools",
+                "run",
+                "--rm",
+                "-T",
+                "tools",
+                "python",
+                "-m",
+                "evals.sqlproxy",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            cwd=REPO if (REPO := pathlib.Path(__file__).resolve().parent.parent) else None,
+        )
+        if self._proc.stdin is None or self._proc.stdout is None:
+            raise SystemExit("the SQL proxy has no pipes")
+        self._stdin, self._stdout = self._proc.stdin, self._proc.stdout
+        ready = self._stdout.readline()
+        if "ready" not in ready:
+            raise SystemExit(f"the SQL proxy did not start: {ready[:200]}")
+
+    def send(self, request: dict) -> dict:
+        self._stdin.write(json.dumps(request) + "\n")
+        self._stdin.flush()
+        line = self._stdout.readline()
+        if not line:
+            raise SystemExit("the SQL proxy stopped answering")
+        return json.loads(line)
+
+    def cursor(self) -> ProxyCursor:
+        return ProxyCursor(self, self._source)
+
+    def close(self) -> None:
+        with contextlib.suppress(Exception):
+            self._stdin.close()
+            self._proc.terminate()
+
+
 class GoldConnections:
     """One connection per engine a use-case touches, opened on demand.
 
@@ -77,11 +161,17 @@ class GoldConnections:
     """
 
     def __init__(self, default_source: str = ""):
-        self._default = default_source or os.environ.get("DAS_DEFAULT_SOURCE", "")
+        # Through the configuration, not the process environment. A harness
+        # running on the host has nothing exported, resolves the default to
+        # empty, and then asks for a source named "" — which reads as a
+        # missing question field rather than an unread setting.
+        self._default = default_source or c.CFG.get("DAS_DEFAULT_SOURCE", "")
         self._open: dict[str, Any] = {}
 
     def for_question(self, question: dict):
         name = question.get("source") or self._default
+        if name not in self._open and os.environ.get("DAS_SQL_PROXY", "").lower() in ("1", "true"):
+            self._open[name] = ProxyConnection(name)
         if name not in self._open:
             src = c.source_by_name(name) if name else (c.sources() or [{}])[0]
             if not src:
@@ -432,7 +522,7 @@ def main() -> int:
             )
         ]
 
-    report = {"usecase": a.usecase, "agent": a.agent, "runs": {}}
+    report: dict[str, Any] = {"usecase": a.usecase, "agent": a.agent, "runs": {}}
     for label, om, catalog, naive in runs:
         print(f"\n{label}")
         results = run(
@@ -473,37 +563,57 @@ def main() -> int:
             f"grounding {summary['grounding']}% · semantics {summary['semantic_fidelity']}%"
         )
 
-    if a.ablation and len(report["runs"]) == 2:
-        with_ = report["runs"]["with catalog"]["summary"]
-        without = report["runs"]["without catalog"]["summary"]
-        delta = {"pass_rate": round(with_["pass_rate"] - without["pass_rate"], 1)}
-        for key in ("execution_accuracy", "semantic_fidelity", "grounding"):
-            if with_[key] is not None and without[key] is not None:
-                delta[key] = round(with_[key] - without[key], 1)
-        l3_with = with_["by_tier"].get("L3", {}).get("pass_rate")
-        l3_without = without["by_tier"].get("L3", {}).get("pass_rate")
-        if l3_with is not None and l3_without is not None:
-            delta["L3_pass_rate"] = round(l3_with - l3_without, 1)
+    if a.ablation and len(report["runs"]) >= 2:
+        arms = list(report["runs"])
+        base = arms[0]
 
-        # Both arms answered the SAME questions, so the pairing is the whole
-        # point: each question is its own control for difficulty, and only the
-        # questions the two arms disagree about carry any evidence.
-        def passes(arm: str) -> dict[str, bool]:
-            return {
-                r["id"]: r["passed"]
-                for r in report["runs"][arm]["results"]
-                if not r["score"].get("declined")
+        def votes(arm: str, metric: str | None = None) -> dict[str, bool]:
+            """One verdict per QUESTION, by majority across repeats.
+
+            Repeats exist because the model is nondeterministic, so a paired
+            test has to compare questions rather than individual runs — the
+            three runs of one question are not three independent observations
+            of anything. Keying by question id without collapsing them keeps
+            only whichever ran last, which silently discards the repeats that
+            were paid for.
+            """
+            tally: dict[str, list[bool]] = {}
+            for r in report["runs"][arm]["results"]:
+                if r["score"].get("declined"):
+                    continue
+                value = r["passed"] if metric is None else r["score"].get(metric)
+                if value is not None:
+                    tally.setdefault(r["id"], []).append(bool(value))
+            return {q: sum(v) > len(v) / 2 for q, v in tally.items()}
+
+        comparisons = {}
+        for other in arms[1:]:
+            summary_first = report["runs"][base]["summary"]
+            summary_other = report["runs"][other]["summary"]
+            delta = {}
+            for key in ("pass_rate", "execution_accuracy", "semantic_fidelity", "grounding"):
+                if summary_first.get(key) is not None and summary_other.get(key) is not None:
+                    delta[key] = round(summary_first[key] - summary_other[key], 1)
+            paired_by_metric = {
+                label: stats.paired(votes(base, metric), votes(other, metric))
+                for label, metric in (
+                    ("pass", None),
+                    ("execution", "execution"),
+                    ("grounding", "grounding"),
+                    ("semantics", "semantics"),
+                )
             }
-
-        paired = stats.paired(passes("with catalog"), passes("without catalog"))
-        delta["mcnemar"] = paired
-        report["ablation_delta"] = delta
-        print(f"\nablation delta (catalog − no catalog): {json.dumps(delta)}")
-        print(
-            f"paired: {paired['compared']} questions compared, "
-            f"{paired.get('only_first', 0)} gained, {paired.get('only_second', 0)} lost "
-            f"— {paired['note']}"
-        )
+            comparisons[f"{base} vs {other}"] = {"delta": delta, "paired": paired_by_metric}
+            print(f"\n{base} − {other}: {json.dumps(delta)}")
+            for label, pr in paired_by_metric.items():
+                if pr["discordant"]:
+                    print(
+                        f"  {label:<10} +{pr.get('only_first', 0)}/-{pr.get('only_second', 0)}"
+                        f"  p={pr['p_value']}  ({pr['note']})"
+                    )
+                else:
+                    print(f"  {label:<10} no question was scored differently")
+        report["comparisons"] = comparisons
 
     REPORTS.mkdir(exist_ok=True)
     stamp = os.environ.get("DAS_REPORT_STAMP") or str(int(time.time()))
