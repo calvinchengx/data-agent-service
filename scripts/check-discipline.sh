@@ -55,7 +55,10 @@ if [ -n "$admin" ]; then
   for hit in $(printf '%s\n' "$admin" | cut -d: -f1,2 | tr ' ' '~'); do
     file=$(printf '%s' "$hit" | cut -d: -f1)
     line=$(printf '%s' "$hit" | cut -d: -f2)
-    start=$(( line - 3 )); [ $start -lt 1 ] && start=1
+    # Six lines, not three: the formatter splits a call across several lines,
+    # so the marker above it can be further from the URL than it looks in
+    # source. Still tight enough that the marker must be adjacent to the call.
+    start=$(( line - 6 )); [ $start -lt 1 ] && start=1
     if ! sed -n "${start},${line}p" "$file" | grep -q 'emulator-setup-only'; then
       unmarked="$unmarked$file:$line\n"
     fi

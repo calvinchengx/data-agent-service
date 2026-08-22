@@ -19,7 +19,7 @@ endif
 
 PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
-.PHONY: help doctor up down restart clean status logs ps pull tools-build seed test eval load lint format typecheck client-config ask
+.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load lint format typecheck conformance client-config ask
 
 help: ## Show the available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -55,6 +55,13 @@ logs: ## Follow logs (SERVICE=name to filter)
 tools-build: ## Build the tools image (seeds/harnesses runtime)
 	$(COMPOSE) --profile tools build tools
 
+stack: ## Everything from nothing: start, seed, apply, verify (what CI runs)
+	$(MAKE) up
+	$(MAKE) seed
+	@echo "== applying ids the seed created (the executor reads them at start)"
+	$(COMPOSE) up -d
+	$(MAKE) test
+
 seed: ## Seed warehouse data, OpenMetadata semantics, authz, and APIM resources (Phases 1-6)
 	$(TOOLS) python -m seed.run $(ARGS)
 
@@ -84,6 +91,9 @@ format: ## Apply formatting and safe fixes — the only target that edits files
 	$(RUFF) check . --fix
 	$(RUFF) format .
 	docker run --rm -v "$(PWD):/src" -w /src/services/warehouse-query-go $(GOLANGCI) golangci-lint fmt ./...
+
+conformance: ## The executor contract, against whichever implementation is running
+	$(TOOLS) python -m services.conformance.run
 
 typecheck: ## Python types only
 	$(TY) check

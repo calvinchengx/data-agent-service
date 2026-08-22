@@ -474,6 +474,10 @@ def main() -> dict:
     if not VALIDATE_JWT:
         out["om_subscription_key"] = om_subscription_key()
     c.save_state(apim=out)
+    subscription_key = out.get("om_subscription_key")
+    if isinstance(subscription_key, str) and subscription_key:
+        # The agent and the client-config generator both send this header.
+        c.write_env(DAS_OM_SUBSCRIPTION_KEY=subscription_key)
     return out
 
 

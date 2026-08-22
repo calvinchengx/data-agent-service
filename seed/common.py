@@ -306,6 +306,40 @@ def load_state() -> dict:
     return json.loads(STATE.read_text()) if STATE.exists() else {}
 
 
+def write_env(**values: str) -> None:
+    """Persist ids the seed CREATED back into the env file this run loaded.
+
+    Seeding brings things into existence whose identifiers the service must then
+    be configured with — the API app registration, the gateway's subscription
+    key. Without this they live only in state.json, so a fresh clone seeds
+    successfully and still cannot start: the executor reads its configuration
+    from the environment, not from the seed's notes.
+
+    Production is never rewritten. `.env.prod` is authored from the runbook,
+    where the app registrations are made with `az ad` by someone who decides
+    their names; a seed reaching in and editing that file would be surprising in
+    exactly the place surprises are expensive.
+    """
+    if os.environ.get("DAS_ENV", "local") == "prod":
+        log("prod environment: not rewriting .env.prod (see docs/10-production.md)")
+        return
+    target = ROOT / ".env"
+    if not target.exists():
+        return
+    lines = target.read_text().splitlines()
+    remaining = dict(values)
+    for i, line in enumerate(lines):
+        key = line.split("=", 1)[0].strip()
+        if key in remaining:
+            lines[i] = f"{key}={remaining.pop(key)}"
+    for key, value in remaining.items():
+        lines.append(f"{key}={value}")
+    target.write_text("\n".join(lines) + "\n")
+    for key, value in values.items():
+        CFG[key] = value
+    log(f"wrote {', '.join(values)} to .env")
+
+
 def save_state(**kv) -> dict:
     st = load_state()
     st.update(kv)

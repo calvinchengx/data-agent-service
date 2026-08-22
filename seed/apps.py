@@ -219,7 +219,48 @@ def ensure_secret(app_id: str, kv_name: str) -> str | None:
     return secret
 
 
+def ensure_data_plane_scope() -> None:
+    """The engine's resource app must EXPOSE the delegated scope on-behalf-of
+    asks for.
+
+    Registering the resource makes `<resource>/.default` issuable, which is
+    enough for a client-credentials token and not enough for a delegated one:
+    an on-behalf-of exchange for `<resource>/user_impersonation` is refused with
+    AADSTS70011 until the scope exists on that app. A tenant that has been used
+    for a while already has it, which is exactly why this was invisible until a
+    run started from an empty one.
+
+    First-party resources in a real tenant expose their own scopes, so this
+    finds them and does nothing.
+    """
+    scope = c.CFG.get("DAS_SQL_SCOPE", "")
+    resource, _, value = scope.rpartition("/")
+    if not resource or not value:
+        return
+    app_id = c.graph_ensure_resource_app(resource, "Azure SQL Database")
+    app = by_app_id(app_id)
+    if app and has_scope(app, value):
+        return
+    display = f"Access {resource} as the signed-in user"
+    c.http(
+        "PATCH",
+        f"{G}/applications/{app_id}",
+        headers=c.bearer(c.GRAPH_AUD),
+        json_body={"api": {"oauth2PermissionScopes": [{
+            "value": value, "type": "User", "isEnabled": True,
+            "adminConsentDisplayName": display,
+            "adminConsentDescription": (
+                f"Allows the middle tier to reach {resource} on behalf of the user."),
+        }]}},
+    )
+    after = by_app_id(app_id)
+    if not (after and has_scope(after, value)):
+        _admin_add_scope(app_id, value, display)
+    c.log(f"data-plane scope {scope} is exposed")
+
+
 def main() -> dict:
+    ensure_data_plane_scope()
     api = ensure_api_app()
     api_id = api["appId"]
     agent_id = c.CFG["DAS_AGENT_CLIENT_ID"]
@@ -240,6 +281,13 @@ def main() -> dict:
         "secret_kv_name": "das-executor-client-secret",
     }
     c.save_state(apps=out)
+    # The service reads these from its environment, so a seed that only recorded
+    # them in state.json would leave a fresh clone unable to start.
+    c.write_env(
+        DAS_MIDDLE_TIER_CLIENT_ID=api_id,
+        DAS_QUERY_SVC_CLIENT_ID=api_id,
+        DAS_AGENT_AUDIENCE=API_AUDIENCE,
+    )
     return out
 
 

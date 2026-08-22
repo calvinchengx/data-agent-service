@@ -238,6 +238,24 @@ services:
   # dependency the way the service does:  docker compose run --rm tools <cmd>
   tools:
     profiles: [tools]
+    # The harnesses talk to these, so they wait for them to be HEALTHY rather
+    # than merely started. `docker compose up -d` returns once a container is
+    # running, and OpenMetadata takes a further minute or two to answer — which
+    # is invisible to anyone who seeds by hand a few minutes later, and fails
+    # every time in CI.
+    depends_on:
+      entra-emulator:
+        condition: service_healthy
+      keyvault-emulator:
+        condition: service_healthy
+      fabric-emulator:
+        condition: service_healthy
+      openmetadata:
+        condition: service_healthy
+      apim-emulator:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     build:
       context: .
       dockerfile: docker/tools/Dockerfile

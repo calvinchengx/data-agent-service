@@ -1,0 +1,105 @@
+name: CI
+
+# A push to a PR branch would otherwise fire both events and run every job
+# twice for the same commit. Filtering push to main leaves branch commits
+# covered by the pull_request run and main commits by the push run.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Supersede PR runs, never main runs: a main commit's run is the record of what
+# main was, while only a PR's newest commit is under review.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Everything that needs no running stack, so a mistake in a linter or a guard
+  # is reported in a minute rather than after a fifteen-minute bring-up.
+  quality:
+    name: Lint, types and guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-groups --frozen
+
+      # LINT_MODE=host: the runner already has the toolchain, and building the
+      # tools image to lint would trade three minutes for nothing.
+      - name: ruff
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: ty
+        run: uv run ty check
+      - name: python tests
+        run: uv run pytest tests -q
+
+      # Discipline rule 2, mechanically: no emulator-only code path, and no
+      # development-only surface without a stated reason.
+      - name: no emulator-only code paths
+        run: sh scripts/check-discipline.sh
+      - name: no development-only paths
+        run: uv run python -m scripts.check_prod_paths --strict
+
+      # The production template must stay coherent even though nothing here
+      # deploys: an incoherent one is discovered at the worst moment otherwise.
+      - name: production settings are coherent
+        run: cp .env.example .env && uv run python -m scripts.preflight --env local --offline
+
+  go:
+    name: Go executor
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/warehouse-query-go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/warehouse-query-go/go.mod
+          cache-dependency-path: services/warehouse-query-go/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.6.1
+          working-directory: services/warehouse-query-go
+
+  infra:
+    name: Infrastructure compiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # Bicep is bundled with the az CLI, which the runner image already has.
+      - name: bicep build
+        run: az bicep build --file infra/main.bicep --stdout > /dev/null
+
+  # The whole thing, from nothing: bring the stack up, seed it, and run every
+  # witness. This is the job that would notice a fresh clone cannot reach green.
+  stack:
+    name: Full stack witnesses
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: free disk for the images
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+          df -h /
+      - name: bring up, seed, verify
+        run: make stack
+      - name: executor contract, both implementations
+        run: make conformance
+      - name: what failed
+        if: failure()
+        run: |
+          docker compose ps
+          docker compose logs --tail 80 warehouse-query openmetadata apim-emulator || true
