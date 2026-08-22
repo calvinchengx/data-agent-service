@@ -173,7 +173,9 @@ Standard Streamable HTTP JSON-RPC; plain JSON Schema tools; no `_meta` vendor fi
 | Guardrail | adversarial blocked at guard | 100% |
 | Efficiency | tool calls / tokens / latency | tracked |
 
-Dataset tiers L1 lookup · L2 join/agg · L3 needs OM definition · L4 ambiguous/unanswerable · L5 adversarial; ~60–100 per use case; gold SQL validated against seeded data; N=3 repeats; model id + prompt hash pinned. **Ablation** `DAS_OM_CONTEXT_MODE=off` vs `base` (vs `native` in stretch) is the headline number.
+Dataset tiers L1 lookup · L2 join/agg · L3 needs OM definition · L4 ambiguous/unanswerable · L5 adversarial; gold SQL validated against seeded data; N=3 repeats; model id + prompt hash pinned.
+
+> **Revised target.** This said *~60–100 per use case*, written before anything was known about what bounds it. The count of GENUINE L3 questions is limited by how many definitions the catalog holds — contoso has 10 glossary terms and 6 metrics, support 5 and 3 — and beyond that they are paraphrases, which inflate the sample while breaking the independence the paired test assumes: better-looking n, worse statistics. Reaching 60–100 is therefore a *dataset* change, not a question-writing one. What the ablation actually needs is **discordant pairs** — about six in one direction reaches p < 0.05 — so the suite stands at 44 questions (26 contoso, 18 support) of which 25 are L3. See `docs/07-evaluation.md`. **Ablation** `DAS_OM_CONTEXT_MODE=off` vs `base` (vs `native` in stretch) is the headline number.
 
 ---
 
