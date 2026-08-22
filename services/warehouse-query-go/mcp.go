@@ -280,12 +280,14 @@ func callTool(r *http.Request, p *Principal, name string, raw json.RawMessage) m
 		result, verdict, status, err := runQuery(r.Context(), src, args.SQL, args.MaxRows, p)
 		if err != nil {
 			if status == http.StatusBadRequest {
-				return textContent(err.Error(), true)
+				// The guard's own words, not the engine's -- but capped the
+				// same way, so one function decides what a caller may see.
+				return textContent(engineMessage(err), true)
 			}
 			if status == http.StatusForbidden {
 				return textContent(refusedPrefix(err), true)
 			}
-			return textContent("the source returned an error: "+err.Error(), true)
+			return textContent("the source returned an error: "+engineMessage(err), true)
 		}
 		return textContent(map[string]any{
 			"source": src.Name, "sql": verdict.SQL, "tables": verdict.Tables,

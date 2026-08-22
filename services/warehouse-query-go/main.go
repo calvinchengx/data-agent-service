@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -299,12 +300,25 @@ func isDenial(err error) bool {
 
 // engineMessage keeps the engine's own words — they usually name the real
 // problem — without the driver's framing.
+// driverLayers matches the chain a driver wraps its message in:
+// [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]The real message.
+var driverLayers = regexp.MustCompile(`^(\s*\[[^\]]*\]\s*)+`)
+
+// engineMessage is the engine's own words, minus the driver's noise. EVERY
+// string this service hands a caller goes through here.
+//
+// It used to cut at the LAST "] " -- bracket followed by a space -- and real
+// drivers pack their layers together as `][`, so it stripped nothing at all
+// from the common form. It read as though it worked because what remained
+// still ended with the engine's sentence. The Python executor had the same
+// bug, in the same shape, found by code scanning.
 func engineMessage(err error) string {
 	msg := err.Error()
-	if i := strings.LastIndex(msg, "] "); i >= 0 {
-		msg = msg[i+2:]
+	if i := strings.Index(msg, "DDBC Error: "); i >= 0 {
+		msg = msg[i+len("DDBC Error: "):]
 	}
-	return truncate(msg, 400)
+	msg = driverLayers.ReplaceAllString(msg, "")
+	return truncate(strings.TrimSpace(msg), 400)
 }
 
 func audit(fields ...any) { slog.Info("audit", fields...) }
