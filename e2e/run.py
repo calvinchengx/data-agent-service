@@ -1365,12 +1365,35 @@ def quality() -> None:
         check("quality", name, out.returncode == 0, (tail[-1] if tail else "")[:90])
 
     gate("python lints clean (ruff)", [sys.executable, "-m", "ruff", "check", "."])
+    gate(
+        "python formatting is clean (ruff format)",
+        [sys.executable, "-m", "ruff", "format", "--check", "."],
+    )
     gate("python type-checks clean (ty)", [sys.executable, "-m", "ty", "check"])
 
     # The Go toolchain is not in this container; the gate that owns it is
     # `make lint`. What can be asserted here is that its configuration is
     # present and names the checks the repo relies on — and phase9 already
     # proves the Go tests run.
+    # Coverage is asserted by RUNNING the gate, for the same reason the lints
+    # are: a floor recorded in a Makefile and never enforced drifts down one
+    # merge at a time. The Go half runs under `make coverage-go`, which owns
+    # the toolchain container this one does not have.
+    gate(
+        "python unit coverage is at or above the floor",
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "--cov=agent",
+            "--cov=promoter",
+            "--cov=services/warehouse-query-py",
+            "--cov-report=",
+            "--cov-fail-under=90",
+        ],
+    )
+
     config = pathlib.Path(".golangci.yml")
     text = config.read_text() if config.exists() else ""
     check(

@@ -4,6 +4,8 @@
 [![Docs](https://github.com/calvinchengx/data-agent-service/actions/workflows/docs-site.yml/badge.svg)](https://calvinchengx.github.io/data-agent-service/docs/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
+[![python coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fcalvinchengx.github.io%2Fdata-agent-service%2Fcoverage-python.json)](https://calvinchengx.github.io/data-agent-service/docs/13-testing/)
+[![go coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fcalvinchengx.github.io%2Fdata-agent-service%2Fcoverage-go.json)](https://calvinchengx.github.io/data-agent-service/docs/13-testing/)
 [![witnesses](https://img.shields.io/endpoint?url=https%3A%2F%2Fcalvinchengx.github.io%2Fdata-agent-service%2Fwitnesses.json)](https://calvinchengx.github.io/data-agent-service/docs/07-evaluation/)
 
 **A governed Data Agent: natural-language questions over Fabric Warehouses (and other sources), grounded in the glossary, metrics and schema held in OpenMetadata, fronted by Azure API Management with Entra identity — runnable locally on the emulator family and unchanged against real Azure.**
@@ -11,7 +13,7 @@
 📖 **[Documentation site](https://calvinchengx.github.io/data-agent-service/docs/)** — the full
 reference, also browsable as Markdown in [`docs/`](docs/).
 
-Status: **Phases 0-14 landed** — see [docs/00-plan.md](docs/00-plan.md).
+Status: **Phases 0-15 landed** — see [docs/00-plan.md](docs/00-plan.md).
 
 ## Quick start
 

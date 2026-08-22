@@ -33,17 +33,38 @@ var (
 	maxRows  int
 	audience string
 	scopeReq string
+
+	// Which source a call is about when it does not say. The Python executor
+	// has always honoured this; without it the two implementations answer the
+	// same unqualified request differently, which is what ADR 0001 exists to
+	// prevent.
+	defaultSource string
 )
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: levelFromEnv(),
 	})))
-
-	var err error
-	if sources, err = LoadSources(); err != nil {
+	if err := configure(); err != nil {
 		slog.Error("cannot read DAS_SOURCES", "err", err)
 		os.Exit(1)
+	}
+	addr := ":" + envOr("DAS_PORT", "8090")
+	slog.Info("warehouse-query (go) listening", "addr", addr, "sources", len(sources))
+	server := &http.Server{Addr: addr, Handler: routes(), ReadHeaderTimeout: 10 * time.Second}
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		slog.Error("server stopped", "err", err)
+		os.Exit(1)
+	}
+}
+
+// configure reads the environment into the package state the handlers use.
+// Separate from main so a test can wire the service the same way the binary
+// does, rather than assembling its own approximation and proving that instead.
+func configure() error {
+	var err error
+	if sources, err = LoadSources(); err != nil {
+		return err
 	}
 	rules = LoadRules()
 	cred = NewCredential()
@@ -52,7 +73,13 @@ func main() {
 	maxRows = intEnv("DAS_SQL_MAX_ROWS", 500)
 	audience = os.Getenv("DAS_AGENT_AUDIENCE")
 	scopeReq = envOr("DAS_REQUIRED_SCOPE", "access_as_user")
+	defaultSource = strings.TrimSpace(os.Getenv("DAS_DEFAULT_SOURCE"))
+	return nil
+}
 
+// routes is the service's URL surface, in one place so the tests drive the
+// same mux the binary serves.
+func routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("GET /sources", handleSources)
@@ -62,14 +89,7 @@ func main() {
 	mux.HandleFunc("POST /mcp", handleMCP)
 	mux.HandleFunc("GET /mcp", handleMCPStream)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", handleProtectedResource)
-
-	addr := ":" + envOr("DAS_PORT", "8090")
-	slog.Info("warehouse-query (go) listening", "addr", addr, "sources", len(sources))
-	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		slog.Error("server stopped", "err", err)
-		os.Exit(1)
-	}
+	return mux
 }
 
 func levelFromEnv() slog.Level {
@@ -191,6 +211,12 @@ func sourceFor(name string) (Source, error) {
 			for _, s := range sources {
 				return s, nil
 			}
+		}
+		// Two sources can hold a table of the same name, so guessing is the
+		// kind of wrong answer that looks right. A configured default makes
+		// that choice a deployment's explicit decision rather than ours.
+		if s, ok := sources[defaultSource]; ok && defaultSource != "" {
+			return s, nil
 		}
 		return Source{}, fmt.Errorf("source is required; one of %s", strings.Join(sourceNames(), ", "))
 	}

@@ -17,6 +17,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -76,6 +77,12 @@ type token struct {
 	kind tokenKind
 	text string // as written
 	up   string // upper-cased, for words
+	// quoted marks an identifier written as [name] or "name". A quoted
+	// identifier is a NAME, never a keyword: a column legitimately called
+	// [drop] must not be read as the DROP statement. Without this the guard
+	// refuses valid queries, which is a quieter failure than allowing invalid
+	// ones but still a wrong answer.
+	quoted bool
 }
 
 // tokenise splits a statement into words, strings, numbers and punctuation,
@@ -138,7 +145,9 @@ func tokenise(sql string) ([]token, error) {
 				return nil, denied("could not parse as tsql: unterminated identifier")
 			}
 			word := string(runes[i+1 : j])
-			out = append(out, token{kind: tokWord, text: word, up: strings.ToUpper(word)})
+			out = append(out, token{
+				kind: tokWord, text: word, up: strings.ToUpper(word), quoted: true,
+			})
 			i = j + 1
 		case isWordRune(ch):
 			j := i
@@ -200,12 +209,13 @@ func Guard(sql string, p Policy) (*Verdict, error) {
 
 	// 3. no forbidden construct anywhere, and no SELECT … INTO.
 	for i, t := range toks {
-		if t.kind != tokWord {
+		if t.kind != tokWord || t.quoted {
+			// A quoted identifier is a name. Unquoted CREATE/DROP as a column
+			// alias is still refused: telling those apart would be guessing,
+			// and quoting is how a caller says which one they meant.
 			continue
 		}
 		if _, bad := forbiddenKeywords[t.up]; bad {
-			// CREATE/DROP as a column alias is not a thing worth allowing; a
-			// recogniser that tried to tell them apart would be guessing.
 			return nil, denied("%s is not allowed; this endpoint is read-only", t.up)
 		}
 		if t.up == "INTO" && !precededBy(toks, i, "INSERT") {
@@ -258,7 +268,7 @@ func Guard(sql string, p Policy) (*Verdict, error) {
 
 func hasKeyword(toks []token, word string) bool {
 	for _, t := range toks {
-		if t.kind == tokWord && t.up == word {
+		if t.kind == tokWord && !t.quoted && t.up == word {
 			return true
 		}
 	}
@@ -487,7 +497,48 @@ func columnsRead(toks []token, tables []string, aliases map[string]string) []str
 
 // applyTop enforces the ceiling with T-SQL's own construct, keeping a smaller
 // caller-supplied TOP.
+// isTopDialect reports whether the row ceiling is written as TOP. Everything
+// else this service speaks writes LIMIT, and emitting TOP to a PostgreSQL
+// engine produces a syntax error rather than a smaller result — the Python
+// executor has always chosen per dialect.
+func isTopDialect(dialect string) bool {
+	switch strings.ToLower(dialect) {
+	case "", "tsql", "mssql", "fabric", "synapse":
+		return true
+	default:
+		return false
+	}
+}
+
+// trailingLimit matches the ceiling at the END of a statement — the one the
+// caller wrote for the whole query, not a LIMIT inside a subquery.
+var trailingLimit = regexp.MustCompile(`(?is)\s+LIMIT\s+\d+\s*;?\s*$`)
+
+func applyLimit(sql string, toks []token, p Policy) (string, int) {
+	cap := p.MaxRows
+	for i, t := range toks {
+		if t.kind == tokWord && !t.quoted && t.up == "LIMIT" &&
+			i+1 < len(toks) && toks[i+1].kind == tokNumber {
+			if n, err := strconv.Atoi(toks[i+1].text); err == nil && n <= cap {
+				return sql, n
+			}
+			break
+		}
+	}
+	trimmed := strings.TrimRight(strings.TrimSpace(sql), "; \t\n\r")
+	// Replace the caller's ceiling rather than adding a second one: two LIMIT
+	// clauses are a syntax error, so appending would turn "too many rows" into
+	// "broken query".
+	if trailingLimit.MatchString(trimmed) {
+		trimmed = strings.TrimRight(trailingLimit.ReplaceAllString(trimmed, ""), "; \t\n\r")
+	}
+	return fmt.Sprintf("%s LIMIT %d", trimmed, cap), cap
+}
+
 func applyTop(sql string, toks []token, p Policy) (string, int) {
+	if !isTopDialect(p.Dialect) {
+		return applyLimit(sql, toks, p)
+	}
 	cap := p.MaxRows
 	for i, t := range toks {
 		if t.up == "TOP" && i+1 < len(toks) && toks[i+1].kind == tokNumber {

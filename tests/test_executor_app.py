@@ -24,10 +24,10 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "services" / "warehouse-query-py"))
 
+import jwt  # noqa: E402
 from cryptography.hazmat.primitives import serialization  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-import jwt  # noqa: E402
 
 import app as app_mod  # noqa: E402
 
@@ -392,3 +392,118 @@ def test_the_metadata_url_puts_well_known_between_host_and_path(monkeypatch):
 def test_the_metadata_url_is_empty_when_no_base_is_configured(monkeypatch):
     monkeypatch.setenv("DAS_PUBLIC_BASE_URL", "")
     assert app_mod._metadata_url() == ""
+
+
+# ------------------------------------------------- engine failure paths ---
+@pytest.mark.parametrize("op", ["list_tables", "describe_table", "run_query"])
+@pytest.mark.parametrize(
+    ("failure", "status"),
+    [
+        (PermissionError("access denied"), 403),
+        (RuntimeError("The SELECT permission was denied on the object"), 403),
+        (RuntimeError("dial tcp: connection refused"), 502),
+    ],
+)
+def test_an_engine_failure_is_classified_the_same_way_for_every_operation(
+    client, signing_key, backend, monkeypatch, op, failure, status
+):
+    """A denial and an outage are different answers, and a caller acts on
+    them differently — retrying an outage is sensible, retrying a denial is
+    not."""
+    method = {"list_tables": "list_tables", "describe_table": "describe", "run_query": "run"}[op]
+
+    def fail(*_a, **_k):
+        raise failure
+
+    monkeypatch.setattr(backend, method, fail)
+    if op == "list_tables":
+        response = client.get("/tables", headers=auth(signing_key))
+    elif op == "describe_table":
+        response = client.get("/tables/dbo.fct_sales", headers=auth(signing_key))
+    else:
+        response = client.post(
+            "/query", json={"sql": "SELECT 1 AS n FROM dbo.fct_sales"}, headers=auth(signing_key)
+        )
+    assert response.status_code == status
+
+
+def test_mcp_list_tables_and_describe_go_through_the_same_checks(client, signing_key, backend):
+    body = rpc(client, signing_key, "tools/call", {"name": "list_tables", "arguments": {}}).json()
+    assert not body["result"].get("isError")
+
+    body = rpc(
+        client,
+        signing_key,
+        "tools/call",
+        {"name": "describe_table", "arguments": {"table": "dbo.dim_customer"}},
+    ).json()
+    assert "email" not in json.dumps(body), "a withheld column was described over MCP"
+
+
+def test_mcp_list_sources_reports_the_callers_roles(client, signing_key):
+    body = rpc(client, signing_key, "tools/call", {"name": "list_sources", "arguments": {}}).json()
+    assert "Data.Analyst" in json.dumps(body["result"])
+
+
+def test_mcp_engine_failures_become_tool_errors(client, signing_key, backend, monkeypatch):
+    def fail(*_a, **_k):
+        raise RuntimeError("dial tcp: connection refused")
+
+    monkeypatch.setattr(backend, "list_tables", fail)
+    body = rpc(client, signing_key, "tools/call", {"name": "list_tables", "arguments": {}}).json()
+    assert body.get("error") is None, "an engine failure became a protocol error"
+    assert body["result"]["isError"] is True
+
+
+def test_an_unknown_source_over_mcp_is_a_tool_error(client, signing_key, backend):
+    body = rpc(
+        client,
+        signing_key,
+        "tools/call",
+        {"name": "list_tables", "arguments": {"source": "nope"}},
+    ).json()
+    assert body["result"]["isError"] is True
+
+
+def test_the_jwks_is_fetched_once_and_cached(monkeypatch, signing_key):
+    """The key set is fetched from the tenant, not configured by hand."""
+    _, jwks = signing_key
+    hits = []
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def read(self):
+            return json.dumps(self._payload).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    def fake_urlopen(url, **_kw):
+        hits.append(url)
+        return FakeResponse(jwks)
+
+    monkeypatch.setattr(app_mod, "_JWKS", {})
+    monkeypatch.setattr(app_mod, "_JWKS_AT", 0.0)
+    monkeypatch.setattr(app_mod.urllib.request, "urlopen", fake_urlopen)
+    assert app_mod._jwks() == jwks
+    assert app_mod._jwks() == jwks
+    assert len(hits) == 1, "the key set was fetched twice"
+
+
+def test_the_source_is_required_when_several_are_configured(monkeypatch, client, signing_key):
+    monkeypatch.setattr(app_mod, "SOURCES", {"a": object(), "b": object()})
+    monkeypatch.setattr(app_mod, "DEFAULT_SOURCE", "")
+    response = client.get("/tables", headers=auth(signing_key))
+    assert response.status_code == 400
+    assert "source is required" in response.json()["detail"]
+
+
+def test_no_configured_source_is_a_server_error(monkeypatch, client, signing_key):
+    monkeypatch.setattr(app_mod, "SOURCES", {})
+    response = client.get("/tables", headers=auth(signing_key))
+    assert response.status_code == 500
