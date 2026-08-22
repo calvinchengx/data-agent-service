@@ -37,8 +37,14 @@ jobs:
         run: uv run ruff check . && uv run ruff format --check .
       - name: ty
         run: uv run ty check
-      - name: python tests
-        run: uv run pytest tests -q
+      - name: python tests, with the coverage floor
+        # Same targets and floor as `make coverage-python`; run directly rather
+        # than through the tools container, because this job has no stack and
+        # does not need one to measure unit coverage.
+        run: >
+          uv run pytest tests -q
+          --cov=agent --cov=promoter --cov=services/warehouse-query-py
+          --cov-report=term-missing --cov-fail-under=90
 
       # Discipline rule 2, mechanically: no emulator-only code path, and no
       # development-only surface without a stated reason.
@@ -69,7 +75,13 @@ jobs:
           go-version-file: services/warehouse-query-go/go.mod
           cache-dependency-path: services/warehouse-query-go/go.sum
       - run: go vet ./...
-      - run: go test ./...
+      - name: go test, with the coverage floor
+        # Same measurement as `make coverage-go`, on the runner's own toolchain.
+        run: |
+          go test ./... -coverprofile=cover.out
+          go tool cover -func=cover.out | tail -1
+          pct=$(go tool cover -func=cover.out | tail -1 | awk '{gsub(/%/,"",$NF); print $NF}')
+          awk -v p="$pct" 'BEGIN { if (p+0 < 90) { printf "go coverage %s%% is below the 90%% floor\n", p; exit 1 } }'
       - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.13.1

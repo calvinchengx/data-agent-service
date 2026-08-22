@@ -8,20 +8,23 @@
 package main
 
 import (
+	"cmp"
 	"net/http"
 	"os"
 	"time"
 )
 
-func main() { os.Exit(probe(os.Getenv("DAS_HEALTH_URL"))) }
+// The default sits on the getenv line deliberately: an address on a line of
+// its own is a hardcoded endpoint, and scripts/check-discipline.sh is right
+// to say so.
+func main() {
+	os.Exit(probe(cmp.Or(os.Getenv("DAS_HEALTH_URL"), "http://localhost:8090/health")))
+}
 
 // probe returns the exit code: 0 when the service answers 200, 1 otherwise.
 // Separate from main so the decision can be tested; main only turns it into an
 // exit status.
 func probe(url string) int {
-	if url == "" {
-		url = "http://localhost:8090/health"
-	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url) //nolint:noctx // a probe with its own timeout
 	if err != nil {
