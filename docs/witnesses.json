@@ -1,0 +1,70 @@
+{
+  "passed": 86,
+  "total": 86,
+  "phases": {
+    "phase1": {
+      "passed": 2,
+      "total": 2
+    },
+    "phase10": {
+      "passed": 2,
+      "total": 2
+    },
+    "phase11": {
+      "passed": 10,
+      "total": 10
+    },
+    "phase12": {
+      "passed": 3,
+      "total": 3
+    },
+    "phase13": {
+      "passed": 7,
+      "total": 7
+    },
+    "phase14": {
+      "passed": 6,
+      "total": 6
+    },
+    "phase15": {
+      "passed": 6,
+      "total": 6
+    },
+    "phase2": {
+      "passed": 5,
+      "total": 5
+    },
+    "phase3": {
+      "passed": 3,
+      "total": 3
+    },
+    "phase4": {
+      "passed": 10,
+      "total": 10
+    },
+    "phase5": {
+      "passed": 3,
+      "total": 3
+    },
+    "phase6": {
+      "passed": 12,
+      "total": 12
+    },
+    "phase7": {
+      "passed": 3,
+      "total": 3
+    },
+    "phase8": {
+      "passed": 4,
+      "total": 4
+    },
+    "phase9": {
+      "passed": 5,
+      "total": 5
+    },
+    "quality": {
+      "passed": 5,
+      "total": 5
+    }
+  }
+}
