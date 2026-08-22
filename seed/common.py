@@ -239,6 +239,36 @@ def source_by_name(name: str) -> dict:
     raise SystemExit(f"no source named {name} in DAS_SOURCES")
 
 
+def connect_source(src: dict):
+    """A DB-API connection to whichever engine a source names.
+
+    The harnesses need to reach a source directly — to seed it, and to run an
+    eval's reference query so the oracle is the data rather than a number typed
+    into a fixture. That has to work per engine, because the second source is
+    the whole point of having a second source.
+
+    The SERVICE never uses this: it connects through its own adapters, as the
+    asking user. This is the harness's own door, and it uses whatever
+    credential the local seed has.
+    """
+    kind = src.get("kind", "fabric")
+    if kind in ("fabric", "azuresql", "synapse"):
+        server = src.get("tds_server") or ""
+        database = src.get("database") or src.get("item") or ""
+        if not server:
+            state = load_state()
+            server, database = state.get("sql_server", ""), state.get("sql_database", "")
+        return tds_connect(server, database)
+    if kind == "postgres":
+        import psycopg
+
+        dsn = src.get("dsn") or ""
+        if not dsn:
+            raise SystemExit(f"source {src.get('name')} has no dsn")
+        return psycopg.connect(dsn, connect_timeout=15)
+    raise SystemExit(f"no harness connection for source kind {kind!r}")
+
+
 def source_for(workspace: str, item: str) -> dict:
     for src in sources():
         if src.get("workspace") == workspace and src.get("item") == item:

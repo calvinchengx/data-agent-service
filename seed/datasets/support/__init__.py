@@ -17,7 +17,8 @@ different where difference is what gets tested:
 
 That last one is the substance. Support resolution time **excludes** the period
 a ticket spent waiting on the customer. An agent who subtracts nothing gets a
-different, larger number and a different ranking of teams — so a question about
+different, larger number and a different ranking of teams (Billing is LAST
+on wall-clock and FIRST on resolution) — so a question about
 resolution time is a question you cannot answer correctly from the column names
 alone.
 """
@@ -74,6 +75,15 @@ KEYS = {
                        ("priority", "sla.priority")]},
 }
 
+# How each team's work behaves. `elapsed` scales wall-clock, `waits` is the
+# chance a ticket ever waits on the customer, `share` the fraction of elapsed
+# time it waits for. Billing is slow on the clock and fast on the work.
+TEAM_DELAY = {
+    "Frontline": {"elapsed": 1.00, "waits": 0.20, "share": (0.05, 0.20)},
+    "Technical": {"elapsed": 1.25, "waits": 0.45, "share": (0.15, 0.40)},
+    "Billing":   {"elapsed": 1.90, "waits": 0.85, "share": (0.55, 0.80)},
+}
+
 PRIORITIES = [("P1", 60), ("P2", 240), ("P3", 1440)]
 TEAMS = ["Frontline", "Billing", "Technical"]
 CHANNELS = ["email", "chat", "phone"]
@@ -116,9 +126,21 @@ def generate(n_customers=120, n_agents=18, n_tickets=3000, seed=20260822) -> dic
         priority, _target = rnd.choices(PRIORITIES, [1, 3, 6])[0]
         opened = START + dt.timedelta(seconds=rnd.randrange(span))
         # Elapsed is wall-clock; waiting is the part the customer owed us. The
-        # difference between the two is the whole point of this dataset.
-        elapsed = max(5, int(rnd.lognormvariate(5.2, 0.9)))
-        waiting = 0 if rnd.random() < 0.45 else min(elapsed - 1, int(elapsed * rnd.uniform(0.1, 0.7)))
+        # difference between the two is the whole point of this dataset — and
+        # it is not spread evenly across the teams, which is what makes the
+        # difference OBSERVABLE rather than merely arithmetic.
+        #
+        # Billing tickets sit waiting on the customer far more than any other
+        # kind: they need an invoice number, a PO, an authorised signatory. So
+        # Billing looks like the SLOWEST team on wall-clock and is in fact the
+        # FASTEST once the customer's own delay is excluded. An agent that
+        # reads `elapsed_minutes` therefore gets a different winner, not just a
+        # bigger number — and a wrong ranking is far harder to wave away than a
+        # wrong magnitude.
+        profile = TEAM_DELAY[agent[2]]
+        elapsed = max(5, int(rnd.lognormvariate(5.2, 0.9) * profile["elapsed"]))
+        waiting = 0 if rnd.random() > profile["waits"] else min(
+            elapsed - 1, int(elapsed * rnd.uniform(*profile["share"])))
         status = rnd.choices(["resolved", "resolved", "resolved", "open"], [6, 3, 3, 2])[0]
         resolved = opened + dt.timedelta(minutes=elapsed) if status == "resolved" else None
         tickets.append((

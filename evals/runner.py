@@ -44,8 +44,41 @@ def load_questions(usecase: str, tier: str | None) -> list[dict]:
 def gold_rows(question: dict, conn) -> list[list] | None:
     if not question.get("gold_sql"):
         return None
-    cur = conn.cursor().execute(question["gold_sql"])
+    cur = conn.cursor()
+    cur.execute(question["gold_sql"])
     return [list(r) for r in cur.fetchall()]
+
+
+class GoldConnections:
+    """One connection per engine a use-case touches, opened on demand.
+
+    A question names its source; the reference query has to run on THAT engine.
+    Holding one Fabric connection for every use-case was the assumption that
+    only survived while there was one engine — the kind of thing a second
+    source exists to expose.
+    """
+
+    def __init__(self, default_source: str = ""):
+        self._default = default_source or os.environ.get("DAS_DEFAULT_SOURCE", "")
+        self._open: dict[str, object] = {}
+
+    def for_question(self, question: dict):
+        name = question.get("source") or self._default
+        if name not in self._open:
+            src = c.source_by_name(name) if name else (c.sources() or [{}])[0]
+            if not src:
+                raise SystemExit(
+                    f"question {question['id']} names source {name!r}, which is not in "
+                    f"DAS_SOURCES ({', '.join(s['name'] for s in c.sources())})")
+            self._open[name] = c.connect_source(src)
+        return self._open[name]
+
+    def close(self) -> None:
+        for conn in self._open.values():
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 — closing is best effort
+                pass
 
 
 @dataclasses.dataclass
@@ -78,27 +111,33 @@ class GoldAgent:
 
     def ask(self, question: dict) -> agent_mod.Answer:
         expect = question.get("expect", "answer")
+        # The source travels with the question: the baseline has to reach the
+        # engine the question is about, and "the first one configured" stopped
+        # being a safe default the moment there were two.
+        args = {"source": question["source"]} if question.get("source") else {}
         if expect != "answer":
-            text = {"abstain": "The warehouse holds no data that can answer this.",
+            text = {"abstain": "That data does not exist in this source.",
                     "block": "That is not permitted: the query was refused."}[expect]
             calls = []
             if expect == "block":
                 toolbox = agent_mod.build_toolbox(self.token, om=False)
                 toolbox.connect()
-                out, is_error = toolbox.call("warehouse__run_query",
-                                             {"sql": "DROP TABLE dbo.fct_sales"})
-                calls = [agent_mod.ToolCall("warehouse__run_query", {}, out, is_error, 0)]
+                # A statement refused by the GUARD rather than by a missing
+                # table, so the probe means the same thing on every engine.
+                out, is_error = toolbox.call(
+                    "warehouse__run_query", {**args, "sql": "DROP TABLE some_table"})
+                calls = [agent_mod.ToolCall("warehouse__run_query", args, out, is_error, 0)]
             return agent_mod.Answer(text, calls)
         toolbox = agent_mod.build_toolbox(self.token, om=False)
         toolbox.connect()
-        out, is_error = toolbox.call("warehouse__run_query", {"sql": question["gold_sql"]})
+        out, is_error = toolbox.call("warehouse__run_query",
+                                     {**args, "sql": question["gold_sql"]})
         payload = {} if is_error else json.loads(out)
         rows = payload.get("rows", [])
         numbers = [str(cell) for row in rows[:20] for cell in row]
         text = f"Result: {', '.join(numbers)[:400]}"
-        return agent_mod.Answer(text, [agent_mod.ToolCall("warehouse__run_query",
-                                                          {"sql": question["gold_sql"]},
-                                                          out, is_error, 0)])
+        return agent_mod.Answer(text, [agent_mod.ToolCall(
+            "warehouse__run_query", {**args, "sql": question["gold_sql"]}, out, is_error, 0)])
 
 
 def evaluate(question: dict, answer: agent_mod.Answer, gold: list[list] | None,
@@ -116,7 +155,8 @@ def evaluate(question: dict, answer: agent_mod.Answer, gold: list[list] | None,
     actual = None
     if answer.sql:
         try:
-            cur = conn.cursor().execute(answer.sql[-1])
+            cur = conn.cursor()
+            cur.execute(answer.sql[-1])
             actual = [list(r) for r in cur.fetchall()]
         except Exception as e:  # noqa: BLE001 — a statement that will not re-run is a miss
             s.detail = (s.detail + f" | gold re-run failed: {e}")[:300]
@@ -135,12 +175,12 @@ def evaluate(question: dict, answer: agent_mod.Answer, gold: list[list] | None,
 def run(usecase: str, *, agent_kind: str, om: bool, repeats: int, tier: str | None,
         user: str, model: str, effort: str) -> list[Result]:
     questions = load_questions(usecase, tier)
-    state = c.load_state()
-    conn = c.tds_connect(state["sql_server"], state["sql_database"])
+    connections = GoldConnections()
     results: list[Result] = []
     for question in questions:
         who = question.get("persona") or user
         token = identity.token_for(who)
+        conn = connections.for_question(question)
         gold = gold_rows(question, conn)
         for attempt in range(repeats):
             label = f"{question['id']}" + (f" #{attempt + 1}" if repeats > 1 else "")
@@ -158,7 +198,7 @@ def run(usecase: str, *, agent_kind: str, om: bool, repeats: int, tier: str | No
             mark = "\033[32mpass\033[0m" if result.passed else "\033[31mFAIL\033[0m"
             print(f"  {mark}  [{question['tier']}] {label}: {question['question'][:64]}"
                   + (f"  — {s.detail}" if s.detail and not result.passed else ""), flush=True)
-    conn.close()
+    connections.close()
     return results
 
 

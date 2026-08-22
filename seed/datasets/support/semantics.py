@@ -2,12 +2,12 @@
 
 The definition that matters is `Resolution Time`. Wall-clock elapsed time and
 resolution time differ by the period a ticket spent waiting on the customer,
-and on this data that is a 28% gap — so an agent that reads the column names
+and on this data that is a 44% gap — so an agent that reads the column names
 and stops gets a plausible, confidently wrong answer, and a different ranking
 of teams.
 
-The descriptions carry the MAGNITUDE, not only the rule ("mean elapsed 270
-minutes against mean resolution 211"). A definition with a number in it gives
+The descriptions carry the MAGNITUDE, not only the rule ("mean elapsed 369
+minutes against mean resolution 256"). A definition with a number in it gives
 a model something to check its own answer against; a definition that only
 states a rule does not.
 """
@@ -28,7 +28,7 @@ TERMS = {
             "Minutes a ticket took to resolve, **excluding** any period it spent waiting on "
             "the customer: `resolution_minutes = elapsed_minutes - waiting_minutes`. Elapsed "
             "time is wall-clock and is NOT the answer to 'how long did we take' — on current "
-            "data mean elapsed is 270 minutes against mean resolution of 211, a 28% "
+            "data mean elapsed is 369 minutes against mean resolution of 256, a 44% "
             "difference, and the two orderings of teams disagree. Always use "
             "`resolution_minutes`; use `elapsed_minutes` only when the question is explicitly "
             "about wall-clock duration."),

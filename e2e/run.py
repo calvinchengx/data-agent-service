@@ -600,9 +600,85 @@ def phase12() -> None:
           f"{served} served then {throttled} refused, Retry-After {retry_after}")
 
 
+# --------------------------------------------------------------- phase 13 --
+def phase13() -> None:
+    """A second engine, and what having one is actually for.
+
+    One source cannot tell you whether a design generalises or was shaped
+    around its only example. These checks assert the second engine is reachable
+    through the same gateway, guard, rules and catalog as the first — and that
+    the evaluation of it is honest about what the catalog is worth.
+    """
+    import subprocess
+
+    from agent import identity
+
+    sources = {s["name"]: s for s in c.sources()}
+    kinds = {s.get("kind") for s in sources.values()}
+    check("phase13", "more than one engine is configured", len(kinds) > 1,
+          ", ".join(f"{n} ({s.get('kind')})" for n, s in sorted(sources.items())))
+
+    carol = identity.token_for("carol@entraemulator.dev")
+    second = next((s for s in sources.values() if s.get("kind") != "fabric"), None)
+    if not second:
+        check("phase13", "a non-Fabric source is queryable", False, "none configured")
+        return
+
+    def tool(name, args, token):
+        _, body = rpc("tools/call", {"name": name, "arguments": args}, token)
+        return tool_result(body)
+
+    err, text = tool("run_query", {"source": second["name"],
+                                   "sql": "SELECT COUNT(*) AS n FROM support.tickets"}, carol)
+    payload = json.loads(text) if err is False else {}
+    check("phase13", "the second engine answers through the same gateway and guard",
+          err is False and payload.get("rowCount") == 1,
+          f"{second['name']} ({second.get('dialect')}): {payload.get('rows')}")
+
+    # The guard is dialect-aware: the ceiling must be the one this engine
+    # speaks, not the one the first engine happened to need.
+    check("phase13", "the row ceiling is applied in the engine's own dialect",
+          "LIMIT" in payload.get("sql", "").upper(), payload.get("sql", "")[:70])
+
+    err, text = tool("run_query", {"source": second["name"],
+                                   "sql": "DROP TABLE support.tickets"}, carol)
+    check("phase13", "read-only is enforced on every engine, not only the first",
+          bool(err) and "read-only" in text, text[:60])
+
+    alice = identity.token_for("alice@entraemulator.dev")
+    err, text = tool("run_query", {"source": second["name"],
+                                   "sql": "SELECT agent_id, email FROM support.agents"}, alice)
+    check("phase13", "access rules reach the second engine too",
+          bool(err) and "may not read" in text, text[:70])
+
+    # The point of the use-case: a question whose wrong answer is wrong in the
+    # ranking, not merely in the magnitude.
+    out = subprocess.run([sys.executable, "-m", "evals.runner", "--agent", "gold",
+                          "--usecase", "support"], capture_output=True, text=True,
+                         env={**os.environ})
+    summary = next((line for line in reversed((out.stdout or "").splitlines())
+                    if "passed (" in line), "")
+    check("phase13", "the second use-case's reference answers score 100%",
+          out.returncode == 0 and "(100.0%)" in summary, summary.strip()[:80])
+
+    conn = c.connect_source(second)
+    cur = conn.cursor()
+    ranking = {}
+    for column in ("resolution_minutes", "elapsed_minutes"):
+        cur.execute(f"SELECT a.team FROM support.tickets t JOIN support.agents a "
+                    f"ON a.agent_id = t.agent_id WHERE t.status = 'resolved' "
+                    f"GROUP BY a.team ORDER BY AVG(t.{column}) ASC")
+        ranking[column] = [r[0] for r in cur.fetchall()]
+    conn.close()
+    check("phase13", "ignoring the catalog changes the ANSWER, not just the number",
+          ranking["resolution_minutes"][0] != ranking["elapsed_minutes"][0],
+          f"catalog says {ranking['resolution_minutes'][0]}, "
+          f"naive says {ranking['elapsed_minutes'][0]}")
+
+
 PHASES = {"phase1": phase1, "phase2": phase2, "phase3": phase3, "phase4": phase4,
           "phase5": phase5, "phase6": phase6, "phase7": phase7, "phase8": phase8,
-          "phase9": phase9, "phase10": phase10, "phase11": phase11, "phase12": phase12}
+          "phase9": phase9, "phase10": phase10, "phase11": phase11, "phase12": phase12, "phase13": phase13}
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
