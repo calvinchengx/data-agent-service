@@ -50,7 +50,10 @@ jobs:
       # The production template must stay coherent even though nothing here
       # deploys: an incoherent one is discovered at the worst moment otherwise.
       - name: production settings are coherent
-        run: cp .env.example .env && uv run python -m scripts.preflight --env local --offline
+        # Against the PRODUCTION template, which is what the step name claims.
+        # Run against .env.example it proves nothing about production and
+        # fails on ids that only exist after seeding.
+        run: cp .env.prod.example .env.prod && uv run python -m scripts.preflight --env prod --offline
 
   go:
     name: Go executor
@@ -67,7 +70,7 @@ jobs:
           cache-dependency-path: services/warehouse-query-go/go.sum
       - run: go vet ./...
       - run: go test ./...
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.6.1
           working-directory: services/warehouse-query-go
