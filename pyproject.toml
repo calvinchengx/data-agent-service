@@ -89,3 +89,23 @@ testpaths = ["tests"]
 # The repo root is the import root: `agent`, `seed`, `evals` and `e2e` are
 # packages, and the executor's modules are added by the test that needs them.
 pythonpath = ["."]
+
+# Coverage measures code that unit tests can reach. A CONFORMANCE HARNESS
+# cannot be: it asserts a contract against a running service, and the stack job
+# is what exercises it.
+#
+# `services/conformance/run.py` was already outside the measurement -- the
+# `--cov=` flags name packages, and that one is not among them. `agent/
+# conformance/run.py` is the same kind of file and got swept in anyway, because
+# `--cov=agent` takes a whole package. 186 statements at 0% cost about five
+# points and put the total under the floor, which read as somebody shipping
+# untested code rather than as two sibling harnesses being measured differently.
+#
+# Here rather than on the three command lines that measure coverage (Makefile,
+# ci.yml, e2e/run.py): they all read this, so the rule cannot be widened in one
+# place and missed in the other two.
+[tool.coverage.run]
+omit = [
+    "agent/conformance/*",
+    "services/conformance/*",
+]
