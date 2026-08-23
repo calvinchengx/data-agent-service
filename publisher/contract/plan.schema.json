@@ -15,8 +15,8 @@
     "title": { "type": "string", "minLength": 1 },
     "source": { "type": "string", "description": "The executor source the template ran against; targets use it to decide whether they can bind." },
     "tables": {
-      "type": "array", "minItems": 1, "items": { "type": "string" },
-      "description": "schema.table, as the template read them, in template order."
+      "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" },
+      "description": "schema.table, as the template read them, in template order. Distinct: a self-join reads one table under two aliases, and a repeated entry would make its own columns read as ambiguous with themselves."
     },
     "columns": {
       "type": "object",

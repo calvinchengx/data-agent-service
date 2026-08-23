@@ -99,6 +99,17 @@ case. Add your target to the `targets` dict, run it, commit the regenerated
 `cases.json`, and CI will regenerate and diff on every push. If you also write
 a Go generator in `publisher-go/`, it is held to those same bytes.
 
+Two rules that cost nothing and have both already paid:
+
+- **Record refusals beside successes.** A corpus of only successes passes
+  against a function that never refuses anything. The `bindings` section
+  exists for this, and caught a real divergence on its first run.
+- **Write the property, not just the cases.** "Feed the output back into the
+  thing that produced it and demand the same answer" is about forty lines and
+  killed a canonicalisation bug the day it was written. If your target has a
+  transform whose result could depend on how it was *reached* rather than on
+  what it *means*, that property will find it.
+
 ```bash
 uv run python publisher/contract/gen_cases.py
 make publisher-contract

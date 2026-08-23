@@ -148,6 +148,15 @@ jobs:
           go tool cover -func=cover.out | tail -1
           pct=$(go tool cover -func=cover.out | tail -1 | awk '{gsub(/%/,"",$NF); print $NF}')
           awk -v p="$pct" 'BEGIN { if (p+0 < 90) { printf "publisher-go coverage %s%% is below the 90%% floor\n", p; exit 1 } }'
+      # The committed corpus replays under `go test` above; this looks for the
+      # NEXT one. Both properties here have already earned their keep -- the
+      # self-join binding and the Canonical fixed point were found this way,
+      # not by anyone reading the code.
+      - name: a short fuzz over the generator's properties
+        working-directory: publisher-go
+        run: |
+          go test -run=XXX -fuzz=FuzzCanonicalIsAFixedPoint -fuzztime=40s .
+          go test -run=XXX -fuzz=FuzzTableOfNeverGuesses -fuzztime=40s .
 
   infra:
     name: Infrastructure compiles

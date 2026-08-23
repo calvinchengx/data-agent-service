@@ -8,6 +8,7 @@ disagree. A publisher that quietly published those would be worse than none.
 from __future__ import annotations
 
 import json
+import pathlib
 
 import pytest
 
@@ -481,3 +482,78 @@ def test_the_table_fqn_is_built_from_the_seeded_schema(monkeypatch):
     assert publish._table_fqn("dbo.fct_sales") == "svc.db.dbo.fct_sales"
     # An unqualified name still resolves rather than producing "svc.db.dbo."
     assert publish._table_fqn("fct_sales") == "svc.db.dbo.fct_sales"
+
+
+def test_a_measure_no_target_can_express_is_skipped_before_anything_is_created(
+    monkeypatch, tmp_path, capsys
+):
+    """The Plan is built BEFORE any target is asked to publish, so a candidate
+    the generator cannot express costs no Fabric item and no half-made
+    dashboard. The reason names the aggregate rather than raising, because a
+    stack trace out of a scheduled job tells the person reading the log
+    nothing they can act on."""
+    path = tmp_path / "candidates.json"
+    path.write_text(
+        json.dumps(
+            {
+                "released": [
+                    {
+                        "title": "Median Revenue by Country",
+                        "source": "contoso_warehouse",
+                        "template_sql": (
+                            "SELECT country, MEDIAN(revenue_usd) AS c1 "
+                            "FROM dbo.fct_revenue_summary GROUP BY country"
+                        ),
+                        "dialect": "tsql",
+                        "tables": ["dbo.fct_revenue_summary"],
+                        "measures": ["median(revenue_usd)"],
+                        "dimensions": ["country"],
+                        "slot_columns": [],
+                    }
+                ]
+            }
+        )
+    )
+    published = []
+    monkeypatch.setattr(run.identity, "token_for", lambda *_a, **_k: "tok")
+    monkeypatch.setattr(
+        run.c,
+        "load_state",
+        lambda: {"warehouse_name": "contoso_warehouse", "workspace": "ws", "warehouse": "wh"},
+    )
+    monkeypatch.setattr(
+        run,
+        "describe",
+        lambda *_a, **_k: {
+            "dbo.fct_revenue_summary": [
+                {"name": "revenue_usd", "dataType": "double"},
+                {"name": "country", "dataType": "string"},
+            ]
+        },
+    )
+    monkeypatch.setattr(run.catalognames, "for_columns", dict)
+    monkeypatch.setattr(publish, "publish", lambda *a, **k: published.append(a) or None)
+    monkeypatch.setattr("sys.argv", ["run", "--candidates", str(path)])
+
+    assert run.main() == 1, "a candidate nothing can express is not a successful run"
+    out = capsys.readouterr().out
+    assert "skipping" in out and "MEDIAN" in out
+    assert not published, "the Plan must fail before any target is asked to create anything"
+
+
+def test_the_module_runs_as_a_command_and_reports_a_missing_candidates_file():
+    """`python -m publisher.run` is how the job is actually invoked. The
+    entry point is exercised as one, because a module that imports cleanly and
+    cannot be RUN is a job that fails in the scheduler and nowhere else."""
+    import subprocess
+    import sys as _sys
+
+    proc = subprocess.run(
+        [_sys.executable, "-m", "publisher.run", "--candidates", "/nonexistent/candidates.json"],
+        cwd=pathlib.Path(__file__).resolve().parent.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 1, proc.stderr[-500:]
+    assert "no candidates at" in proc.stdout and "promoter.run" in proc.stdout

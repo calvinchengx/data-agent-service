@@ -1772,6 +1772,123 @@ def phase16() -> None:
         ", ".join(sorted(upstream)) or "no upstream lineage",
     )
 
+    check(
+        "phase16",
+        "the catalog service type comes from the target, not from a constant",
+        pbi.catalog(done.artefact)[0] == "PowerBI"
+        and isinstance(dash, dict)
+        and dash.get("service", {}).get("name") == pbi.catalog_service,
+        f"{pbi.catalog(done.artefact)[0]} under {pbi.catalog_service}",
+    )
+
+    # The person who ASKED. Power BI records them as the item's creator
+    # because the publish went through their own on-behalf-of token, but the
+    # catalog has to carry it too -- and for a `service` tier target (19b)
+    # the catalog is the ONLY place it will be recorded, so the witness holds
+    # the path that has to work for both.
+    # OM HTML-escapes what it stores in a description, so `@` comes back as
+    # `&#64;` -- compared against both forms rather than against the one this
+    # happened to send. Prose is the wrong home for this fact and 19b moves it
+    # to `owners`; see record_lineage.
+    described = (dash or {}).get("description", "")
+    check(
+        "phase16",
+        "the catalog says who asked for the dashboard",
+        "erin@entraemulator.dev" in described or "erin&#64;entraemulator.dev" in described,
+        described[-58:] or "no description",
+    )
+
+    # ---- the contract, against LIVE data rather than recorded fixtures ----
+    # tests/test_publisher_contract.py validates the schema against cases
+    # recorded from hand-written candidates. That proves the schema describes
+    # the FIXTURES. Only a Plan built from the executor's own describe_table
+    # proves it describes what actually comes back from a warehouse.
+    import jsonschema
+
+    from publisher import plan as _plan
+
+    live_plan = _plan.build(candidate, columns, {"revenue_usd": "Net Revenue"})
+    root = pathlib.Path(__file__).resolve().parent.parent
+    schema = json.loads((root / "publisher" / "contract" / "plan.schema.json").read_text())
+    invalid = ""
+    try:
+        jsonschema.validate(live_plan.as_dict(), schema)
+    except jsonschema.ValidationError as e:
+        invalid = f"{'/'.join(str(p) for p in e.absolute_path)}: {e.message}"[:140]
+    check(
+        "phase16",
+        "a Plan built from the live warehouse satisfies the published schema",
+        not invalid,
+        invalid or f"{len(live_plan.measures)} measures, {len(live_plan.columns)} tables described",
+    )
+
+    # Determinism is the whole claim of §18 and the reason a second generator
+    # exists. Asserted here on live input: the same Plan must produce the same
+    # artefacts twice, byte for byte, or the recorded contract is comparing
+    # two languages against a moving target.
+    from publisher.targets import powerbi as _pbi
+
+    once = _pbi.artefacts(live_plan, workspace, warehouse)
+    twice = _pbi.artefacts(_plan.Plan.from_dict(live_plan.as_dict()), workspace, warehouse)
+    check(
+        "phase16",
+        "the artefacts are the same bytes twice, through a serialisation round trip",
+        json.dumps(once, sort_keys=True) == json.dumps(twice, sort_keys=True),
+        f"{len(once)} artefacts: {', '.join(sorted(once))}",
+    )
+
+    # ---- configuration is refused, not silently ignored ----
+    from publisher import targets as _t
+
+    refused_target = ""
+    try:
+        _t.configured({"DAS_DASHBOARD_TARGETS": "powerbi,tableau"}, state)
+    except LookupError as e:
+        refused_target = str(e)
+    check(
+        "phase16",
+        "a target nobody built is refused at startup, not silently skipped",
+        "tableau" in refused_target and "no target is built" in refused_target,
+        refused_target[:110] or "an unknown target was accepted",
+    )
+
+    # ---- the job, as the scheduler actually invokes it ----
+    # Everything above calls publish() directly. This runs `python -m
+    # publisher.run` the way cron would, against the same stack, from a
+    # candidate file this witness writes -- so the CLI's own argument
+    # handling, target resolution and exit code are covered by something
+    # other than a monkeypatched unit test.
+    import subprocess
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cand_path = pathlib.Path(tmp) / "candidates.json"
+        cand_path.write_text(json.dumps({"released": [candidate]}))
+        cli = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "publisher.run",
+                "--user",
+                "erin@entraemulator.dev",
+                "--candidates",
+                str(cand_path),
+                "--json",
+            ],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    check(
+        "phase16",
+        "`python -m publisher.run` publishes end to end, as a scheduled job would",
+        cli.returncode == 0 and '"agrees": true' in cli.stdout,
+        (cli.stdout or cli.stderr).strip().splitlines()[-1][:110]
+        if (cli.stdout or cli.stderr)
+        else f"exit {cli.returncode}",
+    )
+
     assert report.visual_type(tuple(candidate["dimensions"])) in {"card", "barChart", "tableEx"}
 
 

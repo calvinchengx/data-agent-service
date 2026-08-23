@@ -138,6 +138,15 @@ def record_lineage(
 
     `owner` matters most where the target's `authz_tier` is `service`: the
     tool did not record who asked, so the catalog has to.
+
+    It goes in the DESCRIPTION, which is prose, and that is a compromise
+    rather than a design. OpenMetadata's structured place for this is
+    `owners`, an EntityReference to a user it knows -- and the personas are
+    Entra identities, not OM users, so there is nothing to reference yet.
+    Provisioning them is 19b's, because that is where a `service` tier target
+    makes the catalog the ONLY record of who asked. Note also that OM
+    HTML-escapes what it stores here (`@` comes back as `&#64;`), so anything
+    reading it back must compare against the escaped form.
     """
     from seed.govern import om
 

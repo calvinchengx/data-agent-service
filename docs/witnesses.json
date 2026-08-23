@@ -1,6 +1,6 @@
 {
-  "passed": 129,
-  "total": 129,
+  "passed": 135,
+  "total": 135,
   "phases": {
     "phase1": {
       "passed": 2,
@@ -31,8 +31,8 @@
       "total": 13
     },
     "phase16": {
-      "passed": 10,
-      "total": 10
+      "passed": 16,
+      "total": 16
     },
     "phase17": {
       "passed": 10,

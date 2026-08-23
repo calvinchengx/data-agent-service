@@ -116,6 +116,71 @@ CASES: list[dict[str, Any]] = [
 ]
 
 
+# Binding decisions, including the ones that must FAIL. The artefacts record
+# what each target produces; these record what `table_of` decides before there
+# are any artefacts at all -- and a divergence there shows up as one generator
+# refusing a candidate the other publishes, which no byte comparison can
+# catch. The message is recorded too, because a refusal a person cannot read
+# is barely better than a wrong answer. Same discipline as
+# services/contract/guard_corpus.json, which records denials beside permits.
+BINDINGS: list[dict[str, Any]] = [
+    {
+        "why": "the ordinary case: one table owns it",
+        "column": "amount",
+        "tables": ["a.orders"],
+        "owned": {"a.orders": ["amount", "id"]},
+    },
+    {
+        "why": "a self-join reads one table under two aliases and is NOT ambiguous",
+        "column": "amount",
+        "tables": ["a.orders", "a.orders"],
+        "owned": {"a.orders": ["amount"]},
+    },
+    {
+        "why": "two different tables owning it is a genuine ambiguity and must refuse",
+        "column": "amount",
+        "tables": ["a.orders", "a.refunds"],
+        "owned": {"a.orders": ["amount"], "a.refunds": ["amount"]},
+    },
+    {
+        "why": "a column no table has must refuse, naming the tables ONCE",
+        "column": "nope",
+        "tables": ["a.orders", "a.orders"],
+        "owned": {"a.orders": ["amount"]},
+    },
+    {
+        "why": "the qualifier is stripped: template aliases mean nothing outside the template",
+        "column": "t0.amount",
+        "tables": ["a.orders"],
+        "owned": {"a.orders": ["amount"]},
+    },
+    {
+        "why": "a table in the list with no columns known contributes no ownership",
+        "column": "amount",
+        "tables": ["a.orders", "a.unknown"],
+        "owned": {"a.orders": ["amount"]},
+    },
+]
+
+
+def bindings() -> list[dict]:
+    out = []
+    for case in BINDINGS:
+        record: dict[str, Any] = {k: case[k] for k in ("why", "column", "tables", "owned")}
+        try:
+            record["table"] = _plan.table_of(
+                case["column"],
+                tuple(case["tables"]),
+                {t: tuple(cols) for t, cols in case["owned"].items()},
+            )
+            record["refused"] = None
+        except _plan.Unsupported as e:
+            record["table"] = None
+            record["refused"] = str(e)
+        out.append(record)
+    return out
+
+
 def canonical(obj) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
@@ -140,9 +205,13 @@ def record() -> dict:
                 },
             }
         )
-    return {"settings": {"workspace": WORKSPACE, "warehouse": WAREHOUSE}, "cases": cases}
+    return {
+        "settings": {"workspace": WORKSPACE, "warehouse": WAREHOUSE},
+        "cases": cases,
+        "bindings": bindings(),
+    }
 
 
 if __name__ == "__main__":
     OUT.write_text(json.dumps(record(), indent=2, sort_keys=True) + "\n")
-    print(f"recorded {len(CASES)} cases to {OUT.relative_to(ROOT)}")
+    print(f"recorded {len(CASES)} cases and {len(BINDINGS)} bindings to {OUT.relative_to(ROOT)}")

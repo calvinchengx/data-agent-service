@@ -55,6 +55,27 @@ def on_behalf_of(user_token: str, audience: str, who: str) -> str:
     )
 
 
+def _status(body: str) -> str:
+    """The operation's status, or empty when the body does not carry one.
+
+    An empty body was already handled; a JSON SCALAR was not. `null`, a number
+    or a quoted error string all parse successfully and then have no `.get`,
+    so reading the status straight off `json.loads` turned a strange reply from
+    a proxy into an AttributeError three frames from anything that names the
+    operation. Anything that is not an object simply has no status yet, and
+    the poll's own timeout is what reports the failure.
+    """
+    if not body.strip():
+        return ""
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        return ""
+    if not isinstance(parsed, dict):
+        return ""
+    return (parsed.get("status") or "").lower()
+
+
 def post_wait(path: str, body: dict, token: str, what: str = "") -> dict:
     """POST that may be a long-running operation, polled to its result.
 
@@ -74,7 +95,7 @@ def post_wait(path: str, body: dict, token: str, what: str = "") -> dict:
         raise RuntimeError(f"{what or path}: 202 with no operation to poll")
     for _ in range(60):
         st, _h, got = c.http("GET", f"{FABRIC}/v1/operations/{operation}", headers=headers)
-        state = (json.loads(got).get("status") or "").lower() if got.strip() else ""
+        state = _status(got)
         if state == "succeeded":
             break
         if state == "failed":

@@ -184,3 +184,107 @@ def test_the_generator_runs_with_no_credentials_in_the_environment():
     )
     assert proc.returncode == 0, proc.stderr[-800:]
     assert proc.stdout.strip() == str(len(CASES["cases"]))
+
+
+def test_the_older_call_shape_still_resolves_through_the_module_global():
+    """`model.table_of` and `model.measures_for` read `COLUMNS_BY_TABLE`
+    rather than taking columns as an argument. `plan.build` passes them
+    explicitly, but the older shape is still what `e2e/run.py` and the model
+    tests use, and a delegate nothing exercises is a delegate free to rot."""
+    from publisher import model
+
+    model.COLUMNS_BY_TABLE = {"dbo.fct_sales": ("revenue_usd", "country")}
+    try:
+        assert model.table_of("t0.country", ("dbo.fct_sales",)) == "dbo.fct_sales"
+        [m] = model.measures_for(("sum(t0.revenue_usd)",), ("dbo.fct_sales",), {})
+        # The subclass, so it carries the DAX spelling the Plan's Measure does not.
+        assert isinstance(m, model.Measure)
+        assert m.expression == "SUM('fct_sales'[revenue_usd])"
+        with pytest.raises(_plan.Unsupported, match="no table"):
+            model.table_of("t0.nope", ("dbo.fct_sales",))
+    finally:
+        model.COLUMNS_BY_TABLE = {}
+
+
+def test_running_the_generator_as_a_script_rewrites_the_file_byte_for_byte():
+    """This is the exact command CI runs before diffing. If the script's write
+    path disagreed with `record()` -- a different indent, a missing trailing
+    newline, unsorted keys -- CI would fail on formatting forever while every
+    unit test here passed, because they compare objects and CI compares
+    bytes."""
+    import subprocess
+
+    before = (CONTRACT / "cases.json").read_bytes()
+    proc = subprocess.run(
+        [sys.executable, str(CONTRACT / "gen_cases.py")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    after = (CONTRACT / "cases.json").read_bytes()
+    assert proc.returncode == 0, proc.stderr[-500:]
+    assert f"recorded {len(CASES['cases'])} cases" in proc.stdout
+    assert after == before, "the script's own write path disagrees with record()"
+    assert after.endswith(b"\n"), "a file CI diffs must end with a newline"
+
+
+def test_a_self_join_is_not_ambiguous_with_itself():
+    """Found by the Go fuzzer (`FuzzTableOfNeverGuesses`) within a second of
+    it existing, and fixed in both languages together. A self-join reads ONE
+    table under two aliases; counting the alias twice refused the column as
+    "ambiguous across ['dbo.a', 'dbo.a']" -- ambiguous with itself.
+
+    Nothing was broken in practice, because the promoter's canonicaliser
+    deduplicates before this is reached. That is exactly why it is worth
+    fixing: the function depended on a caller's behaviour it never stated, and
+    `Plan.from_dict` reads `tables` out of JSON where nothing enforces it."""
+    owned = {"dbo.a": ("amount",)}
+    assert _plan.table_of("amount", ("dbo.a", "dbo.a"), owned) == "dbo.a"
+    with pytest.raises(_plan.Unsupported) as e:
+        _plan.table_of("nope", ("dbo.a", "dbo.a"), owned)
+    assert "['dbo.a']" in str(e.value), "the message repeats the table"
+
+
+def test_the_dedup_did_not_weaken_the_rule_it_exists_to_enforce():
+    owned = {"a.orders": ("amount",), "a.refunds": ("amount",)}
+    with pytest.raises(_plan.Unsupported, match="ambiguous"):
+        _plan.table_of("amount", ("a.orders", "a.refunds", "a.orders"), owned)
+
+
+def test_the_schema_forbids_a_repeated_table():
+    """The fix above makes a repeated table harmless; the schema says it is
+    not expected, so a generator in a third language does not have to
+    rediscover the rule from a failing diff."""
+    bad = dict(CASES["cases"][0]["plan"])
+    bad["tables"] = bad["tables"] + bad["tables"]
+    with pytest.raises(jsonschema.ValidationError, match=r"non-unique|unique"):
+        jsonschema.validate(bad, SCHEMA)
+
+
+@pytest.mark.parametrize("binding", CASES["bindings"], ids=lambda b: b["why"][:40])
+def test_every_recorded_binding_is_what_the_code_decides_now(binding):
+    """The artefacts record what each target PRODUCES; the bindings record
+    what `table_of` decides before there are any artefacts at all. A
+    divergence there shows up as one generator refusing a candidate the other
+    publishes, which no comparison of bytes can catch -- there are no bytes.
+
+    It earned its keep on the first run: the Go `TableOf` did not strip a
+    template alias and the Python did."""
+    owned = {t: tuple(cols) for t, cols in binding["owned"].items()}
+    if binding["refused"] is None:
+        assert (
+            _plan.table_of(binding["column"], tuple(binding["tables"]), owned) == binding["table"]
+        )
+    else:
+        with pytest.raises(_plan.Unsupported) as e:
+            _plan.table_of(binding["column"], tuple(binding["tables"]), owned)
+        assert str(e.value) == binding["refused"]
+
+
+def test_the_bindings_record_both_outcomes():
+    """A corpus of only-permits would pass against a function that never
+    refuses anything, which is precisely the failure `table_of` exists to
+    prevent."""
+    outcomes = {b["refused"] is None for b in CASES["bindings"]}
+    assert outcomes == {True, False}, "the bindings record only one kind of outcome"

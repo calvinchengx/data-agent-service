@@ -1,4 +1,98 @@
 {
+  "bindings": [
+    {
+      "column": "amount",
+      "owned": {
+        "a.orders": [
+          "amount",
+          "id"
+        ]
+      },
+      "refused": null,
+      "table": "a.orders",
+      "tables": [
+        "a.orders"
+      ],
+      "why": "the ordinary case: one table owns it"
+    },
+    {
+      "column": "amount",
+      "owned": {
+        "a.orders": [
+          "amount"
+        ]
+      },
+      "refused": null,
+      "table": "a.orders",
+      "tables": [
+        "a.orders",
+        "a.orders"
+      ],
+      "why": "a self-join reads one table under two aliases and is NOT ambiguous"
+    },
+    {
+      "column": "amount",
+      "owned": {
+        "a.orders": [
+          "amount"
+        ],
+        "a.refunds": [
+          "amount"
+        ]
+      },
+      "refused": "'amount' is ambiguous across ['a.orders', 'a.refunds']; cannot bind it to one table",
+      "table": null,
+      "tables": [
+        "a.orders",
+        "a.refunds"
+      ],
+      "why": "two different tables owning it is a genuine ambiguity and must refuse"
+    },
+    {
+      "column": "nope",
+      "owned": {
+        "a.orders": [
+          "amount"
+        ]
+      },
+      "refused": "no table in ['a.orders'] has a column 'nope'",
+      "table": null,
+      "tables": [
+        "a.orders",
+        "a.orders"
+      ],
+      "why": "a column no table has must refuse, naming the tables ONCE"
+    },
+    {
+      "column": "t0.amount",
+      "owned": {
+        "a.orders": [
+          "amount"
+        ]
+      },
+      "refused": null,
+      "table": "a.orders",
+      "tables": [
+        "a.orders"
+      ],
+      "why": "the qualifier is stripped: template aliases mean nothing outside the template"
+    },
+    {
+      "column": "amount",
+      "owned": {
+        "a.orders": [
+          "amount"
+        ]
+      },
+      "refused": null,
+      "table": "a.orders",
+      "tables": [
+        "a.orders",
+        "a.unknown"
+      ],
+      "why": "a table in the list with no columns known contributes no ownership"
+    }
+  ],
   "cases": [
     {
       "candidate": {

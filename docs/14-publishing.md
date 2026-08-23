@@ -161,9 +161,35 @@ uv run python publisher/contract/gen_cases.py   # re-record
 make publisher-contract                          # regenerate, diff, hold Go to the bytes
 ```
 
-`publisher/contract/cases.json` records, for each case, the candidate, the
-executor's column lists, the `Plan` built from them, and every artefact each
-target emits — canonically serialised, so two generators either match to the
-byte or name the line they disagree on. CI regenerates and diffs it, so the
-file cannot drift from the Python it describes; the same discipline as
-`services/contract/guard_corpus.json`.
+`publisher/contract/cases.json` records two things.
+
+**Cases** — for each candidate, the executor's column lists, the `Plan` built
+from them, and every artefact each target emits, canonically serialised, so
+two generators either match to the byte or name the line they disagree on.
+
+**Bindings** — what `table_of` decides *before* there are any artefacts:
+which table a column belongs to, or the exact message explaining why it cannot
+be decided. Refusals are recorded beside successes, because a corpus of only
+successes passes against a function that never refuses anything, which is
+precisely what `table_of` exists to prevent. A divergence here surfaces as one
+generator refusing a candidate the other publishes — which no comparison of
+artefact bytes can catch, since there are no bytes.
+
+CI regenerates and diffs both, so the file cannot drift from the Python it
+describes; the same discipline as `services/contract/guard_corpus.json`.
+
+### What the contract has caught
+
+Every one of these was found by the machinery rather than by reading:
+
+| Found by | What |
+|---|---|
+| the first contract run | Go's `Canonical` kept struct field order while sorting map keys — one value canonicalising two ways depending on how the caller declared it |
+| `FuzzTableOfNeverGuesses` | a self-join was refused as "ambiguous across `['dbo.a', 'dbo.a']`" — ambiguous with itself. Unreachable today only because the promoter's canonicaliser deduplicates first, which the function never said it relied on |
+| the first **bindings** run | Go's `TableOf` did not strip a `t0.` alias where the Python did. The artefacts matched anyway, because `DAX()` happens to pass already-bare columns — a divergence waiting for the first caller that used it differently |
+| a stripped-environment test | the generator imported `publisher/fabric.py`, which built a `Credential` at import, so the *pure* half needed a live identity. CI would have failed on a missing secret rather than on a byte difference |
+
+The properties are cheap and worth more than the cases. `Canonical` must be a
+fixed point over its own output; `TableOf` must bind a column only when
+exactly one *distinct* table owns it. Both are about forty lines and both
+found something the same day they were written.

@@ -492,6 +492,15 @@ access rules already narrowed; and the asking user is recorded as owner on the
 catalog entity. It is not per-user, and the docs say so rather than implying
 an on-behalf-of hop that does not exist.
 
+Today that owner goes in the catalog entity's **description**, which is prose
+and therefore the wrong home for a fact. OpenMetadata's structured field is
+`owners`, an EntityReference to a user it knows — and the personas are Entra
+identities OM has never seen; only the role bots exist as OM users. 19b
+provisions them, because that is the phase where a `service` tier target makes
+the catalog the *only* place the asker is recorded at all. Until then, note
+that OM HTML-escapes description text: `@` is stored as `&#64;`, so anything
+reading it back must compare against the escaped form.
+
 ### Why the publisher is Python, and why there is a Go one anyway
 
 The executor and the publisher are different kinds of thing. The executor is
@@ -521,7 +530,7 @@ second implementation with nothing to disagree about.
 | | Deliverable | Exit test |
 |---|---|---|
 | 19a | `DashboardTarget`, `Plan`, `PowerBITarget` extracted; `DAS_DASHBOARD_TARGETS`; `plan.schema.json`; Go generator + golden conformance | phase-16 witnesses pass unchanged; a `postgres` candidate reports *why* no target accepts it; Go and Python goldens byte-equal |
-| 19b | `superset` in compose; service credential as a `keyvault:` reference; `SupersetTarget` against `postgres` | a candidate the witness itself creates → dataset, chart, dashboard exist; `chart/data` agrees with the executor; OM dashboard with lineage to the postgres table, owner = asking user |
+| 19b | `superset` in compose; service credential as a `keyvault:` reference; **personas provisioned as OM users so `owners` can reference them**; `SupersetTarget` against `postgres` | a candidate the witness itself creates → dataset, chart, dashboard exist; `chart/data` agrees with the executor; OM dashboard with lineage to the postgres table, owner = asking user |
 | 19c | Superset against the Fabric warehouse (derived image with the ODBC driver) | same witness, warehouse source |
 | 19d | Cube spike | a go/no-go note here: the schema channel (job and service share no disk) and the catalog entity type |
 | 19e | `TableauTarget` — `.twb` with a live connection, VizQL Data Service to evaluate | `parity.md` hosted row; nothing in CI |

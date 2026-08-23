@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -88,9 +89,36 @@ func (p Plan) ColumnNames() map[string][]string {
 
 // TableOf is plan.table_of: the one table among those the template read that
 // owns the column, or an error -- never a guess.
-func TableOf(column string, tables []string, owned map[string][]string) (string, error) {
-	var owners []string
+// qualifier is publisher/plan.py's QUALIFIER: a leading `t0.` alias, which
+// means nothing outside the template that produced it.
+var qualifier = regexp.MustCompile(`^[a-z0-9_]+\.`)
+
+// Bare strips a template alias from a column reference. The Python does this
+// inside table_of; the Go did not, so a qualified column the Python bound
+// happily was refused here. The artefact comparison never saw it because
+// DAX() passes columns that are already bare -- a divergence in an exported
+// function that only a caller yet to be written would have found. This is
+// what recording BINDINGS rather than only artefacts is for.
+func Bare(column string) string {
+	return strings.TrimSpace(qualifier.ReplaceAllString(strings.TrimSpace(column), ""))
+}
+
+func TableOf(qualified string, tables []string, owned map[string][]string) (string, error) {
+	column := Bare(qualified)
+	// DISTINCT tables, not positions. A self-join reads one table under two
+	// aliases, and counting the alias twice would refuse a column as
+	// "ambiguous across [dbo.a dbo.a]" -- ambiguous with itself, which is both
+	// wrong and unreadable. Found by FuzzTableOfNeverGuesses; the promoter's
+	// canonicaliser deduplicates before this is reached, so nothing was
+	// broken, but relying on that is a dependency this function never stated.
+	var owners, distinct []string
+	seen := map[string]bool{}
 	for _, t := range tables {
+		if seen[t] {
+			continue
+		}
+		seen[t] = true
+		distinct = append(distinct, t)
 		for _, c := range owned[t] {
 			if c == column {
 				owners = append(owners, t)
@@ -102,9 +130,38 @@ func TableOf(column string, tables []string, owned map[string][]string) (string,
 	case 1:
 		return owners[0], nil
 	case 0:
-		return "", fmt.Errorf("no table in %v has a column %q", tables, column)
+		return "", fmt.Errorf("no table in %s has a column %s", pyList(distinct), pyRepr(column))
 	}
-	return "", fmt.Errorf("%q is ambiguous across %v; cannot bind it to one table", column, owners)
+	return "", fmt.Errorf("%s is ambiguous across %s; cannot bind it to one table",
+		pyRepr(column), pyList(owners))
+}
+
+// pyRepr and pyList spell a string and a list of strings the way Python's
+// repr does. Not decoration: the contract records the Python's refusal
+// MESSAGES and holds this generator to them, for the reason the executor's
+// guard corpus exists -- the Go guard there once refused a statement with a
+// message the Python guard has never produced, and nothing caught it because
+// only the verdict was compared. A person reading either implementation's
+// refusal should see the same words.
+//
+// Identifiers are the only thing that reaches this, so the escaping covers
+// what Python's repr does for them: single quotes unless the value contains
+// one, and backslashes escaped.
+func pyRepr(s string) string {
+	if strings.Contains(s, "'") && !strings.Contains(s, `"`) {
+		return `"` + strings.ReplaceAll(s, `\`, `\\`) + `"`
+	}
+	esc := strings.ReplaceAll(s, `\`, `\\`)
+	esc = strings.ReplaceAll(esc, "'", `\'`)
+	return "'" + esc + "'"
+}
+
+func pyList(items []string) string {
+	parts := make([]string, 0, len(items))
+	for _, i := range items {
+		parts = append(parts, pyRepr(i))
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 // Canonical is the contract's JSON form: sorted keys, no whitespace, ASCII
@@ -126,6 +183,12 @@ func Canonical(v any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The two errors below are structurally unreachable and deliberately
+	// still checked: `raw` came from json.Marshal so it always parses, and
+	// `normalised` is a parsed JSON value so it always encodes. They are the
+	// only lines in this package with no test, and writing one that forced
+	// them would mean weakening the code to make it reachable. Named here so
+	// the next person does not spend an afternoon on it.
 	var normalised any
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber() // so 1604 does not come back as 1.604e+03

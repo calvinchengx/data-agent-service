@@ -157,12 +157,22 @@ def table_of(qualified: str, tables: tuple[str, ...], columns: Mapping[str, Sequ
     produces a model that answers, which is the failure nobody notices.
     """
     name = bare(qualified)
-    owners = [t for t in tables if name in columns.get(t, ())]
-    if len(owners) == 1:
-        return owners[0]
-    if not owners:
-        raise Unsupported(f"no table in {list(tables)} has a column {name!r}")
-    raise Unsupported(f"{name!r} is ambiguous across {owners}; cannot bind it to one table")
+    # DISTINCT tables, not positions. A self-join reads one table under two
+    # aliases, and counting the alias twice would refuse a column as
+    # "ambiguous across ['dbo.a', 'dbo.a']" -- ambiguous with itself, which is
+    # both wrong and unreadable. The promoter's canonicaliser happens to
+    # deduplicate before this is reached, so nothing was broken; relying on
+    # that is a dependency this function never stated, and `Plan.from_dict`
+    # reads `tables` straight out of JSON where nothing enforces it.
+    seen: list[str] = []
+    for table in tables:
+        if table not in seen and name in columns.get(table, ()):
+            seen.append(table)
+    if len(seen) == 1:
+        return seen[0]
+    if not seen:
+        raise Unsupported(f"no table in {list(dict.fromkeys(tables))} has a column {name!r}")
+    raise Unsupported(f"{name!r} is ambiguous across {seen}; cannot bind it to one table")
 
 
 def measures_for(
