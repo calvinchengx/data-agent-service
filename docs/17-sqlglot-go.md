@@ -116,53 +116,55 @@ build), none of which is port work.
 
 ### Tier 1.5 — properties over the grammar already ported
 
-**The next tier is not more grammar.** Nothing the service is held to is
-unparsed — 105/105, 29/29, 13/13, zero in every category — and no statement in
-sqlglot's own 2,171 is parsed into a *different* tree. On those two numbers
-Tier 2 looks like the obvious next step, and it is not.
+**Done, and it found six bugs.** The tier existed because the risk was depth
+rather than breadth: nothing the service is held to was unparsed, no statement
+in sqlglot's 2,171 parsed into a different tree, and yet feeding the
+generator's output back through the parser found real bugs in minutes, all
+inside grammar the port already handled.
 
-In fifteen minutes, feeding the generator's output back through the parser
-found **three real bugs**, every one inside grammar the port already handles:
+What it found, in order of consequence:
 
-* a quote inside a Databricks string written as `''''`, which Databricks reads
-  as two adjacent empty strings concatenated — a silently different value;
-* `TOP` with a non-literal count written without the parentheses T-SQL
-  requires, producing SQL neither the reference nor the port can read;
-* `parseTop` accepting only a bare number, so the port could not read back the
-  `TOP (A)` it writes for a `LIMIT A` it had just parsed.
+* **`x IS NOT NULL` has two shapes.** PostgreSQL records the negation on the
+  `Is` node; every other dialect wraps in a `Not` and writes `NOT x IS NULL`.
+  The port used PostgreSQL's everywhere, so the Go guard and the Python guard
+  saw **different trees for a predicate in almost every real query**.
+  Semantically identical, and exactly the divergence this port exists to
+  prevent. sqlglot has no flag for it, so the rule is probed from the
+  reference rather than transcribed.
+* **`IS [NOT] DISTINCT FROM` was unparseable in every dialect** while the
+  generator emitted it for Databricks' `<=>`. Standard SQL, simply missing.
+* **A quote inside a Databricks string was doubled**, where Databricks escapes
+  with a backslash and reads `''''` as two adjacent empty strings concatenated
+  — a silently different value.
+* **`TOP` with a non-literal count lost its parentheses**, and `parseTop`
+  refused the `TOP (A)` the generator wrote for a `LIMIT A` it had just parsed.
+* **`~ *` was written `~*`**, which lexes back as a single operator. The rule
+  is now put to the tokenizer rather than compared character by character.
+* **A class that is an operator in one dialect and a function in another**
+  could reach the binary writer with no left-hand side, producing
+  `SELECT * FROM main. GLOB '/**'` — not SQL at all.
 
-None was visible to any of the three verification methods below, and the reason
-generalises: **all three are corpus comparisons.** They compare the port to the
-reference over a fixed set of statements, so they find a bug only where some
-fixture already exercises the construct. The risk left in this port is depth,
-not breadth, and depth is bought with properties rather than with fixtures.
+Two existing tests asserted the port's own behaviour rather than the
+reference's, and passed while the two disagreed.
 
-The work, roughly a week:
+**The machinery, which is the part that outlives the bugs.** A fuzzer cannot
+call the oracle — a Python round trip per input is four orders of magnitude too
+slow at 130k executions a second — so the fuzz targets can only assert
+properties that hold INDEPENDENTLY of sqlglot. That is a real limit: three
+findings turned out to be the reference behaving identically, and a property
+stronger than the oracle's reports the reference's behaviour as the port's bug.
 
-1. **Operator adjacency, then the read-back fuzz into CI.** `~ *` is written
-   `~*` and lexes back as one token. `unary` already spaces `- -5`, but only
-   when the operand begins with the operator's own last character; the rule it
-   wants is "space it when joining would form a longer token", which needs the
-   keyword trie rather than a character comparison. With that fixed,
-   `FuzzGeneratedSQLCanBeReadBack` can run in CI beside the panic target.
+So the two speeds are decoupled. The fuzzer collects failures with the port's
+own error attached; `harness/adjudicate.py` asks the reference about each and
+groups by cause; only a **YOURS** verdict — the reference handles it, the port
+does not — fails the build. The first run judged 97,657 candidates in 24
+seconds and collapsed 96,096 of them to one cause with a nine-character
+reproducer. It now finds none, and runs in CI beside the pinned-oracle check.
 
-2. **Batched differential fuzzing** — the one that changes what is findable.
-   A fuzzer cannot call the Python oracle: at 130k executions a second, a
-   round trip per input is four orders of magnitude too slow. So the targets
-   written so far can only assert properties that hold *independently of the
-   reference*, and that cost two candidate properties outright — tree
-   round-trip stability and join-without-`FROM` both turned out to be things
-   sqlglot itself does not guarantee, so asserting them reported the
-   reference's behaviour as the port's bug.
-
-   Decoupling the two speeds gives the oracle back. Fuzz in Go to COLLECT
-   interesting inputs; then batch the corpus through the oracle offline, diff
-   the trees, and promote any divergence into the permanent fixture corpus.
-   `testdata/fuzz` stops being a pile of crash inputs and becomes a differential
-   corpus that grows itself.
-
-3. **Seed the fuzz corpus from the service corpus.** Real statements find
-   realistic neighbours; `((((` does not.
+`make fuzz` runs it by hand. Findings worth keeping are promoted into
+`EDGE_CORPUS`, where the differential holds the port to them from then on —
+which is how the `IS NOT NULL` divergence was found, the statement not being
+in any of the 2,171 fixtures.
 
 ### What Tier 2 gets built from
 
@@ -289,8 +291,8 @@ writing them.
 | Tier | Size | Time | Starts when |
 |---|---|---|---|
 | 1 — guard's needs, executor switched | ~6,000–8,000 lines | 3–4 weeks | **done** |
-| 1.5 — properties over what is ported | ~400 | ~1 week | **now** |
-| 2 — full SELECT for four dialects | ~6,000 more | 3–4 weeks | the refusal counts name a construct |
+| 1.5 — properties over what is ported | ~600 | done, in a day | **done** — six bugs |
+| 2 — full SELECT for four dialects | ~6,000 more | 3–4 weeks | **the refusal counts name a construct** |
 | differential harness (built first, used throughout) | ~800 | 3 days | done |
 
 Tier 1 first, with the harness before any parser code — so the first parser
