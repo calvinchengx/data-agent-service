@@ -36,6 +36,13 @@ jobs:
       - run: uv run pytest tests -q
       - run: sh scripts/check-discipline.sh
       - run: uv run python -m scripts.check_prod_paths --strict
+      # The tagged commit must describe itself: `uv version` writes the
+      # number, this proves it was written. Setting it during the build
+      # instead would leave main saying the old one, and committing it back
+      # from CI would put the truth on a commit the tag does not point at.
+      - name: pyproject.toml claims the tag being released
+        if: github.ref_type == 'tag'
+        run: uv run python -m scripts.check_version --release "${{ github.ref_name }}"
 
   go:
     name: Go executor tests

@@ -23,7 +23,7 @@ endif
 
 PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
-.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance conformance-one client-config ask docs coverage coverage-python coverage-go coverage-manifest witnesses-manifest witnesses-check unit guard-corpus
+.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance conformance-one client-config ask docs coverage coverage-python coverage-go coverage-manifest release-version witnesses-manifest witnesses-check unit guard-corpus
 
 help: ## Show the available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -174,6 +174,16 @@ secrets: ## Scan the working tree AND the history for committed secrets
 vulns: ## Reachable vulnerabilities in the Go executor (govulncheck)
 	docker run --rm -v "$(PWD):/src" -w /src/services/warehouse-query-go $(GO_IMAGE) \
 		sh -c 'go run golang.org/x/vuln/cmd/govulncheck@latest ./...'
+
+release-version: ## Set the project version, then commit and tag it (V=0.1.2)
+	@test -n "$(V)" || { echo "usage: make release-version V=0.1.2"; exit 1; }
+	uv version --frozen "$(V)"
+	@echo
+	@echo "Now, in one commit, then tag THAT commit:"
+	@echo "    git commit -m 'Release v$(V)' -- pyproject.toml uv.lock"
+	@echo "    git tag -a v$(V) -m 'v$(V)' && git push origin main v$(V)"
+	@echo
+	@echo "The release refuses to publish if the tag and pyproject disagree."
 
 witnesses-manifest: ## Record this run's witness counts into docs/witnesses.json
 	$(TOOLS) python -m e2e.run --write-manifest $(ARGS)

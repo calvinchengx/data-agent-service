@@ -31,6 +31,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 # Anything a reader could copy and run. Both surfaces publish these.
@@ -38,6 +39,39 @@ TARGETS = ("docs/18-releases.md", "site/index.html", "README.md")
 PULL = re.compile(
     r"(docker pull ghcr\.io/calvinchengx/data-agent-service/executor-(?:go|py):)(\d+\.\d+\.\d+)"
 )
+PYPROJECT = ROOT / "pyproject.toml"
+
+
+def project_version() -> str:
+    return str(tomllib.loads(PYPROJECT.read_text())["project"]["version"])
+
+
+def gate(tag: str) -> int:
+    """Refuse to publish a tag the project does not claim.
+
+    `uv version` writes the number and this proves it was written, so the
+    TAGGED COMMIT describes itself. The alternative -- setting the version
+    during the release build -- leaves `main` still saying the old one, which
+    is the drift rather than a fix for it. The alternative after that --
+    committing the bump back from CI -- puts the truth on a commit the tag
+    does not point at.
+    """
+    want = tag[1:] if tag.startswith("v") else tag
+    if not re.fullmatch(r"\d+\.\d+\.\d+", want):
+        print(f"FAIL: {tag!r} is not a vMAJOR.MINOR.PATCH tag.")
+        return 1
+    have = project_version()
+    if have == want:
+        print(f"pyproject.toml claims {have}, which is the tag being released")
+        return 0
+    print(
+        f"FAIL: releasing {tag}, but pyproject.toml says {have}.\n"
+        f"\n"
+        f"The tagged commit must describe itself. Run:\n"
+        f"    uv version --frozen {want}\n"
+        f"then commit, delete and re-cut the tag on that commit."
+    )
+    return 1
 
 
 def released() -> str | None:
@@ -66,7 +100,15 @@ def released() -> str | None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--fix", action="store_true", help="rewrite the pull commands in place")
+    ap.add_argument(
+        "--release",
+        metavar="TAG",
+        help="gate mode: fail unless pyproject.toml's version is this tag's version",
+    )
     args = ap.parse_args()
+
+    if args.release:
+        return gate(args.release)
 
     version = released()
     if version is None:

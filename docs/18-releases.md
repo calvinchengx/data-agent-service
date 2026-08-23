@@ -38,21 +38,40 @@ rather than mis-routing it.
 ## Cutting a release
 
 ```sh
-git tag -a vX.Y.Z -m "…"
-git push origin vX.Y.Z
+make release-version V=X.Y.Z          # uv version writes it into pyproject.toml
+git commit -m "Release vX.Y.Z" -- pyproject.toml uv.lock
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin main vX.Y.Z
 ```
 
-A placeholder deliberately: naming a real version here reads as the one to
-cut next, and it is always the one already cut. `scripts/check_version.py`
-checks the pull commands above against the newest tag for the same reason,
-and leaves this example and every historical mention alone.
+`X.Y.Z` is a placeholder deliberately: naming a real version here reads as
+the one to cut next, and it is always the one already cut.
+`scripts/check_version.py` checks the pull commands at the top of this page
+against the newest tag for the same reason, and leaves historical mentions
+of older images alone.
 
-The tag is the only place a release version is written. `pyproject.toml`
-still says `0.0.1` and should: nothing reads it, this is an application
-rather than a published package, and coupling it would add a file to bump
-to a release process that is otherwise one command. The same goes for the
-`version` in `services/contract/openapi.json` — that one moves when the API
-changes, which is a different event.
+The version is written **before** the tag so the tagged commit describes
+itself, and `release.yml` refuses to publish if the two disagree:
+
+```
+FAIL: releasing v0.2.0, but pyproject.toml says 0.1.1.
+```
+
+Two alternatives were rejected. Setting the version during the release build
+leaves `main` still stating the old one — that is the drift, not a fix for it.
+Committing the bump back from CI puts the truth on a commit the tag does not
+point at.
+
+The tag and `pyproject.toml` now agree by construction. `uv` has no native
+git-tag versioning — its own backend (`uv_build`) rejects
+`dynamic = ["version"]` outright, and SCM support is still an open request
+([astral-sh/uv#14037](https://github.com/astral-sh/uv/issues/14037)) — so
+`uv version` writes the number and a gate proves it was written. `hatch-vcs`
+would derive it instead, at the cost of making this project a built,
+installed package and yielding `0.1.2.dev0+g<sha>` between tags.
+
+The `version` in `services/contract/openapi.json` is deliberately not
+coupled: it moves when the API changes, which is a different event.
 
 `.github/workflows/release.yml` then runs the full gate again — ruff, ty,
 pytest, the discipline checks, `go vet` and `go test` — before building
