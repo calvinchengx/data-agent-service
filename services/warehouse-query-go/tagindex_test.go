@@ -376,3 +376,59 @@ func TestLoadRulesBuildsAnIndexOnlyWhenTagsAreUsed(t *testing.T) {
 		t.Fatal("a ruleset with deny_tagged built no index")
 	}
 }
+
+// ------------------------------------------ a catalog bigger than one page --
+
+func TestACatalogLargerThanOnePageIsReadToTheEnd(t *testing.T) {
+	// The bug this exists to prevent: reading page one and silently not
+	// withholding every tagged column after it.
+	pages := []string{
+		`{"data":[{"fullyQualifiedName":"svc.db.dbo.first","columns":[
+		  {"name":"email","tags":[{"tagFQN":"PII.Sensitive"}]}]}],
+		  "paging":{"after":"cursor-1","total":2}}`,
+		`{"data":[{"fullyQualifiedName":"svc.db.dbo.second","columns":[
+		  {"name":"ssn","tags":[{"tagFQN":"PII.Sensitive"}]}]}],"paging":{"total":2}}`,
+	}
+	var seen []string
+	i := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(pages[i]))
+		if i < len(pages)-1 {
+			i++
+		}
+	}))
+	defer server.Close()
+
+	index := &TagIndex{base: server.URL, token: "t", refresh: time.Hour,
+		byTag: map[string]map[string]bool{}}
+	if err := index.Refresh(); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	got, err := index.Resolve([]string{"PII.Sensitive"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(got) != 2 || got[0] != "dbo.first.email" || got[1] != "dbo.second.ssn" {
+		t.Fatalf("a page was dropped: %v", got)
+	}
+	if !strings.Contains(strings.Join(seen, " "), "after=cursor-1") {
+		t.Fatalf("the cursor was not followed: %v", seen)
+	}
+}
+
+func TestACatalogThatNeverStopsPaginatingIsRefused(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[],"paging":{"after":"always-more"}}`))
+	}))
+	defer server.Close()
+
+	index := &TagIndex{base: server.URL, token: "t", refresh: time.Hour,
+		byTag: map[string]map[string]bool{}}
+	err := index.Refresh()
+	if err == nil || !strings.Contains(err.Error(), "partial tag set") {
+		t.Fatalf("an endless catalog was accepted: %v", err)
+	}
+}

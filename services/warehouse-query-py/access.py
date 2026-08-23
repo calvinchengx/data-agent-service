@@ -44,6 +44,11 @@ import urllib.request
 from collections.abc import Callable
 
 GRAPH_AUDIENCE = "https://graph.microsoft.com"
+
+# How many tables to ask for at a time, and how many pages to follow before
+# concluding something is wrong. A large estate is normal; an endless one is not.
+PAGE_SIZE = 1000
+MAX_PAGES = 200
 LOG = logging.getLogger("warehouse-query.access")
 
 
@@ -128,16 +133,41 @@ class TagIndex:
         token = self.token()
         if not self.base or not token:
             raise TagsUnavailable("no catalog configured (DAS_OM_URL / DAS_OM_BOT_TOKEN)")
-        url = f"{self.base}/api/v1/tables?limit=1000&fields=columns,tags"
-        request = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
-        try:
-            with urllib.request.urlopen(
-                request, timeout=30, context=_ssl_context() if self.insecure else None
-            ) as response:
-                payload = json.loads(response.read().decode())
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
-            raise TagsUnavailable(f"cannot read the catalog at {self.base}: {e}") from None
-        return index_columns_by_tag(payload)
+        # FOLLOWED TO THE END, not read once. The `limit` was an arbitrary
+        # 1000 -- the API's ceiling is a million, and it returns an `after`
+        # cursor -- so a catalog with more tables than one page silently
+        # returned the first page, and every tagged column past it was
+        # silently NOT withheld. A partial read here is a security downgrade
+        # that looks exactly like a healthy service.
+        found: dict[str, set[str]] = {}
+        after, pages = "", 0
+        while True:
+            url = f"{self.base}/api/v1/tables?limit={PAGE_SIZE}&fields=columns,tags"
+            if after:
+                url += f"&after={urllib.parse.quote(after)}"
+            request = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
+            try:
+                with urllib.request.urlopen(
+                    request, timeout=30, context=_ssl_context() if self.insecure else None
+                ) as response:
+                    payload = json.loads(response.read().decode())
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+                raise TagsUnavailable(f"cannot read the catalog at {self.base}: {e}") from None
+
+            for tag_fqn, columns in index_columns_by_tag(payload).items():
+                found.setdefault(tag_fqn, set()).update(columns)
+
+            after = (payload.get("paging") or {}).get("after") or ""
+            pages += 1
+            if not after:
+                return found
+            if pages >= MAX_PAGES:
+                # Refusing beats returning most of the answer: "most of the
+                # columns that should be withheld" is not a useful guarantee.
+                raise TagsUnavailable(
+                    f"the catalog at {self.base} did not finish paginating after "
+                    f"{pages} pages of {PAGE_SIZE}; refusing a partial tag set"
+                )
 
     def refresh(self) -> None:
         found = self._fetch()

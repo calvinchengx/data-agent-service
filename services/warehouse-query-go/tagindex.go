@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	neturl "net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -54,7 +55,17 @@ func NewTagIndex() *TagIndex {
 	}
 }
 
+// How many tables to ask for at a time, and how many pages to follow before
+// concluding something is wrong. A large estate is normal; an endless one is not.
+const (
+	tagPageSize = 1000
+	tagMaxPages = 200
+)
+
 type omTables struct {
+	Paging struct {
+		After string `json:"after"`
+	} `json:"paging"`
 	Data []struct {
 		FullyQualifiedName string `json:"fullyQualifiedName"`
 		Columns            []struct {
@@ -109,12 +120,44 @@ func (t *TagIndex) fetch() (map[string]map[string]bool, error) {
 		return nil, fmt.Errorf("%w: no catalog configured (DAS_OM_URL / DAS_OM_BOT_TOKEN)",
 			ErrTagsUnavailable)
 	}
-	var payload omTables
-	url := t.base + "/api/v1/tables?limit=1000&fields=columns,tags"
-	if err := getJSON(url, token, &payload); err != nil {
-		return nil, fmt.Errorf("%w: cannot read the catalog at %s: %w", ErrTagsUnavailable, t.base, err)
+	// FOLLOWED TO THE END, not read once. The limit was an arbitrary 1000 --
+	// the API's ceiling is a million and it returns an `after` cursor -- so a
+	// catalog with more tables than one page silently returned the first page
+	// and every tagged column past it was silently NOT withheld. A partial
+	// read is a security downgrade that looks exactly like a healthy service.
+	found := map[string]map[string]bool{}
+	after, pages := "", 0
+	for {
+		url := fmt.Sprintf("%s/api/v1/tables?limit=%d&fields=columns,tags", t.base, tagPageSize)
+		if after != "" {
+			url += "&after=" + neturl.QueryEscape(after)
+		}
+		var payload omTables
+		if err := getJSON(url, token, &payload); err != nil {
+			return nil, fmt.Errorf("%w: cannot read the catalog at %s: %w",
+				ErrTagsUnavailable, t.base, err)
+		}
+		for tag, columns := range indexColumnsByTag(payload) {
+			if found[tag] == nil {
+				found[tag] = map[string]bool{}
+			}
+			for column := range columns {
+				found[tag][column] = true
+			}
+		}
+		after = payload.Paging.After
+		pages++
+		if after == "" {
+			return found, nil
+		}
+		if pages >= tagMaxPages {
+			// Refusing beats returning most of the answer: "most of the
+			// columns that should be withheld" is not a useful guarantee.
+			return nil, fmt.Errorf(
+				"%w: the catalog at %s did not finish paginating after %d pages of %d;"+
+					" refusing a partial tag set", ErrTagsUnavailable, t.base, pages, tagPageSize)
+		}
 	}
-	return indexColumnsByTag(payload), nil
 }
 
 func (t *TagIndex) Refresh() error {
