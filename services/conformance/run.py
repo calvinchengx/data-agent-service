@@ -404,30 +404,17 @@ def conform(base: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default=c.CFG.get("DAS_EXECUTOR_URL", "http://warehouse-query:8090"))
-    ap.add_argument(
-        "--expect-executor",
-        choices=("py", "go"),
-        help="refuse to run unless the stack is running this implementation",
-    )
     ap.add_argument("--name", default=None)
     a = ap.parse_args()
 
-    # Refuse rather than measure the wrong binary. "27/27, both
-    # implementations" was one implementation measured twice, and the check
-    # that would have caught it did not exist: nothing in the HTTP surface
-    # says which implementation answered, by design, since the two are meant
-    # to be indistinguishable to a client. The answer comes from the image the
-    # container was built from, which is what load.run already reads.
-    if a.expect_executor:
-        from load.run import running_executor
-
-        actual = running_executor()
-        if actual != a.expect_executor:
-            print(
-                f"refusing to run: expected the {a.expect_executor} executor, "
-                f"the stack is running {actual or 'something unrecognised'}"
-            )
-            return 1
+    # The "which implementation is this" check is NOT here, deliberately.
+    # "27/27, both implementations" was once one implementation measured
+    # twice, so the check matters -- but it reads `docker compose ps` and an
+    # image label, and this harness runs inside the tools container, which has
+    # no docker CLI and no socket. Asked from here it could only ever answer
+    # "unrecognised": a gate that refuses unconditionally while naming the
+    # wrong cause. It runs on the host instead, in `conformance-one`, between
+    # the recreate and this call.
 
     print(f"\nconformance: {a.name or a.base}")
     conform(a.base)

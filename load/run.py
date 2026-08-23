@@ -365,7 +365,31 @@ def main() -> int:
         choices=("py", "go"),
         help="refuse to measure unless the stack is running this implementation",
     )
+    # The same check with no load run behind it, for callers that only need the
+    # question answered. It lives here because `running_executor` does, and it
+    # has to run on the HOST: the answer comes from `docker compose ps` and an
+    # image label, and the tools container has neither the docker CLI nor the
+    # socket. The conformance harness asked from inside that container and got
+    # "unrecognised" every time -- a gate that could not pass, reporting the
+    # wrong cause. See `conformance-one` in the Makefile.
+    ap.add_argument(
+        "--assert-executor",
+        choices=("py", "go"),
+        help="check which implementation the stack is running, then exit; no load is generated",
+    )
     args = ap.parse_args()
+
+    if args.assert_executor:
+        actual = running_executor()
+        if actual != args.assert_executor:
+            print(
+                f"refusing to continue: expected the {args.assert_executor} executor, "
+                f"the stack is running {actual or 'an image with no executor label'}.\n"
+                f"Rebuild with DAS_EXECUTOR={args.assert_executor} first."
+            )
+            return 2
+        print(f"executor: {actual} (verified from the image label)")
+        return 0
 
     REPORTS.mkdir(exist_ok=True)
 

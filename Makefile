@@ -126,8 +126,12 @@ conformance-one: ## The contract against one implementation (DAS_EXECUTOR=py|go)
 	# when only the build arg changed, and the contract would then be measured
 	# against the implementation that was already up.
 	DAS_EXECUTOR=$(DAS_EXECUTOR) docker compose up -d --build --force-recreate --wait warehouse-query
-	$(TOOLS) python -m services.conformance.run \
-		--name "$(DAS_EXECUTOR) executor" --expect-executor $(DAS_EXECUTOR)
+	# On the HOST, not in the tools container. The answer comes from `docker
+	# compose ps` and an image label, and the tools container has neither the
+	# docker CLI nor the socket -- asking from in there returned "unrecognised"
+	# unconditionally, so the gate refused every run and named the wrong cause.
+	$(PY) -m load.run --assert-executor $(DAS_EXECUTOR)
+	$(TOOLS) python -m services.conformance.run --name "$(DAS_EXECUTOR) executor"
 
 typecheck: ## Python types only
 	$(TY) check
