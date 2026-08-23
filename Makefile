@@ -103,6 +103,7 @@ lint: ## Lint and type-check everything (never edits; use `make format` for that
 	@echo "== annotations vs bodies";   $(TOOLS) python -m scripts.check_annotations
 	@echo "== docs nav vs docs/";       python3 scripts/check_docs_nav.py
 	@echo "== pull cmds vs newest tag"; python3 -m scripts.check_version
+	@echo "== ci filter vs doc reads"; python3 scripts/check_ci_filter.py
 	@echo "== witness totals in prose"; $(TOOLS) python -m scripts.check_counts
 	@echo "== no emulator-only paths";  sh scripts/check-discipline.sh
 	@echo "== no dev-only paths";       $(TOOLS) python -m scripts.check_prod_paths --strict

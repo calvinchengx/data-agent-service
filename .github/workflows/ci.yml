@@ -22,9 +22,14 @@ on:
     # touching a guard script or any source runs them here. Neither kind of
     # change can reach main without the guards that read it having run.
     paths-ignore:
-      - 'docs/*.md'
+      # NOT 'docs/*.md' and NOT 'README.md'. The witness suite READS
+      # docs/10-production.md, docs/parity.md and README.md from disk and
+      # asserts on their contents -- the runbook's HCL example against the real
+      # Terraform variables, the ledger's rows against their Azure claims, the
+      # README's badge endpoints against what badges.py emits. Ignoring those
+      # would skip the only checks that read them. scripts/check_ci_filter.py
+      # derives that set from the code and fails if this list ever covers it.
       - 'docs/**/*.md'
-      - 'README.md'
       - 'SECURITY.md'
       - 'site/**'
       - 'website/**'
@@ -45,9 +50,14 @@ on:
     # touching a guard script or any source runs them here. Neither kind of
     # change can reach main without the guards that read it having run.
     paths-ignore:
-      - 'docs/*.md'
+      # NOT 'docs/*.md' and NOT 'README.md'. The witness suite READS
+      # docs/10-production.md, docs/parity.md and README.md from disk and
+      # asserts on their contents -- the runbook's HCL example against the real
+      # Terraform variables, the ledger's rows against their Azure claims, the
+      # README's badge endpoints against what badges.py emits. Ignoring those
+      # would skip the only checks that read them. scripts/check_ci_filter.py
+      # derives that set from the code and fails if this list ever covers it.
       - 'docs/**/*.md'
-      - 'README.md'
       - 'SECURITY.md'
       - 'site/**'
       - 'website/**'
@@ -121,6 +131,9 @@ jobs:
       - name: pull commands name the released version
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: uv run python -m scripts.check_version
+      # The filter above is only safe while it ignores nothing a check reads.
+      - name: CI's own path filter skips nothing a check reads
+        run: python3 scripts/check_ci_filter.py
       - name: python tests, with the coverage floor
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         # Same targets and floor as `make coverage-python`; run directly rather
