@@ -53,11 +53,12 @@ same check has been watched passing against a real tenant.
 > 3. Copy three values, which cannot be recovered once the page closes: the
 >    **Client ID** (beside the app name), then **Generate New Secret** for the
 >    **Secret ID** and **Secret Value**.
-> 4. Put the secret in the vault, never in `.env`:
->    `store_secret("tableau-connected-app", "<secret value>")`, and set
->    `DAS_TABLEAU_SECRET=keyvault:tableau-connected-app`. The other settings —
->    `DAS_TABLEAU_URL`, `_SITE`, `_CLIENT_ID`, `_SECRET_ID`, `_PROJECT` — are
->    already in `.env.example`, empty.
+> 4. `make tableau-setup`. It prompts for the five identifiers and writes
+>    them to `.env`, then reads the Secret Value without echoing it and stores
+>    it in Key Vault as `keyvault:tableau-connected-app`. The signing key never
+>    reaches the settings file, the shell history, or a scrollback — anyone
+>    holding it can mint a token for any user on the site. `--secret-only`
+>    rotates the key and leaves the identifiers alone.
 > 5. `make tableau-check`. It signs a connected-app token for the asking user
 >    and asks the site to accept it, reporting Tableau's own words if not.
 >

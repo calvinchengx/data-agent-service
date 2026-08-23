@@ -183,6 +183,9 @@ coverage-go: ## Go unit coverage, failing under the floor
 		printf \"go coverage: %s%%\\n\", \$$NF; \
 		if (\$$NF+0 < floor) { printf \"below the %s%% floor\\n\", floor; exit 1 }}"'
 
+tableau-setup: ## Record a Tableau connected app: ids to .env, signing key to Key Vault
+	@$(TOOLS) python -m scripts.tableau_setup $(ARGS)
+
 tableau-check: ## Does a real Tableau site accept a token we signed? (needs a tenant; not a witness)
 	$(TOOLS) python -m scripts.tableau_check $(ARGS)
 
