@@ -17,6 +17,7 @@ make eval ARGS="--tier L3"             # only the catalog-dependent questions
 | **Grounding** | the tables the executor reported must equal the expected set | catches an answer that reached the right number from the wrong place |
 | **Semantic fidelity** | the definition must appear in the SQL that ran — `fiscal_year` and not `YEAR(...)`, `revenue_usd` and not gross | prose can claim a definition the query never applied |
 | **Behaviour** | answered / abstained / reported a refusal, as the question requires | an invented answer to an unanswerable question is worse than none |
+| **Attribution** | when the answer claims a definition came from the catalog, that claim must be **true** — the arm must actually have held definitions. Silent answers score neither way | it asks about the answer's honesty rather than its content. Every fact in a description is rediscoverable by querying, so no test of what the agent *knew* can tell a catalog reader from a good guesser. What a catalog-less arm cannot have is the right to say the catalog said so |
 
 ## The tiers
 
@@ -34,6 +35,11 @@ make eval ARGS="--tier L3"             # only the catalog-dependent questions
 and once without. The L3 delta is the number that says whether the business
 semantics in OpenMetadata make the agent more accurate — if it is near zero,
 this architecture is plumbing and the report should say so.
+
+`--schema-arm` and `--floor` add two more arms, and the four together are what
+the results below are built from. **The answer is not one number**: catalog
+*existence* changes everything, catalog *prose* changes no answer but is the
+sole basis for a true citation. See [the results](#the-results-both-use-cases-l3-three-repeats).
 
 ## The gold baseline
 
@@ -345,62 +351,184 @@ probe passed `entity_type` where the tool wants `entityType`, got a 500, and
 was one step from being written up as an upstream OpenMetadata defect. Reading
 the tool's own `inputSchema` before believing an error is what caught it.
 
-### First result: support, L3, three repeats
+### The results: both use cases, L3, three repeats
 
-27 observations per arm — 9 questions × 3 repeats.
+Support is 27 observations per arm (9 questions x 3 repeats), contoso 48
+(16 x 3). Every number below is from a four-arm run whose per-question rows
+are on disk, so the paired tests are computed rather than eyeballed.
 
-| Arm | Pass | Execution | Grounding | Semantics |
-|---|---|---|---|---|
-| with catalog | 37.0% | 48.1% | **100%** | 88.9% |
-| schema only | 40.7% | 44.4% | **100%** | 96.3% |
-| without catalog | **0.0%** | 7.4% | 59.3% | 33.3% |
+Both were produced by, with the gateway's rate limit raised as described above:
 
-Two things separate cleanly, and they behave nothing alike.
+```
+sh scripts/eval-cli.sh --usecase <support|contoso> --tier L3 \
+   --ablation --schema-arm --floor --repeats 3
+```
 
-**The catalog's vocabulary and tool surface carry almost everything.** Removing
-the server takes grounding from 100% to 59.3%: the agent stops finding the
-right tables. It is not blind — the warehouse still lists tables for it — it
-simply chooses wrong among plausible ones. Execution collapses with it, and
-nothing passes.
+The report files named below are **not committed** — `evals/reports/` is
+ignored, because a scorecard is evidence for a particular commit on a
+particular day rather than a source file. They are named so a run on this
+machine can be traced to the numbers here; reproduce with the command above.
 
-**The written definitions carried nothing measurable here.** Emptying every
-description, glossary definition and metric expression cost nothing: 40.7%
-against 37.0% is one question in twenty-seven, and in the *stripped* arm's
-favour. So on this dataset the honest sentence is narrower than "the catalog
-matters":
+**support** — `evals/reports/support-claude-code-1787398205.json`
 
-> The catalog is what lets the agent find the right data. Its written
-> definitions did not change what the agent did once it got there.
+| Arm | Pass | Execution | Grounding | Semantics | Attribution |
+|---|---|---|---|---|---|
+| with catalog | 37.0% | 48.1% | **100%** | 88.9% | **100%** (22/22) |
+| schema only | 40.7% | 44.4% | **100%** | 96.3% | **0%** (0/15) |
+| without catalog | **0.0%** | 7.4% | 59.3% | 33.3% | 0% (0/1) |
+| naive floor | **0.0%** | 0.0% | 14.8% | 0.0% | 0% (0/1) |
 
-**Why that is not yet the conclusion.** Support's definitions are unusually
-guessable from column names — `resolution_minutes` beside `elapsed_minutes`
-nearly explains itself, so a capable model can pick correctly from the
-vocabulary alone. Contoso is the harder test and is queued: a fiscal year
-starting in April, gross against net, and `Unallocated` meaning "never
-published to the hierarchy" cannot be inferred from a name. If the prose earns
-nothing there either, that is a finding about catalogs. If it earns its keep
-there, the support result is a finding about *well-named schemas*.
+**contoso** — `evals/reports/contoso-claude-code-1787410755.json`
 
-*Floor arm running; contoso queued; paired statistics land with the report.*
+| Arm | Pass | Execution | Grounding | Semantics | Attribution |
+|---|---|---|---|---|---|
+| with catalog | 56.2% | 64.6% | 79.2% | 85.4% | **100%** (39/39) |
+| schema only | 58.3% | 64.6% | 83.3% | 85.4% | **0%** (0/33) |
+| without catalog | **0.0%** | 0.0% | 0.0% | 0.0% | 0% (0/6) |
+| naive floor | **0.0%** | 0.0% | 0.0% | 0.0% | 0% (0/6) |
+
+Contoso is the harder dataset and scores higher, which is worth stating plainly
+rather than explaining away: the two use cases are not a difficulty scale, and
+neither pass rate should be read as *the* accuracy of this system.
+
+### What the paired tests say
+
+Percentages between arms invite eyeballing. McNemar asks the only question that
+survives a small sample: of the questions the two arms **disagreed** about, did
+they fall one way or split evenly?
+
+**Catalog against no catalog** — every discordant pair, on every metric, on
+both use cases, falls the same way:
+
+| Comparison | support (n=9) | contoso (n=16) |
+|---|---|---|
+| pass | +3 / -0, p = 0.25 | +9 / -0, **p = 0.0039** |
+| execution | +3 / -0, p = 0.25 | +11 / -0, **p = 0.001** |
+| grounding | +4 / -0, p = 0.125 | +12 / -0, **p = 0.0005** |
+| semantics | +5 / -0, p = 0.0625 | +14 / -0, **p = 0.0001** |
+
+Eight comparisons, not one counter-example. But note what the p-values say:
+**support alone could not have established this.** Its four sweeps all point
+the same way and none reaches p < 0.05, because nine questions cannot produce
+enough discordant pairs to do so — with 5-0 the *best case* is p = 0.0625.
+Contoso's sixteen questions are what carry the significance. This is the sample
+argument from item 4 arriving in practice rather than in principle.
+
+**Full catalog against schema only** — four metrics, four nulls:
+
+| Comparison | support (n=9) | contoso (n=16) |
+|---|---|---|
+| pass | +0 / -1, p = 1.0 | +2 / -2, p = 1.0 |
+| execution | *no question differed* | +2 / -1, p = 1.0 |
+| grounding | *no question differed* | +0 / -1, p = 1.0 |
+| semantics | +0 / -1, p = 1.0 | *no question differed* |
+
+Two independent datasets, eight comparisons: the discordant pairs split evenly,
+vanish, or fall *against* the full catalog. Nothing here even hints at an
+effect too small to detect.
+
+### What this establishes, and what it does not
+
+**The catalog is load-bearing.** Removing the server does not degrade the
+agent, it collapses it: contoso goes to 0% on every metric, and grounding to
+0.0%. The failure mode is visible in the log — *answered without running a
+query*. Without a catalog the agent stops looking and starts assuming.
+
+**The prose in it does not change the answers.** Emptying every description,
+glossary definition, metric expression, unit and synonym — while keeping every
+tool, name, schema and call sequence identical — costs nothing measurable on
+either dataset. On contoso semantics, not one question out of sixteen came out
+differently.
+
+This survives the test we set for it. Support's definitions were unusually
+guessable from column names, so we queued contoso precisely because a fiscal
+year starting in April, gross against net, and `Unallocated` meaning "never
+published to the hierarchy" **cannot** be inferred from a name. The prose
+earned nothing there either. That makes it a finding about catalogs and this
+class of model, not about well-named schemas.
+
+**The prose is the whole of attribution: 100% against 0%, on both use cases.**
+Same tools, same schema, statistically indistinguishable answers — but only the
+arm holding definitions can say where one came from and be right. The
+schema-only arm made 33 provenance claims on contoso and 15 on support; every
+single one was false. It cites a glossary it cannot read.
+
+This is not a curiosity. An agent that invents its provenance is worse than one
+that cites nothing, because the citation is what a reader uses to decide
+whether to trust the number.
+
+**A secondary effect, replicated.** Prose does not change *what* the agent
+concludes, but it changes how much work that takes:
+
+| Arm | support: median tool calls | contoso |
+|---|---|---|
+| with catalog | 7 | 6 |
+| schema only | 9 | 9 |
+
+Roughly a third more calls to reach the same answer, on both datasets. Cost and
+latency, not accuracy.
+
+**The floor scores zero on both.** A competent instruction with nothing in it
+about consulting a catalog or checking a definition passes nothing. With gold
+at 100% bounding the top, the pass rates above are measured between two real
+ends rather than against nothing.
+
+### The honest summary
+
+> The catalog is what lets the agent find the right data — decisively, with no
+> counter-example across four metrics and two use cases. Its written
+> definitions did not change what the agent did once it got there; they made it
+> get there in fewer steps, and they are the sole reason its citations are
+> true.
+
+**What would still overturn this.** Sixteen L3 questions on contoso and nine on
+support give thin discordant counts. The schema-only nulls support "no
+detectable difference", not "proven identical" — a larger question set is what
+would sharpen them, and is the first item below.
 
 ### 4–6. What is still missing
 
-**Sample.** 31 questions against a documented target of 60–100 per use case,
-concentrated on L3 where the catalog decides. Roughly 40 L3 questions per use
-case gets to ±10 points rather than ±30.
+**Done, and reported above.** The cleaner ablation (the schema-only arm), the
+naive floor, and repeats all landed and are folded into the results. Three
+items remain.
+
+**Sample.** This is now the binding constraint, and the paired tests show
+exactly why: support's nine L3 questions cannot reach p < 0.05 no matter how
+one-sided the result, because five discordant pairs all falling one way is
+p = 0.0625. Contoso's sixteen carried the finding alone. Roughly 40 L3
+questions per use case gets to ±10 points rather than ±30, and gives the
+schema-only nulls enough power to mean "no effect" rather than "no effect we
+could see".
 
 A discipline worth imposing on new questions: write them from the **business**,
 not from the schema. Ours were authored alongside their gold SQL, which risks
 phrasing the question in the vocabulary the catalog happens to use.
 
-**Repeats.** The model is nondeterministic and n=1 reports no variance at all.
+**A second model.** Every number here is one model's loop over our MCP servers.
+The finding that catalog prose does not change answers is plausibly a statement
+about *capable* models — one that infers `net_revenue_usd` from context may
+simply not need the sentence explaining it. A weaker model is the test that
+would separate "prose is redundant" from "prose is redundant to this model".
 
-**A cleaner ablation.** Today `om=False` removes the catalog *server*, which
-removes knowledge and tools together, so the delta conflates "did not know the
-definition" with "had fewer tools". A second arm that keeps the catalog
-connected but stripped to bare schema separates them.
+**Reading the failures.** 56.2% and 37.0% are pass rates, not diagnoses.
+Nothing here yet says *why* the with-catalog arm misses the questions it
+misses, and the per-question rows are on disk to support exactly that reading.
 
-**A floor.** Gold at 100% proves the harness cannot be the reason for a
-failure. Nothing yet bounds the bottom: a deliberately naive agent says what
-the score is when nothing helps, so the delta is measured against a real floor
-rather than against zero.
+### An operational note this run paid for
+
+The first contoso attempt died on its fourth arm when a single `claude -p` call
+exceeded its 300s budget: the exception propagated, and because the report was
+written once at the end, three completed arms — about three hours of paid
+model time — survived only as console summaries. The per-question rows needed
+for every McNemar number above were lost.
+
+Both causes are fixed in `348a156`. A timeout now returns an answer marked
+`timeout` and scores as a miss, because an agent failing to respond is a result
+the scorer can handle rather than a reason to discard everything around it; and
+the report is written after **every arm**, so a failure costs the arm it happens
+in and not the ones already paid for.
+
+The general form is worth keeping: **a long run should bank its results
+incrementally, and a harness should treat a slow participant as data rather
+than as an error.** Neither is clever, and both are the difference between
+losing a question and losing an afternoon.
