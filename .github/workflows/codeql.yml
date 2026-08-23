@@ -16,26 +16,8 @@ name: CodeQL
 on:
   push:
     branches: [main]
-    # Nothing here analyses prose. Same fail-safe shape as ci.yml: a run is
-    # skipped only when every changed file is one of these.
-    paths-ignore:
-      - 'docs/*.md'
-      - 'docs/**/*.md'
-      - 'README.md'
-      - 'SECURITY.md'
-      - 'site/**'
-      - 'website/**'
   pull_request:
     branches: [main]
-    # Nothing here analyses prose. Same fail-safe shape as ci.yml: a run is
-    # skipped only when every changed file is one of these.
-    paths-ignore:
-      - 'docs/*.md'
-      - 'docs/**/*.md'
-      - 'README.md'
-      - 'SECURITY.md'
-      - 'site/**'
-      - 'website/**'
   schedule:
     - cron: '17 6 * * 1' # weekly, Monday 06:17 UTC
 
@@ -49,7 +31,50 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # The same classifier ci.yml uses, and for the same reason: nothing here
+  # analyses a markdown file. A job rather than `paths-ignore`, so the
+  # repository has ONE answer to "is this a docs change" -- self-tested, with
+  # a delete or a rename disqualifying it.
+  changes:
+    name: Docs-only?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The classifier diffs against a base commit, which a shallow clone
+          # does not have.
+          fetch-depth: 0
+      # The self-test runs BESIDE the real classification, every time. A
+      # classifier that stopped matching anything would answer `false` forever
+      # -- safe, plausible and silently useless -- so a case list asserting
+      # both directions is the only thing that would notice.
+      - run: python3 scripts/docs_only_change.py --self-test
+      - run: python3 scripts/docs_only_change.py --explain
+      - id: classify
+        env:
+          # Three-dot: what this ref ADDED since it diverged, never what main
+          # did underneath it.
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # A force push and a branch's first commit both give the null sha.
+          # Neither is a docs change; both run everything.
+          if ! git rev-parse -q --verify "$BASE^{commit}" >/dev/null; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "base '$BASE' is not a commit here; running everything"
+            exit 0
+          fi
+          git diff --name-status "$BASE...$HEAD_SHA" | python3 scripts/docs_only_change.py
+
+  # Everything that needs no running stack, so a mistake in a linter or a guard
+  # is reported in a minute rather than after a fifteen-minute bring-up.
   analyze:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 20

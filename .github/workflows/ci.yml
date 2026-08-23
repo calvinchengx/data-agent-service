@@ -6,61 +6,7 @@ name: CI
 on:
   push:
     branches: [main]
-    # Prose-only commits do not run this workflow. `paths-ignore` skips a run
-    # only when EVERY changed file matches, so a commit touching a document and
-    # a source file still runs in full -- and any path not listed here runs it,
-    # which is the fail-safe direction: adding a new source directory cannot
-    # silently opt out of CI.
-    #
-    # docs/*.json is deliberately absent. docs/witnesses.json and
-    # docs/coverage.json are manifests the guards READ, and a wrong number in
-    # one of them is exactly what this suite exists to catch.
-    #
-    # The prose guards do not stop running. `check_counts`, `check_docs_nav`
-    # and `check_version` run in BOTH workflows, and the two trigger sets are
-    # complementary: a prose commit runs them in docs-site.yml, a commit
-    # touching a guard script or any source runs them here. Neither kind of
-    # change can reach main without the guards that read it having run.
-    paths-ignore:
-      # NOT 'docs/*.md' and NOT 'README.md'. The witness suite READS
-      # docs/10-production.md, docs/parity.md and README.md from disk and
-      # asserts on their contents -- the runbook's HCL example against the real
-      # Terraform variables, the ledger's rows against their Azure claims, the
-      # README's badge endpoints against what badges.py emits. Ignoring those
-      # would skip the only checks that read them. scripts/check_ci_filter.py
-      # derives that set from the code and fails if this list ever covers it.
-      - 'docs/**/*.md'
-      - 'SECURITY.md'
-      - 'site/**'
-      - 'website/**'
   pull_request:
-    # Prose-only commits do not run this workflow. `paths-ignore` skips a run
-    # only when EVERY changed file matches, so a commit touching a document and
-    # a source file still runs in full -- and any path not listed here runs it,
-    # which is the fail-safe direction: adding a new source directory cannot
-    # silently opt out of CI.
-    #
-    # docs/*.json is deliberately absent. docs/witnesses.json and
-    # docs/coverage.json are manifests the guards READ, and a wrong number in
-    # one of them is exactly what this suite exists to catch.
-    #
-    # The prose guards do not stop running. `check_counts`, `check_docs_nav`
-    # and `check_version` run in BOTH workflows, and the two trigger sets are
-    # complementary: a prose commit runs them in docs-site.yml, a commit
-    # touching a guard script or any source runs them here. Neither kind of
-    # change can reach main without the guards that read it having run.
-    paths-ignore:
-      # NOT 'docs/*.md' and NOT 'README.md'. The witness suite READS
-      # docs/10-production.md, docs/parity.md and README.md from disk and
-      # asserts on their contents -- the runbook's HCL example against the real
-      # Terraform variables, the ledger's rows against their Azure claims, the
-      # README's badge endpoints against what badges.py emits. Ignoring those
-      # would skip the only checks that read them. scripts/check_ci_filter.py
-      # derives that set from the code and fails if this list ever covers it.
-      - 'docs/**/*.md'
-      - 'SECURITY.md'
-      - 'site/**'
-      - 'website/**'
 
 # Supersede PR runs, never main runs: a main commit's run is the record of what
 # main was, while only a PR's newest commit is under review.
@@ -72,10 +18,51 @@ permissions:
   contents: read
 
 jobs:
+  # Which lane may this commit take? A path CLASSIFIER rather than a path
+  # filter: `paths-ignore` cannot see that a page was DELETED, and a page that
+  # disappears can break a link another page or check asserts. Ported from
+  # fabric-emulator, which solved this first -- see scripts/docs_only_change.py.
+  changes:
+    name: Docs-only?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The classifier diffs against a base commit, which a shallow clone
+          # does not have.
+          fetch-depth: 0
+      # The self-test runs BESIDE the real classification, every time. A
+      # classifier that stopped matching anything would answer `false` forever
+      # -- safe, plausible and silently useless -- so a case list asserting
+      # both directions is the only thing that would notice.
+      - run: python3 scripts/docs_only_change.py --self-test
+      - run: python3 scripts/docs_only_change.py --explain
+      - id: classify
+        env:
+          # Three-dot: what this ref ADDED since it diverged, never what main
+          # did underneath it.
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # A force push and a branch's first commit both give the null sha.
+          # Neither is a docs change; both run everything.
+          if ! git rev-parse -q --verify "$BASE^{commit}" >/dev/null; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "base '$BASE' is not a commit here; running everything"
+            exit 0
+          fi
+          git diff --name-status "$BASE...$HEAD_SHA" | python3 scripts/docs_only_change.py
+
   # Everything that needs no running stack, so a mistake in a linter or a guard
   # is reported in a minute rather than after a fifteen-minute bring-up.
   quality:
     name: Lint, types and guards
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -131,9 +118,6 @@ jobs:
       - name: pull commands name the released version
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: uv run python -m scripts.check_version
-      # The filter above is only safe while it ignores nothing a check reads.
-      - name: CI's own path filter skips nothing a check reads
-        run: python3 scripts/check_ci_filter.py
       - name: python tests, with the coverage floor
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         # Same targets and floor as `make coverage-python`; run directly rather
@@ -164,6 +148,8 @@ jobs:
 
   go:
     name: Go executor
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -216,6 +202,8 @@ jobs:
 
   publisher-contract:
     name: Publisher contract
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -261,6 +249,8 @@ jobs:
   # than of the code.
   go-duckdb:
     name: Go executor (DuckDB adapter)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -302,6 +292,8 @@ jobs:
 
   infra:
     name: Infrastructure compiles
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -325,6 +317,8 @@ jobs:
   # witness. This is the job that would notice a fresh clone cannot reach green.
   stack:
     name: Full stack witnesses
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
