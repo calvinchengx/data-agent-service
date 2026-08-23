@@ -1888,6 +1888,67 @@ def quality() -> None:
     # marked complete against a claim nothing could satisfy.
     from agent import identity as _identity
 
+    # Publish a candidate first, from the promoter's own pipeline. The executor
+    # reads candidates from the CATALOG -- promoter and executor share no
+    # filesystem in Azure -- and nothing in `make stack` runs the promoter. So
+    # without this the check asserts against whatever a previous local run left
+    # behind: it passed on the machine that wrote it and failed in CI for four
+    # commits. Phase 16 already carries a comment about this exact shape --
+    # a witness that depends on an artefact nothing produces reports the state
+    # of someone's laptop.
+    from promoter import catalog as _pcat
+    from promoter.audit import parse as _parse_audit
+    from promoter.publish_candidates import publish_candidates as _publish
+    from promoter.score import release as _release
+    from promoter.store import build as _build_store
+    from promoter.title import derive as _derive
+
+    _sql = (
+        "SELECT a.team, AVG(t.resolution_minutes) AS m FROM support.tickets t "
+        "JOIN support.agents a ON a.agent_id = t.agent_id GROUP BY a.team"
+    )
+    _lines = list(
+        _parse_audit(
+            [
+                "INFO audit "
+                + json.dumps(
+                    {
+                        "op": "run_query",
+                        "oid": f"user-{i}@contoso.example",
+                        "source": "contoso_support",
+                        "verdict": "ok",
+                        "sql": _sql.replace("AS m", f"AS alias_{i}"),
+                    }
+                )
+                for i in range(6)
+            ]
+        )
+    )
+    _cands, _ = _build_store(
+        _lines,
+        window="quality",
+        key=b"quality-key",
+        source_dialects={"contoso_support": "postgres"},
+    )
+    _names = _pcat.column_names()
+    _released, _ = _release(
+        _cands,
+        {k: _derive(c_.template, _names) for k, c_ in _cands.items()},
+        window="quality",
+        env={
+            "DAS_PROMOTE_MIN_USERS": "3",
+            "DAS_PROMOTE_MIN_RUNS": "5",
+            "DAS_PROMOTE_EPSILON": "1.0",
+        },
+    )
+    _fqns = _publish([r.as_dict() for r in _released])
+    check(
+        "phase15",
+        "a released candidate reaches the catalog, which is how the executor sees it",
+        bool(_fqns) and len(_fqns) == len(_released),
+        f"{len(_fqns)} published",
+    )
+
     def candidates_for(user: str):
         token = _identity.token_for(user)
         _st, _hd, text = c.http(
@@ -1974,6 +2035,12 @@ def quality() -> None:
     )
 
     from seed.govern import om as _om
+
+    # Write the gap before asserting it is there, for the same reason the
+    # candidate above is published first: `make stack` never runs the promoter,
+    # so a GET alone asserts against whatever a previous local run left in the
+    # catalog. It passed locally and failed in CI, which is the tell.
+    _gaps.write_back(released, "Contoso Commerce", om=_om)
 
     drafted = _om(
         "GET",
