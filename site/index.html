@@ -135,7 +135,7 @@ footer a{text-decoration:none}
 <header class="hero">
   <div class="wrap">
     <p class="eyebrow">Data Agent Service</p>
-    <a class="release-pill" href="https://github.com/calvinchengx/data-agent-service/releases/tag/v0.2.0"><span>v0.2.0</span> security fix — upgrade from 0.1.0 &rarr;</a>
+    <a class="release-pill" href="https://github.com/calvinchengx/data-agent-service/releases/tag/v0.2.0"><span>v0.2.0</span> both executors, every SQL source &rarr;</a>
     <h1>Ask your warehouse a question. Get an answer you can defend.</h1>
     <p>Natural-language questions over the warehouses, databases and APIs you already have —
        Fabric and Azure SQL, PostgreSQL, Databricks, and any REST service including a retrieval
@@ -257,98 +257,91 @@ footer a{text-decoration:none}
 <section class="sec" id="value">
   <div class="wrap">
     <h2>What it does</h2>
-    <p class="lede">Eight capabilities, each with the evidence behind it and an honest status.</p>
+    <p class="lede"><b data-capability-count>&mdash;</b> capabilities, each with the evidence behind it and an honest status.</p>
     <div class="grid">
 
       <div class="card">
         <h3>Generalizable by adapter <span class="tag t-ship">4 shipped</span></h3>
-        <p>One interface, four adapters that share neither a dialect nor an identity model: TDS
-           (Fabric, Azure SQL, Synapse), PostgreSQL, Databricks, and HTTP. Pointing at another
-           source is a configuration entry, not a fork — and the guard is dialect-aware, so the row
-           ceiling comes out as <code>TOP</code> or <code>LIMIT</code> without anyone choosing.</p>
+        <p>Four adapters behind one interface: TDS (Fabric, Azure SQL, Synapse), PostgreSQL,
+           Databricks, HTTP. A new source is a config entry, not a fork — and the dialect-aware
+           guard emits <code>TOP</code> or <code>LIMIT</code> without anyone choosing.</p>
         <span class="ev">docs/09-adding-a-source.md · two datasets live in two engines</span>
       </div>
 
       <div class="card">
         <h3>REST APIs as a source <span class="tag t-ship">shipped</span></h3>
-        <p>An OpenAPI document is the allow-list. Unsafe operations are never even offered, an
-           undeclared parameter is refused rather than dropped, and the item ceiling is written into
-           the request. The guard here validates a SQL parse tree; an HTTP call has no parse tree, so
-           every property was translated rather than ported.</p>
+        <p>The OpenAPI document is the allow-list: unsafe operations are never offered, an
+           undeclared parameter is refused rather than dropped, the ceiling is written into the
+           request. No parse tree here — every property was translated, not ported.</p>
         <span class="ev">10 witnesses · OpenMetadata's own API is the live source</span>
       </div>
 
       <div class="card">
         <h3>Enterprise RAG as a source <span class="tag t-ship">shipped</span></h3>
-        <p>A knowledge base plugs in as a REST source — <code>POST /search</code> with a JSON body,
-           the shape most retrieval APIs take. The usual hole in enterprise retrieval is that the
-           vector store is queried with a <em>service</em> identity, so a passage from a document the
-           asking user may not read lands in their answer and nothing records it. Here the source
-           states whether it applies the caller's own permissions, and denied fields are stripped
-           from retrieved documents as they are from warehouse columns.</p>
+        <p>A knowledge base plugs in as a REST source. The usual hole in enterprise retrieval: the
+           vector store is queried as a <em>service</em>, so a passage the asker may not read reaches
+           their answer and nothing records it. Here the source declares whose permissions it
+           applies, and denied fields are stripped as warehouse columns are.</p>
         <span class="ev">top_k capped by the deployment, not the model · docs/15-http-sources</span>
       </div>
 
       <div class="card">
         <h3>Any AI tool <span class="tag t-ship">witnessed</span></h3>
-        <p>A standards-compliant MCP server over Streamable HTTP — no vendor extensions in the tool
-           schemas. Proved by two <em>independent</em> official SDKs, Python and TypeScript, so a
-           server that only its own language can drive fails rather than passes.</p>
+        <p>A standards-compliant MCP server over Streamable HTTP, no vendor extensions. Proved by
+           two <em>independent</em> official SDKs — Python and TypeScript — so a server only its own
+           language can drive fails rather than passes.</p>
         <span class="ev">28 client checks · config generated for Claude, Cursor, VS Code</span>
       </div>
 
       <div class="card">
         <h3>Per-user authorization, on-behalf-of <span class="tag t-ship">witnessed</span></h3>
-        <p>The user's token is exchanged (OAuth 2.0 OBO) so the engine applies <em>their</em>
-           permissions — not the service's. Table and column rules are enforced on the SQL parse
-           tree, and a withheld column is hidden from schema discovery too.</p>
+        <p>The user's token is exchanged (OAuth 2.0 OBO), so the engine applies <em>their</em>
+           permissions, not the service's. Table and column rules run on the SQL parse tree, and a
+           withheld column disappears from schema discovery too.</p>
         <span class="ev">3 personas: same question, different answers, one denial</span>
       </div>
 
       <div class="card">
         <h3>Performance tested <span class="tag t-ship">measured</span></h3>
-        <p>k6 drives four scenarios against the gateway, the executor directly, the catalog, and the
-           rate limiter. Thresholds gate the run, and payloads are inspected — an HTTP-only check
-           would score a refusal as a success.</p>
+        <p>k6 drives four scenarios: gateway, executor direct, catalog, rate limiter. Thresholds
+           gate the run and payloads are inspected — an HTTP-only check would score a refusal as a
+           success.</p>
         <span class="ev">261 req/s · p95 69.5ms · gateway costs +1.6ms and ~2%</span>
       </div>
 
       <div class="card">
         <h3>Natural-language evals <span class="tag t-wip">harness ready</span></h3>
-        <p>31 questions across five difficulty tiers over two datasets, scored on <em>result sets</em>
-           rather than SQL text, plus grounding, semantics and behaviour. The reference answers score
-           100%, which calibrates the instrument. <b>The live model has not been scored yet</b> — that
-           run needs an API key.</p>
+        <p>31 questions across five tiers and two datasets, scored on <em>result sets</em> rather
+           than SQL text. Reference answers score 100%, which calibrates the instrument. <b>The live
+           model has not been scored</b> — that run needs an API key.</p>
         <span class="ev">make eval · L3 questions fail without the catalog</span>
       </div>
 
       <div class="card">
         <h3>Auditable <span class="tag t-ship">shipped</span></h3>
-        <p>Every operation writes a structured audit line: who asked, which source, the verdict, the
-           columns read, the elapsed time, and whether the query ran as the user or as the service —
-           so a weaker authorization tier is visible rather than assumed.</p>
+        <p>Every operation writes a structured line — who asked, which source, the verdict, the
+           columns read, and whether it ran as the user or as the service, so a weaker authorization
+           tier is visible rather than assumed.</p>
         <span class="ev">op · user · source · verdict · authz_tier · ms</span>
       </div>
 
       <div class="card">
         <h3>Dashboard promotion <span class="tag t-ship">shipped</span></h3>
-        <p>Recurring ad-hoc questions are the signal that a dashboard is justified. Queries are
-           canonicalised — literals and aliases normalised away — so the same question asked
-           differently lands on one template, and frequency becomes measurable evidence.</p>
+        <p>Recurring ad-hoc questions are the signal a dashboard is justified. Queries are
+           canonicalised — literals and aliases normalised away — so the same question asked three
+           ways lands on one template, and frequency becomes evidence.</p>
         <span class="ev">promoter/ · <b data-witness-phase="phase15">&mdash;</b> witnesses · no natural language is stored</span>
       </div>
 
       <div class="card">
         <h3>Three dashboard targets, one plan <span class="tag t-ship">shipped</span></h3>
-        <p>A released candidate becomes a <code>Plan</code> — tables, measures, dimensions, slots — and
-           each target spells that one object in its own language: a <b>Power BI</b> semantic model and
-           report in Fabric, an <b>Apache Superset</b> dataset and chart, a <b>Tableau</b> workbook.
-           Every target is then asked the question through its <em>own</em> engine and the answer is
-           compared with the SQL the template came from. A dashboard whose two answers disagree does
-           not reach the catalog.</p>
-        <p>Each carries the guarded template rather than the tables behind it — a Direct Lake binding,
-           a virtual dataset, a custom-SQL relation — so no target can widen the surface the executor's
-           access rules narrowed.</p>
+        <p>One <code>Plan</code> — tables, measures, dimensions, slots — spelled by each target in its
+           own language: a <b>Power BI</b> semantic model, an <b>Apache Superset</b> dataset and chart,
+           a <b>Tableau</b> workbook. Each is then asked the question through its <em>own</em> engine
+           and checked against the SQL the template came from. A dashboard whose two answers disagree
+           never reaches the catalog.</p>
+        <p>Each carries the guarded template, not the tables behind it, so no target can widen the
+           surface the access rules narrowed.</p>
         <span class="ev"><b data-witness-phase="phase16">&mdash;</b> + <b data-witness-phase="phase19">&mdash;</b>
            + <b data-witness-phase="phase20">&mdash;</b> witnesses · identity carried where the tool can
            hold it, and named honestly where it cannot</span>
@@ -356,11 +349,10 @@ footer a{text-decoration:none}
 
       <div class="card">
         <h3>Tableau: the generator, not the tenant <span class="tag t-wip">generator shipped, hop unwitnessed</span></h3>
-        <p>Tableau has no container, so the split is drawn where the evidence stops. The workbook, the
-           VizQL Data Service query and the connected-app token are pure functions of the
-           <code>Plan</code>, recorded in the contract and witnessed on every push. Publishing to a real
-           site is not, and <a href="docs/parity/">the parity ledger</a> carries it red rather than
-           letting a green suite imply otherwise.</p>
+        <p>Tableau has no container, so the line is drawn where the evidence stops. The workbook,
+           the VizQL query and the connected-app token are pure functions of the <code>Plan</code>,
+           witnessed on every push. Publishing to a real site is not — <a href="docs/parity/">the
+           ledger</a> carries that red rather than letting a green suite imply otherwise.</p>
         <span class="ev"><b data-witness-phase="phase20">&mdash;</b> witnesses above the tenant line ·
            <code>publish()</code> refuses by name</span>
       </div>
@@ -517,6 +509,21 @@ ENV=prod make test  # the same checks against a real tenant</code></pre>
   //
   // The fallback is an em dash, not a number: if the manifest cannot be read,
   // the page should say nothing rather than something possibly untrue.
+  // The capability count is counted, not typed. It read "Eight" while the
+  // section held eleven cards -- the same staleness as the witness totals
+  // below, on the same page, in a number nobody thought of as a number.
+  (function () {
+    var cards = document.querySelectorAll('#value .card').length;
+    if (!cards) { return; }
+    // Capitalised: it opens the sentence. Rendered lowercase the first time.
+    var words = ['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven',
+                 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
+    Array.prototype.forEach.call(
+      document.querySelectorAll('[data-capability-count]'),
+      function (el) { el.textContent = words[cards] || cards; }
+    );
+  }());
+
   fetch('witnesses-manifest.json')
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
