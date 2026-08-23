@@ -25,7 +25,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Tags, because check_version reads the newest one and REFUSES to pass a
+      # checkout that has none -- a shallow clone quietly skipping the check is
+      # the failure it exists to prevent.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -46,6 +51,16 @@ jobs:
       # stop the number being copied into prose, where four copies drifted.
       - name: witness totals in prose match the manifest
         run: uv run python -m scripts.check_counts
+      # Both of these were in `make lint` and in no CI job, which is the same
+      # hole as a check nobody runs -- it holds only for whoever remembers.
+      # The nav one has already been paid for: a sidebar entry for a page that
+      # was never committed took the docs site down, and this is the check that
+      # would have said so. It reads `git ls-files`, not the filesystem, which
+      # is exactly why it catches that case.
+      - name: the docs sidebar matches committed pages
+        run: python3 scripts/check_docs_nav.py
+      - name: pull commands name the released version
+        run: uv run python -m scripts.check_version
       - name: python tests, with the coverage floor
         # Same targets and floor as `make coverage-python`; run directly rather
         # than through the tools container, because this job has no stack and

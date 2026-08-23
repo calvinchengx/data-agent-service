@@ -104,6 +104,8 @@ lint: ## Lint and type-check everything (never edits; use `make format` for that
 	@echo "== docs nav vs docs/";       python3 scripts/check_docs_nav.py
 	@echo "== pull cmds vs newest tag"; python3 -m scripts.check_version
 	@echo "== witness totals in prose"; $(TOOLS) python -m scripts.check_counts
+	@echo "== no emulator-only paths";  sh scripts/check-discipline.sh
+	@echo "== no dev-only paths";       $(TOOLS) python -m scripts.check_prod_paths --strict
 	@echo "== golangci-lint (go)";      $(GOLINT)
 
 format: ## Apply formatting and safe fixes — the only target that edits files
