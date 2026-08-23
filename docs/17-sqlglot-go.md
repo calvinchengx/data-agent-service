@@ -54,7 +54,7 @@ rather than assumed.
 
 | Component | Reference | Port |
 |---|---|---|
-| Tokenizer | `tokens.py`, `tokenizer_core.py` (~1,000 lines) | **done** — ported in full; 2,171/2,171 corpus statements lex identically to the reference, positions and comments included |
+| Tokenizer | `tokens.py`, `tokenizer_core.py` (~1,000 lines) | **done** — ported in full; 4,506/4,506 corpus statements lex identically to the reference, positions and comments included |
 | Expression core | `expressions/core.py`: `Expression`, `walk`, `find_all`, `args`, `sql()` | full |
 | Node types | the ~40 the guard touches: `Select`, `From`, `Join`, `Lateral`, `Table`, `Column`, `Star`, `Identifier`, `Literal`, `Subquery`, `CTE`, `With`, `Union`/`Intersect`/`Except`, `Limit`, `LimitOptions`, `Offset`, `Order`, `Group`, `Having`, `Where`, `Alias`, `Anonymous`, `Func`, `Dot`, the DML/DDL nodes it refuses | these, plus the expression-language nodes a SELECT needs (`Binary`, `Unary`, `Case`, `Cast`, `In`, `Between`, `Like`, `Paren`, `Null`, `Boolean`) |
 | Parser | `parser.py`: `_parse_statement` → `_parse_select`, CTEs, set ops, `_parse_table`, joins including comma and APPLY, `_parse_limit`/`TOP`, the expression precedence climber, function calls | the SELECT grammar in full; DML/DDL recognised **only far enough to refuse** (statement keyword → node), not parsed |
@@ -70,7 +70,7 @@ whole corpus. Its keyword, dialect, parser and function tables are all
 generated from the pinned reference rather than transcribed, and CI regenerates
 and diffs them.
 
-The parser reads **620 of sqlglot's 2,171 fixture statements** identically to
+The parser reads **1,465 of sqlglot's 4,506 fixture statements** identically to
 the reference, with **zero divergences**: anything outside the grammar is
 refused, never guessed. That number understates what matters, because most of
 what it still cannot read is dialect exotica no data agent will emit.
@@ -233,9 +233,30 @@ verified three ways, and the first is what makes the other two trustworthy:
 1. **Differential against sqlglot, statement by statement.** A fixture runner
    parses each statement with the Python reference and with the port, dumps
    both trees to JSON, and diffs them. Sources: sqlglot's
-   `tests/fixtures/identity.sql` (980 statements), its four dialect suites
-   (~130), and this repo's guard corpora. A mismatch is a failing test. This
+   `tests/fixtures/identity.sql` (980 statements), its **whole** dialect suite
+   (3,500), and this repo's guard corpora. A mismatch is a failing test. This
    runs in CI on every push to the port.
+
+   "Whole" was earned late and is the lesson worth keeping. The runner read
+   only `validate_identity` calls out of `test_<dialect>.py`, which is a
+   fraction of what sqlglot actually pins: most of its dialect behaviour is in
+   `validate_all(…, read={…}, write={…})`, keyed BY dialect and therefore
+   living in any file — the largest source of DuckDB statements is
+   `test_snowflake.py`, and the largest overall is `test_dialect.py`, 5,448
+   lines organised by CONCEPT rather than by dialect and never opened at all.
+   Harvesting them doubled the corpus and found **31 statements the port
+   parsed into a different tree**, two of which — `IS [NOT] DISTINCT FROM` and
+   typed division — had already been found the expensive way, by fuzzing,
+   while sitting in the reference's own tests the whole time.
+
+   Which is also the honest limit of this method, and it is worth stating
+   next to the number: sqlglot's suite is a **pinned-expectation corpus**, not
+   an oracle. `validate_identity` compares the reference to itself;
+   `validate_all`'s strings were written by a contributor who knew the dialect.
+   Only `test_executor.py` reaches real ground truth, by running TPC-H and
+   TPC-DS through DuckDB and comparing results, and sqlglot's own README says
+   it plainly: "SQLGlot is a transpiler, not a validator." So this differential
+   proves the port MATCHES sqlglot. It cannot prove either of them is right.
 2. **The shared refusal corpus** — `services/contract/guard_corpus.json` from
    the parity plan — which both guards must pass identically.
 3. **The executor contract**, run against **both** executors on every build.
