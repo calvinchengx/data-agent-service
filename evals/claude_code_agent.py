@@ -250,6 +250,49 @@ def ask(
     model: str = "",
     effort: str = "",
     timeout: int = 300,
+    attempts: int = 2,
+) -> agent_mod.Answer:
+    """Ask once, retrying only a HARNESS fault and only once.
+
+    The retry is deliberately narrow. A wrong answer is never retried -- that
+    would be tuning the result -- and a timeout is not retried either, because
+    it is the agent's own failure and scores as a miss. Only a session that
+    came up without its tools is attempted again, because the usual cause is a
+    container that took too long to start rather than anything about the model.
+
+    If it fails twice it raises, and the run stops. A retry that keeps going
+    forever would be the silent-failure bug wearing a different hat.
+    """
+    last: HarnessBroken | None = None
+    for attempt in range(max(1, attempts)):
+        try:
+            return _ask_once(
+                question,
+                token,
+                om=om,
+                catalog=catalog,
+                naive=naive,
+                model=model,
+                effort=effort,
+                timeout=timeout,
+            )
+        except HarnessBroken as e:
+            last = e
+            if attempt + 1 < max(1, attempts):
+                print(f"  harness fault, retrying once: {e}", flush=True)
+    raise last
+
+
+def _ask_once(
+    question: str,
+    token: str,
+    *,
+    om: bool = True,
+    catalog: str = "full",
+    naive: bool = False,
+    model: str = "",
+    effort: str = "",
+    timeout: int = 300,
 ) -> agent_mod.Answer:
     del effort  # Claude Code has no per-call effort switch
     config = mcp_config(token, om=om, catalog=catalog)
@@ -281,6 +324,12 @@ def ask(
         if model:
             cmd += ["--model", model]
         env = dict(os.environ)
+        # The catalog arm serves its MCP server through `docker compose run`,
+        # which cold-starts in ~7s idle and much longer while 900 model runs are
+        # hammering the same daemon. Claude Code gives a server 30s by default,
+        # and a server that misses that window simply is not there -- which the
+        # guard correctly halts on, but which is a timeout rather than a fault.
+        env.setdefault("MCP_TIMEOUT", "120000")
         if _insecure():
             # The family's documented self-signed-certificate switch, in node's
             # spelling. Local only: `.env.prod` sets it false and preflight

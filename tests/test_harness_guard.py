@@ -64,3 +64,50 @@ class TestToolAvailabilityGuard:
 
     def test_no_init_event_leaves_the_answer_alone(self):
         cc._check_tools([{"type": "assistant"}], TOOLS)
+
+
+class TestRetryIsNarrow:
+    """A harness fault may be transient; a bad answer never is."""
+
+    def test_a_transient_fault_is_retried_once_and_succeeds(self, monkeypatch):
+        calls = []
+
+        def flaky(*a, **k):
+            calls.append(1)
+            if len(calls) == 1:
+                raise cc.HarnessBroken("catalog did not connect")
+            return "the answer"
+
+        monkeypatch.setattr(cc, "_ask_once", flaky)
+        assert cc.ask("q", "tok") == "the answer"
+        assert len(calls) == 2
+
+    def test_a_persistent_fault_stops_the_run(self, monkeypatch):
+        def always(*a, **k):
+            raise cc.HarnessBroken("catalog did not connect")
+
+        monkeypatch.setattr(cc, "_ask_once", always)
+        with pytest.raises(cc.HarnessBroken):
+            cc.ask("q", "tok")
+
+    def test_a_timeout_is_not_retried_because_it_is_the_agent_failing(self, monkeypatch):
+        calls = []
+
+        def timed_out(*a, **k):
+            calls.append(1)
+            return "(no answer: the agent exceeded 300s)"
+
+        monkeypatch.setattr(cc, "_ask_once", timed_out)
+        cc.ask("q", "tok")
+        assert len(calls) == 1
+
+    def test_a_wrong_answer_is_never_retried(self, monkeypatch):
+        calls = []
+
+        def wrong(*a, **k):
+            calls.append(1)
+            return "a confidently wrong answer"
+
+        monkeypatch.setattr(cc, "_ask_once", wrong)
+        cc.ask("q", "tok")
+        assert len(calls) == 1
