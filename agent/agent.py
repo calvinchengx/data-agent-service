@@ -75,6 +75,34 @@ class Answer:
     def refused(self) -> bool:
         return any(c.is_error for c in self.tool_calls)
 
+    @property
+    def abstained(self) -> bool:
+        """The agent looked and concluded the data could not answer.
+
+        Mechanical, not a judgement about the prose: no statement ran, and
+        nothing was refused. A REFUSAL is a different outcome — the caller
+        lacks access, which is a security event and stays in the audit log
+        with identity attached rather than being counted (docs §17).
+        """
+        return not self.sql and not self.refused
+
+    @property
+    def searched_terms(self) -> list[str]:
+        """The catalog vocabulary the agent tried, in order, deduplicated.
+
+        Not the question. A search term is an attempt at the business's own
+        words — "customer satisfaction", "churn" — which is what a steward can
+        act on, and it carries none of the phrasing a person used.
+        """
+        seen: list[str] = []
+        for call in self.tool_calls:
+            if "search_metadata" not in call.name:
+                continue
+            term = str(call.arguments.get("query") or "").strip()
+            if term and term not in seen:
+                seen.append(term)
+        return seen
+
 
 def system_prompt(loaded: list[skills_mod.Skill] | None = None) -> str:
     """The method prompt, plus whatever skills this configuration loads.
@@ -231,6 +259,36 @@ def ask(
         tokens_out,
         int((time.time() - started) * 1000),
         "max_steps",
+    )
+
+
+def record_gap(answer: Answer, subject: str) -> None:
+    """Emit one line when the catalog could not ground a question.
+
+    Same convention as the executor's audit: JSON on stdout, collected by
+    whatever the platform collects. Carries the SEARCH TERMS and never the
+    question — see promoter/gaps.py for what is done with them and why the
+    distinction matters.
+
+    Written by the agent because only the agent knows it abstained; the
+    executor never saw a query. That is the honest limit of this: a
+    third-party MCP client abstaining on its own tells us nothing, and
+    docs/12-promotion.md says so.
+    """
+    if not answer.abstained or not answer.searched_terms:
+        return
+    print(
+        "gap "
+        + json.dumps(
+            {
+                "op": "ask",
+                "verdict": "abstained",
+                "subject": subject,
+                "terms": answer.searched_terms,
+            },
+            separators=(",", ":"),
+        ),
+        flush=True,
     )
 
 

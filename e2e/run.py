@@ -1925,6 +1925,71 @@ def quality() -> None:
         f"{len(listed)} candidate(s)" if listed else "none published yet",
     )
 
+    # 15b: a question that never became SQL. Five people asking about
+    # satisfaction is not a missing dashboard, it is a missing DEFINITION, and
+    # the person who can fix it is a steward rather than a report writer.
+    from promoter import gaps as _gaps
+
+    abstentions = list(
+        _gaps.parse(
+            [
+                "gap "
+                + json.dumps(
+                    {
+                        "op": "ask",
+                        "verdict": "abstained",
+                        "subject": who,
+                        "terms": ["customer satisfaction"],
+                    }
+                )
+                for who in ("p1", "p2", "p3")
+            ]
+            + [
+                "gap "
+                + json.dumps(
+                    {
+                        "op": "ask",
+                        "verdict": "abstained",
+                        "subject": "p1",
+                        "terms": ["a term only one person wanted"],
+                    }
+                )
+            ]
+        )
+    )
+    built = _gaps.build(abstentions, window="witness", key=b"witness-key")
+    released = _gaps.release(built, min_users=3)
+    check(
+        "phase15",
+        "a term several people searched for and could not find becomes a gap",
+        [g["term"] for g in released] == ["customer satisfaction"],
+        f"{[g['term'] for g in released]}",
+    )
+    rendered = json.dumps(released)
+    check(
+        "phase15",
+        "a gap carries the catalog vocabulary tried, and no question text",
+        "customer satisfaction" in rendered and "?" not in rendered and "p1" not in rendered,
+        rendered[:70],
+    )
+
+    from seed.govern import om as _om
+
+    drafted = _om(
+        "GET",
+        "/glossaryTerms/name/Contoso%20Commerce.Customer%20Satisfaction?fields=tags",
+        ok=(200, 404),
+    )
+    tagged = (
+        [t.get("tagFQN") for t in (drafted.get("tags") or [])] if isinstance(drafted, dict) else []
+    )
+    check(
+        "phase15",
+        "the gap lands in the steward's own queue, tagged Needs Definition",
+        "Catalog Gaps.Needs Definition" in tagged,
+        ", ".join(tagged) or "no draft term found — run promoter.gaps write_back",
+    )
+
     check(
         "quality",
         "go lint configuration is present and enables the checks that matter",

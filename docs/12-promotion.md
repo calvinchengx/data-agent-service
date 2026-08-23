@@ -115,15 +115,46 @@ dashboard, and the service never learned it.
 | `DAS_PROMOTE_KEY_SECRET` | — | pseudonymisation key; Key Vault reference in production |
 | `DAS_PROMOTE_ROLES` | | who may call `list_dashboard_candidates` |
 
-## Still to come (15b, 16)
+## Catalog gaps: the questions that never became SQL
 
-**Catalog gaps.** Questions that never became SQL — abstentions like "what is
-our CSAT?" — are a signal the catalog has a hole, not that a dashboard is
-missing. The plan (§17) captures the agent's `search_metadata` terms, which are
-catalog-vocabulary attempts rather than anyone's sentence, thresholds them the
-same way, and writes a draft glossary term tagged *Needs Definition*. One
-honest limitation: this observes our own agent. With a third-party MCP client
-the gap signal has to come from the gateway's trace of `/om/mcp` instead.
+Promotion above watches queries that RAN. This watches the ones that did not.
+
+A person asks, the agent searches the catalog for the business's own words,
+finds nothing it can ground the question in, and says so. Five people a week
+asking about customer satisfaction is not a missing dashboard — it is a missing
+**definition**, and the person who can fix it is a steward rather than a report
+writer.
+
+An abstention is defined mechanically rather than by reading the prose: **no
+statement ran, and nothing was refused**. A refusal is a different outcome —
+the caller lacks access — and stays in the audit log with identity attached,
+because "someone keeps asking for withheld columns" is a question for security,
+not a gap for a steward.
+
+What is kept is the **catalog vocabulary the agent tried** — "customer
+satisfaction", "CSAT" — never the sentence anyone typed. Same k-threshold as a
+dashboard candidate, and for the same reason: a term one person searched for is
+that person's question.
+
+Each released gap becomes a **draft glossary term tagged `Needs Definition`**,
+in the glossary a steward already works in. A separate "things the agent could
+not answer" page would be a second place to look, and a second place to stop
+looking.
+
+```
+Contoso Commerce.Customer Satisfaction   [Catalog Gaps.Needs Definition]
+  About 3 people searched for this and the catalog had no definition to
+  ground it in (5 attempts in the window).
+```
+
+### The honest limit
+
+Only the **agent** knows it abstained — the executor never saw a query. So this
+observes our own agent. A third-party MCP client abstaining on its own tells us
+nothing, and no work here changes that: the signal would have to come from the
+gateway's trace of `/om/mcp` instead.
+
+## Still to come
 
 **Publishing** (§18) turns a released candidate into a semantic model and
 report, verifying that the DAX measure and the SQL agree before it publishes.
