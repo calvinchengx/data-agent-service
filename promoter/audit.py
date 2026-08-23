@@ -16,6 +16,24 @@ from collections.abc import Iterable, Iterator
 
 MARKER = "audit "
 
+# The executor's own caps, which the promoter has to know: a payload clipped
+# at the cap does not describe the call that was made, and guessing at the
+# missing tail would invent a template nobody ran.
+#
+# `sql` is capped at 1000 by BOTH executors (`app.py`, `main.go`). `url` is
+# capped at 300 by the Python one, the only executor with an HTTP adapter.
+# The tighter cap sits on the more dangerous string: a clipped statement
+# fails to PARSE, so it announces itself, while a URL missing its last query
+# parameter parses perfectly and describes a narrower call than the one that
+# ran. That asymmetry is why this guard exists before HTTP promotion does
+# rather than alongside it -- there would be nothing to see afterwards.
+SQL_CAP = 1000
+URL_CAP = 300
+
+# The executor operation a line came from, as a surface. `promoter.canonical`
+# dispatches on this the way the executors dispatch a guard on `Source.surface`.
+SURFACES = {"run_query": "sql", "call_operation": "http"}
+
 
 @dataclasses.dataclass(frozen=True)
 class AuditLine:
@@ -26,6 +44,16 @@ class AuditLine:
     sql: str
     tables: tuple[str, ...]
     truncated: bool
+    # The HTTP surface's payload, empty on a SQL line. `url` carries the
+    # literals a SQL statement keeps in its own text, which is why §21 says
+    # §17's no-literal guarantee is re-earned on this path and not inherited.
+    operation: str = ""
+    url: str = ""
+
+    @property
+    def surface(self) -> str:
+        """`sql` | `http` | `""` -- which canonicaliser can read this line."""
+        return SURFACES.get(self.op, "")
 
     @property
     def promotable(self) -> bool:
@@ -52,16 +80,19 @@ def parse(lines: Iterable[str]) -> Iterator[AuditLine]:
         if not isinstance(record, dict):
             continue
         sql = record.get("sql") or ""
+        url = record.get("url") or ""
+        op = record.get("op", "")
         yield AuditLine(
-            op=record.get("op", ""),
+            op=op,
             # oid is the stable subject; upn is a display name that can change.
             subject=str(record.get("oid") or record.get("user") or ""),
             source=record.get("source", ""),
             verdict=record.get("verdict", ""),
             sql=sql,
             tables=tuple(record.get("tables") or ()),
-            # The executor caps SQL at 1000 characters. A truncated statement
-            # will not parse, and guessing at the missing tail would invent a
-            # template nobody ran.
-            truncated=len(sql) >= 1000,
+            # Per surface, because the caps differ and the SQL one applied
+            # to a URL would pass every clipped URL there is.
+            truncated=(len(url) >= URL_CAP if SURFACES.get(op) == "http" else len(sql) >= SQL_CAP),
+            operation=record.get("operation", ""),
+            url=url,
         )
