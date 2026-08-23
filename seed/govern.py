@@ -122,6 +122,58 @@ def tag(term_fqn: str) -> dict:
     return {"tagFQN": term_fqn, "source": "Glossary", "labelType": "Manual", "state": "Confirmed"}
 
 
+def classification_tag(fqn: str) -> dict:
+    """A Classification label, as distinct from a Glossary one.
+
+    Both live in `tags`, and the executor's rules read them the same way -- but
+    the source differs, and OpenMetadata rejects a Classification tag labelled
+    as a Glossary one.
+    """
+    return {"tagFQN": fqn, "source": "Classification", "labelType": "Manual", "state": "Confirmed"}
+
+
+def ensure_classification(fqn: str) -> None:
+    """Make sure a tag exists, creating its classification if it is ours.
+
+    OpenMetadata ships PII, PersonalData, Tier and Certification as
+    `provider: system`. Everything else is a vocabulary an organisation
+    invented, and creating it here is what makes "the tags are yours" true
+    rather than merely claimed -- the executor privileges neither, so the seed
+    must be able to produce both.
+    """
+    classification, _, name = fqn.partition(".")
+    if not name:
+        raise SystemExit(f"{fqn!r} is not a tag FQN (expected 'Classification.Tag')")
+    # Quoted: a classification an organisation invents may contain spaces
+    # ("Contoso Restricted"), which OpenMetadata accepts and a URL path does
+    # not. Assuming otherwise would have made every vocabulary but a
+    # single-word one a special case -- the opposite of the point.
+    existing = om("GET", f"/tags/name/{urllib.parse.quote(fqn)}", ok=(200, 404))
+    if isinstance(existing, dict) and existing.get("id"):
+        return
+    om(
+        "PUT",
+        "/classifications",
+        {
+            "name": classification,
+            "description": f"Vocabulary used by this deployment's access rules ({fqn}).",
+            "mutuallyExclusive": False,
+        },
+        ok=(200, 201, 400),
+    )
+    om(
+        "PUT",
+        "/tags",
+        {
+            "name": name,
+            "classification": classification,
+            "description": f"Applied by seed/govern.py; rules may withhold columns carrying {fqn}.",
+        },
+        ok=(200, 201),
+    )
+    c.log(f"classification {fqn}: available")
+
+
 # -------------------------------------------------------------- schema read --
 def live_columns_postgres(dsn: str, schema: str) -> dict[str, list[dict]]:
     """The same reflection, in the other engine's spelling.
@@ -279,6 +331,12 @@ def govern(dataset: str) -> dict:
         for col in t.get("columns", []):
             col_terms.setdefault(col, []).append(term_fqn[name])
 
+    # 3b. classifications the dataset's access rules depend on, before any
+    # table references them.
+    for fqns in getattr(sem, "CLASSIFICATIONS", {}).values():
+        for fqn in fqns:
+            ensure_classification(fqn)
+
     # 4. tables from the live schema, with descriptions, keys and term tags
     if engine == "postgres":
         live = live_columns_postgres(src["dsn"], ds.SCHEMA)
@@ -287,6 +345,21 @@ def govern(dataset: str) -> dict:
         live = live_columns(conn, ds.SCHEMA)
         conn.close()
     table_ids: dict[str, str] = {}
+    # A classification declared for a column that does not exist is silently
+    # ignored by the catalog, and looks identical to one that worked. That is
+    # the same failure the executor refuses at startup for an unknown TAG, so
+    # the seed refuses it here for an unknown COLUMN -- caught the first time
+    # this ran, on a column I had invented.
+    declared = set(getattr(sem, "CLASSIFICATIONS", {}))
+    real = {f"{table}.{col['name']}" for table, cols in live.items() for col in cols}
+    unknown = declared - real
+    if unknown:
+        raise SystemExit(
+            "CLASSIFICATIONS names columns this schema does not have: "
+            + ", ".join(sorted(unknown))
+            + " — a label on a column that does not exist withholds nothing"
+        )
+
     for table, cols in live.items():
         keys = sem.KEYS.get(table, {})
         pk = set(keys.get("pk", []))
@@ -301,6 +374,13 @@ def govern(dataset: str) -> dict:
             elif entry:
                 col["description"] = entry
             tags = [tag(f) for f in col_terms.get(f"{table}.{col['name']}", [])]
+            # Classification labels: what the catalog knows about the DATA, as
+            # opposed to what the business calls it. Access rules may withhold
+            # a column for carrying one (docs/00-plan.md §19).
+            tags += [
+                classification_tag(f)
+                for f in getattr(sem, "CLASSIFICATIONS", {}).get(f"{table}.{col['name']}", [])
+            ]
             if tags:
                 col["tags"] = tags
         constraints = []

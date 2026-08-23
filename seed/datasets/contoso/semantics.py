@@ -201,6 +201,22 @@ COLUMNS = {
     "fct_sales.order_date": "ISO date string (varchar); cast to date before joining dim_date.",
 }
 
+# What the catalog knows about the DATA, as distinct from what the business
+# calls it. Access rules may withhold a column for carrying one of these
+# (docs/00-plan.md §19), so this is where "which columns are personal data"
+# stops being a hand-maintained list in DAS_ACCESS_RULES and becomes something
+# a steward can change.
+#
+# Two vocabularies on purpose. `PII.*` is OpenMetadata's own; `Contoso
+# Restricted.*` is one this organisation invented and the seed creates. The
+# executor privileges neither, and the witness checks both -- a deployment
+# whose classification scheme is not Microsoft's is not a special case.
+CLASSIFICATIONS = {
+    "dim_customer.email": ["PII.Sensitive"],
+    "dim_party.email": ["PII.Sensitive"],
+    "dim_customer.name": ["PII.NonSensitive", "Contoso Restricted.Commercially Confidential"],
+}
+
 # Primary / foreign keys: the "strong deterministic signals" for SQL generation.
 KEYS = {
     "dim_country": {"pk": ["country"]},

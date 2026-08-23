@@ -157,6 +157,15 @@ COLUMNS = {
     "tickets.resolved_at": "NULL while the ticket is open.",
 }
 
+# See the note in seed/datasets/contoso/semantics.py: classification labels are
+# what the catalog knows about the data, and access rules may withhold a column
+# for carrying one. The second engine gets them too, because a rule that worked
+# on only one source would be a rule nobody could trust.
+CLASSIFICATIONS = {
+    "agents.email": ["PII.Sensitive"],
+    "customers.email": ["PII.Sensitive"],
+}
+
 KEYS = {
     "customers": {"pk": ["customer_id"]},
     "agents": {"pk": ["agent_id"]},

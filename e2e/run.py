@@ -1809,6 +1809,79 @@ def quality() -> None:
         ", ".join(literal) if literal else f"{len(written_by_seed)} checked, all references",
     )
 
+    # A rule that names a TAG withholds the right columns, in a catalog whose
+    # vocabulary is partly OpenMetadata's and partly this organisation's.
+    # Neither is privileged in code, so the witness checks both.
+    import sys as _sys
+
+    _sys.path.insert(
+        0, str(pathlib.Path(__file__).resolve().parents[1] / "services" / "warehouse-query-py")
+    )
+    from access import Rules as TagRules
+
+    rules = TagRules(
+        [
+            {
+                "role": "Data.Analyst",
+                "allow_tables": ["dbo.*", "support.*"],
+                "deny_tagged": ["PII.Sensitive"],
+            }
+        ]
+    )
+    try:
+        verified = rules.verify_tags()
+    except Exception as e:  # noqa: BLE001 — an unresolvable tag IS the failure
+        verified, tag_error = set(), str(e)
+    else:
+        tag_error = ""
+    check(
+        "phase18",
+        "every tag a rule names is one the catalog actually carries",
+        verified == {"PII.Sensitive"},
+        tag_error or f"verified {sorted(verified)}",
+    )
+
+    refused, allowed = [], []
+    for column in (
+        "dbo.dim_customer.email",
+        "support.agents.email",
+        "dbo.dim_customer.customer_id",
+    ):
+        table = column.rsplit(".", 1)[0]
+        try:
+            rules.check(("Data.Analyst",), (table,), (column,))
+            allowed.append(column)
+        except Exception:  # noqa: BLE001
+            refused.append(column)
+    check(
+        "phase18",
+        "a rule naming only a tag withholds the tagged columns, on both engines",
+        refused == ["dbo.dim_customer.email", "support.agents.email"]
+        and allowed == ["dbo.dim_customer.customer_id"],
+        f"refused {refused}, allowed {allowed}",
+    )
+
+    custom = TagRules(
+        [
+            {
+                "role": "Data.Analyst",
+                "allow_tables": ["dbo.*"],
+                "deny_tagged": ["Contoso Restricted.Commercially Confidential"],
+            }
+        ]
+    )
+    try:
+        custom.check(("Data.Analyst",), ("dbo.dim_customer",), ("dbo.dim_customer.name",))
+        vocab_ok, detail = False, "a custom classification did not withhold its column"
+    except Exception as e:  # noqa: BLE001
+        vocab_ok, detail = "may not read" in str(e), str(e)[:70]
+    check(
+        "phase18",
+        "an organisation's own classification is not a second-class vocabulary",
+        vocab_ok,
+        detail,
+    )
+
     check(
         "quality",
         "go lint configuration is present and enables the checks that matter",
