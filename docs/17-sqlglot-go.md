@@ -105,8 +105,13 @@ guard and a **gap** in the report — never a silent divergence.
 
 * `~/calvinchengx/emulators/sqlglot-go` — family conventions: Go, Makefile
   verbs, parity ledger, CI, a `ghcr.io` image is not needed (library).
-* MIT, with Toby Mao's copyright carried alongside, and the reference commit
-  named in the README.
+* **Apache 2.0**, matching `data-agent-service`. MIT permits a derivative
+  under a different license provided the original notice travels with it, so
+  the repo carries: `LICENSE` (Apache 2.0, our copyright), `LICENSE.sqlglot`
+  (Toby Mao's MIT text, verbatim), and a `NOTICE` stating that the
+  architecture, expression model and parser design derive from sqlglot at the
+  pinned commit. Apache 2.0 requires downstream users to propagate `NOTICE`,
+  so the executor's distroless image ships it too, and CI checks that it does.
 * Go 1.26, `CGO_ENABLED=0`, zero non-stdlib runtime dependencies — the
   executor's static distroless image is the constraint.
 
