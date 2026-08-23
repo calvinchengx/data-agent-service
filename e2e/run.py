@@ -2480,6 +2480,13 @@ def quality() -> None:
         # the tail wagging the dog.
         "docs nav vs docs/": "no git binary here, and the check needs `git ls-files` by design; "
         "`make lint` and the quality CI job own it",
+        # Excused HERE and run somewhere else, which is the case this table
+        # exists to distinguish from "not run at all". The classifier decides
+        # whether the quality job runs, so it cannot also be a step inside it:
+        # ci.yml's `changes` job runs `--self-test` before anything is gated,
+        # every time, on a runner that has git.
+        "docs-only classifier": "runs in ci.yml's `changes` job, ahead of this one and of the gate "
+        "it feeds; `make lint` owns it locally",
     }
     check(
         "quality",

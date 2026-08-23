@@ -61,6 +61,10 @@ FORBIDDEN = {
 # `path::finding`; the reason is printed in the report so the exception is
 # read as often as the rule.
 ALLOWED = {
+    "scripts/docs_only_change.py::emulator hostname": "the REPOSITORY this classifier was ported from, named in its docstring "
+    "so the next person can read the original and the reasoning behind it. "
+    "`fabric-emulator` here is a sibling project on GitHub, not a host anything "
+    "resolves -- the checker matches the name, which is the right default",
     "tests/test_ask_authn.py::emulator hostname": "the unit suite's fixture issuer, for the ask service's verifier. "
     "Nothing here reaches a network -- the key set is a generated RSA key and "
     "urlopen is replaced -- and a test that signs tokens must name the issuer "
