@@ -14,8 +14,8 @@ drifted without anyone noticing for two phases.
 | PostgreSQL | ✅ | ✅ | — |
 | DuckDB | ✅ | ✅ opt-in, `-tags duckdb` — decided, not pending | see D1 |
 | Databricks | ✅ unwitnessed | ❌ | adapter. A PAT is configurable in both since `credential` covers SQL sources, and the credential path IS witnessed against a real product stack — see below. The adapter's row decoding is not, and cannot be here: `docs/upstream-issues.md` 12 |
-| HTTP surface (`list_operations`, `describe_operation`, `call_operation`) | ✅ | ❌ | three operations + `httpguard` |
-| REST adapter | ✅ | ❌ | adapter |
+| HTTP surface (`list_operations`, `describe_operation`, `call_operation`) | ✅ | ✅ | — |
+| REST adapter | ✅ | ✅ | — |
 | SQL guard | parser-backed | parser-backed | — |
 
 The last row is the one that matters. Everything above it is work; the guard
@@ -252,10 +252,38 @@ backend rather than falling through to Fabric — that fall-through is the
 failure the router exists to prevent, and a build tag must not quietly
 reintroduce it.
 
-**Still to do: D2 (HTTP surface and REST adapter) and D3 (Databricks).**
-Neither is started. D2 is the larger — three operations, an `httpguard.go`
-mirroring `httpguard.py`, and a `RestBackend`, roughly 600 lines including its
-share of the guard corpus.
+**D2 is done.** `httpguard.go`, `sources_rest.go` and `http_routes.go`: the
+three operations, the guard, and an adapter that executes a verdict and decides
+nothing.
+
+It was built oracle-first, which is what the SQL guard's parity had already
+proved and what the HTTP surface did not have. `services/contract/http_spec.json`
+is the OpenAPI document BOTH guards read, so a disagreement is about the guard
+rather than about what either was shown; `http_corpus.json` records what the
+Python guard does with it. The Go guard agrees on all 14 cases.
+
+Two divergences were caught by that corpus during the port, and neither would
+have been found by testing the Go side alone. Python's `!r` renders single
+quotes where Go's `%q` renders double, and the refusal REASON is contract.
+And percent-encoding: Python's unreserved set matches neither `url.PathEscape`
+(which leaves `/` alone) nor `url.QueryEscape` (which writes a space as `+`) --
+and a `/` left unescaped in a path parameter is how `id=a/../b` climbs out of
+the collection it was checked against.
+
+A third was caught by the conformance suite once it started CALLING the surface
+rather than checking it was published: the Go executor served
+`POST /operations/call` where the Python one serves `POST /call`. Both passed
+their own tests; a client written against one would have got 405 from the other.
+
+Verified against OpenMetadata's own API — a real OpenAPI document neither
+implementation was written against — where the two agree on 46 operations, 94
+response fields and 5 parameters, and refuse an undeclared parameter with the
+same sentence. The contract now runs those checks against both executors on
+every build, and the surface is no longer optional: it was excused because the
+Go executor had no REST adapter, which stopped being true here.
+
+**Still to do: D3 (Databricks).** Not started. `databricks-sql-go` builds with
+`CGO_ENABLED=0`, so unlike DuckDB it costs the image nothing.
 
 ## Phase E — the contract runs against both, always
 
@@ -304,7 +332,7 @@ means:
 | E | contract drift between implementations | ½ day |
 | C | divergence nobody thought to test | 1 day |
 | D1 DuckDB | an adapter | ½ day |
-| D2 HTTP + REST | a surface and an adapter | 2–3 days |
+| D2 HTTP + REST | a surface and an adapter | **done** |
 | D3 Databricks | an adapter, when witnessable | ½ day |
 
 A, B and E first — they are what make the rest *stay* true.

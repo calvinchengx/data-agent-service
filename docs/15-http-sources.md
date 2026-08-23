@@ -107,6 +107,13 @@ quietly, in the same way the PostgreSQL gap was quiet. Either implement both,
 or record the exception in the ADR and the parity ledger **before** landing the
 Python half.
 
+**Resolved: both.** The Go adapter landed in Phase D2, built against the same
+OpenAPI document and the same recorded verdicts as the Python one, and the
+conformance suite now CALLS the surface against both rather than checking it
+was published. The exemption that let the Go executor omit it is gone, so the
+next implementation to drop it fails a build instead of being forgiven. See
+Phase D2 in `docs/16-go-parity.md`.
+
 ---
 
 ## REST — estimate
