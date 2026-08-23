@@ -48,7 +48,7 @@ guard needs and grows outward, and each tier is a shippable state.
 
 | Component | Reference | Port |
 |---|---|---|
-| Tokenizer | `tokens.py`, `tokenizer_core.py` (~1,000 lines) | full — it is small and every dialect relies on it |
+| Tokenizer | `tokens.py`, `tokenizer_core.py` (~1,000 lines) | **done** — ported in full; 2,171/2,171 corpus statements lex identically to the reference, positions and comments included |
 | Expression core | `expressions/core.py`: `Expression`, `walk`, `find_all`, `args`, `sql()` | full |
 | Node types | the ~40 the guard touches: `Select`, `From`, `Join`, `Lateral`, `Table`, `Column`, `Star`, `Identifier`, `Literal`, `Subquery`, `CTE`, `With`, `Union`/`Intersect`/`Except`, `Limit`, `LimitOptions`, `Offset`, `Order`, `Group`, `Having`, `Where`, `Alias`, `Anonymous`, `Func`, `Dot`, the DML/DDL nodes it refuses | these, plus the expression-language nodes a SELECT needs (`Binary`, `Unary`, `Case`, `Cast`, `In`, `Between`, `Like`, `Paren`, `Null`, `Boolean`) |
 | Parser | `parser.py`: `_parse_statement` → `_parse_select`, CTEs, set ops, `_parse_table`, joins including comma and APPLY, `_parse_limit`/`TOP`, the expression precedence climber, function calls | the SELECT grammar in full; DML/DDL recognised **only far enough to refuse** (statement keyword → node), not parsed |
@@ -57,6 +57,14 @@ guard needs and grows outward, and each tier is a shippable state.
 
 Exit: `sqlguard.go` is rewritten over the tree, its recogniser deleted, and it
 passes the shared refusal corpus and the contract against both executors.
+
+**Status.** The tokenizer is complete and verified against the reference token
+for token — type, text, line, column, offsets, attached comments — over the
+whole corpus. Its keyword and dialect tables are generated from the pinned
+reference rather than transcribed, and CI regenerates and diffs them. Unlike
+the parser, the tokenizer has no gap tier: a statement it cannot lex is one the
+parser above it cannot see at all, so anything the reference lexes, the port
+must lex the same way. Next is the expression core and the SELECT grammar.
 
 ### Tier 2 — everything a SELECT can contain
 
