@@ -69,7 +69,9 @@ def _cell(value) -> str:
     return str(value).strip().lower()
 
 
-def rows_match(actual: list[list], gold: list[list], *, ordered: bool, tol=0.02) -> bool:
+def rows_match(
+    actual: list[list] | None, gold: list[list] | None, *, ordered: bool, tol=0.02
+) -> bool:
     if actual is None or gold is None:
         return False
     if len(actual) != len(gold):
@@ -135,7 +137,9 @@ def _row_carries(row_a: tuple, row_g: tuple, tol: float) -> bool:
     return True
 
 
-def rows_contain(actual: list[list], gold: list[list], *, ordered: bool, tol=0.02) -> bool:
+def rows_contain(
+    actual: list[list] | None, gold: list[list] | None, *, ordered: bool, tol=0.02
+) -> bool:
     """Does the agent's result set CARRY the gold answer?
 
     Strict equality asks whether two SELECT lists match, which is a question

@@ -322,9 +322,7 @@ def evaluate(
         answer.text, catalog_had_definitions=catalog_had_definitions
     )
     s.grounding = scoring.grounding(set(answer.tables), question.get("gold_tables", []))
-    s.grounding_exact = scoring.grounding_exact(
-        set(answer.tables), question.get("gold_tables", [])
-    )
+    s.grounding_exact = scoring.grounding_exact(set(answer.tables), question.get("gold_tables", []))
     if question.get("required_semantics") or question.get("forbidden_semantics"):
         s.semantics = scoring.semantics(
             answer.sql,
