@@ -41,6 +41,64 @@ class ToolCall:
     ms: int
 
 
+@dataclasses.dataclass(frozen=True)
+class Hop:
+    """One model turn, and where its time went.
+
+    A question costs 26s at the median over roughly seven of these, and until
+    this existed the only recorded numbers were the TOTAL and a count of tool
+    calls -- which cannot say whether the cost is grounding the question,
+    discovering a schema, or running the query. Ranking the levers in §21
+    without this would be guessing.
+
+    `phase` comes from `milestone_for` rather than a second classification of
+    the same tool names: two classifiers that can disagree eventually do, and
+    then the latency report and the event stream describe different runs. A
+    turn that asked for nothing is `answering`; a turn whose calls disagree is
+    `mixed`, because one turn's model time genuinely cannot be attributed to
+    two phases and rounding that away would invent the precision.
+    """
+
+    index: int
+    phase: str
+    model_ms: int
+    tool_ms: int
+    tools: tuple[str, ...]
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+
+    def as_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+def _hop_phase(calls: list[ToolCall]) -> str:
+    """The phase to bill this turn to, or why it cannot be billed to one."""
+    if not calls:
+        return "answering"
+    seen = {(milestone_for(c) or {}).get("phase") or "other" for c in calls}
+    return seen.pop() if len(seen) == 1 else "mixed"
+
+
+def _hop(index: int, calls: list[ToolCall], model_ms: int, usage: Any, phase: str = "") -> Hop:
+    """One turn's record, built from the response's own usage.
+
+    Module level rather than a closure in the loop: a nested function reading
+    `model_ms` from the enclosing iteration is correct only while it is called
+    in the same one, which is a property nothing enforces.
+    """
+    return Hop(
+        index=index,
+        phase=phase or _hop_phase(calls),
+        model_ms=model_ms,
+        tool_ms=sum(c.ms for c in calls),
+        tools=tuple(c.name for c in calls),
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+    )
+
+
 @dataclasses.dataclass
 class Answer:
     text: str
@@ -52,6 +110,19 @@ class Answer:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     hops: int = 0
+    hop_detail: list[Hop] = dataclasses.field(default_factory=list)
+
+    def phase_ms(self) -> dict[str, int]:
+        """Model time by phase, which is the ranking §21 step 0 exists for.
+
+        Tool time is reported separately and deliberately not folded in: the
+        gateway path is p95 17.5ms, so a phase that looks expensive is
+        expensive in the MODEL, and adding the two would hide that.
+        """
+        out: dict[str, int] = {}
+        for hop in self.hop_detail:
+            out[hop.phase] = out.get(hop.phase, 0) + hop.model_ms
+        return dict(sorted(out.items(), key=lambda kv: -kv[1]))
 
     @property
     def sql(self) -> list[str]:
@@ -302,6 +373,7 @@ def ask(
     client = client or model_client()
     messages: list[dict] = [*(history or []), {"role": "user", "content": question}]
     calls: list[ToolCall] = []
+    hop_detail: list[Hop] = []
     started = time.time()
     tokens_in = tokens_out = cache_read = cache_write = hops = 0
     stop_reason = ""
@@ -317,11 +389,13 @@ def ask(
             cache_read,
             cache_write,
             hops,
+            hop_detail,
         )
 
     for _ in range(MAX_STEPS):
         if cancelled and cancelled():
             return finish("(cancelled)", "cancelled")
+        hop_t0 = time.time()
         response = client.beta.messages.create(
             model=model,
             max_tokens=16000,
@@ -334,6 +408,7 @@ def ask(
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",
         )
+        model_ms = int((time.time() - hop_t0) * 1000)
         hops += 1
         tokens_in += response.usage.input_tokens
         tokens_out += response.usage.output_tokens
@@ -341,19 +416,27 @@ def ask(
         cache_write += getattr(response.usage, "cache_creation_input_tokens", 0) or 0
         stop_reason = response.stop_reason or ""
 
+        # Both of these turns cost model time, and neither reaches the two
+        # places below that record one. Left unrecorded, a run that paused
+        # twice would report its remaining hops as the whole cost and the
+        # phase ranking would be drawn from a total that never happened.
         if stop_reason == "refusal":
+            hop_detail.append(_hop(hops, [], model_ms, response.usage, phase="refused"))
             return finish("(the model declined to answer this question)", stop_reason)
         if stop_reason == "pause_turn":
+            hop_detail.append(_hop(hops, [], model_ms, response.usage, phase="paused"))
             messages.append({"role": "assistant", "content": response.content})
             continue
 
         uses = [b for b in response.content if b.type == "tool_use"]
         if not uses:
+            hop_detail.append(_hop(hops, [], model_ms, response.usage))
             text = "".join(b.text for b in response.content if b.type == "text")
             return finish(text.strip(), stop_reason)
 
         messages.append({"role": "assistant", "content": response.content})
         results = []
+        turn: list[ToolCall] = []
         for use in uses:
             t0 = time.time()
             text, is_error = toolbox.call(use.name, dict(use.input))
@@ -361,6 +444,7 @@ def ask(
                 use.name, dict(use.input), text, is_error, int((time.time() - t0) * 1000)
             )
             calls.append(call)
+            turn.append(call)
             if on_step:
                 on_step(_describe(call))
             if on_event:
@@ -396,6 +480,7 @@ def ask(
                     block.pop("cache_control", None)
         results[-1]["cache_control"] = {"type": "ephemeral"}
         messages.append({"role": "user", "content": results})
+        hop_detail.append(_hop(hops, turn, model_ms, response.usage))
 
     return finish("(gave up: too many steps without an answer)", "max_steps")
 

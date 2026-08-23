@@ -201,6 +201,12 @@ class Result:
     tokens_in: int
     tokens_out: int
     ms: int
+    # §21 step 0. Defaulted because not every agent adapter returns an
+    # `agent.Answer` -- the gold arm is a scripted oracle with no model turns
+    # at all -- and an arm that cannot report hops should say nothing rather
+    # than report zero, which would drag a median it never took part in.
+    phase_ms: dict = dataclasses.field(default_factory=dict)
+    hops: int = 0
 
     @property
     def passed(self) -> bool:
@@ -391,6 +397,8 @@ def run(
                 answer.input_tokens,
                 answer.output_tokens,
                 answer.ms or int((time.time() - t0) * 1000),
+                answer.phase_ms() if hasattr(answer, "phase_ms") else {},
+                getattr(answer, "hops", 0),
             )
             results.append(result)
             # Three outcomes, three labels. A decline printed as FAIL reads as
@@ -439,6 +447,7 @@ def summarise(results: list[Result]) -> dict:
             # itself rather than borrow the authority of a percentage.
             "pass_rate_95ci": stats.wilson(sum(1 for r in scored if r.passed), len(scored)),
         }
+    timed = [r.hops for r in results if r.hops]
     return {
         "n": len(results),
         "passed": sum(1 for r in results if r.passed),
@@ -457,7 +466,22 @@ def summarise(results: list[Result]) -> dict:
         "tool_calls_median": statistics.median([r.tool_calls for r in results]) if results else 0,
         "tokens_out_total": sum(r.tokens_out for r in results),
         "ms_median": statistics.median([r.ms for r in results]) if results else 0,
+        "hops_median": statistics.median(timed) if timed else 0,
+        # Total model milliseconds per phase across the arm, most expensive
+        # first. This is the ranking §21 step 0 exists to produce: it says
+        # whether the 26s is spent grounding the question, discovering a
+        # schema, or running the query -- which a total and a tool-call count
+        # cannot say, and which decides which lever is worth building.
+        "phase_ms_total": _phase_totals(results),
     }
+
+
+def _phase_totals(results: list[Result]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for r in results:
+        for phase, ms in (r.phase_ms or {}).items():
+            out[phase] = out.get(phase, 0) + ms
+    return dict(sorted(out.items(), key=lambda kv: -kv[1]))
 
 
 def fingerprint(usecase: str, model: str, effort: str, om: bool, agent_kind: str) -> dict:
@@ -591,6 +615,8 @@ def main() -> int:
                     "tool_calls": r.tool_calls,
                     "tokens_out": r.tokens_out,
                     "ms": r.ms,
+                    "hops": r.hops,
+                    "phase_ms": r.phase_ms,
                 }
                 for r in results
             ],
