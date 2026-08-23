@@ -65,11 +65,13 @@ Window functions, `GROUP BY` extensions, `QUALIFY`, `PIVOT`/`UNPIVOT`,
 with the type grammar. Driven by sqlglot's dialect fixtures: the tier is done
 when `tests/dialects/test_{tsql,postgres,duckdb,databricks}.py` round-trip.
 
-### Tier 3 — the rest of sqlglot, if ever
+### Tier 3 — the rest of sqlglot
 
 DML/DDL parsing (not just refusal), the remaining 30 dialects, the optimizer,
-transpilation. Explicitly **out of scope** for this service. Listed so nobody
-mistakes Tier 2 for "done" — and so the repo's README can say what it is not.
+transpilation. **Deferred, not abandoned** — the intent is a complete port, and
+Tier 3 is the rest of the road. It is simply not what data agent service needs,
+so it is not what gets built first. Listed so nobody mistakes Tier 2 for "done",
+and so the repo's README can say where the port currently stands.
 
 ## Verification — the part that makes this safe to ship
 
@@ -93,9 +95,10 @@ guard and a **gap** in the report — never a silent divergence.
 
 ## What the port is not
 
-* Not `sqlglot-go` in the sense of "sqlglot, in Go": Tier 3 is out of scope.
-  The name is kept because the architecture is sqlglot's and the attribution
-  should be unmistakable.
+* Not yet `sqlglot-go` in the full sense of "sqlglot, in Go" — Tier 3 is
+  deferred, so at Tier 2 the port covers SELECT and four dialects, not the
+  whole library. The name is the destination, and it is kept because the
+  architecture is sqlglot's and the attribution should be unmistakable.
 * Not a transpiler. `sql()` exists to emit the rewritten statement, not to
   translate between dialects.
 * Not a fork that tracks upstream. It pins a reference commit; moving the pin
