@@ -76,12 +76,12 @@ func toolDefinitions() []map[string]any {
 		},
 		{
 			"name": "describe_table",
-			"description": "Columns, types, nullability and key constraints of one table, e.g. " +
-				"'dbo.fct_revenue_summary'. ALWAYS describe a table before writing SQL against " +
-				"it — never guess a column name.",
+			"description": "Columns, types, nullability and key constraints of one table, named " +
+				"exactly as list_tables returned it. ALWAYS describe a table before writing SQL " +
+				"against it — never guess a column name.",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
 				"table": map[string]any{"type": "string",
-					"description": "Schema-qualified table name, e.g. dbo.fct_sales."},
+					"description": "Schema-qualified table name, as list_tables returns it."},
 				"source": sourceProp,
 			}, "required": []string{"table"}, "additionalProperties": false},
 		},

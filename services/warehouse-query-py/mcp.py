@@ -124,16 +124,16 @@ def tool_definitions(default_source: str | None, dialect: str) -> list[dict]:
         {
             "name": "describe_table",
             "description": (
-                "Columns, types, nullability and key constraints of one table, e.g. "
-                "'dbo.fct_revenue_summary'. ALWAYS describe a table before writing SQL "
-                "against it — never guess a column name."
+                "Columns, types, nullability and key constraints of one table, named "
+                "exactly as list_tables returned it. ALWAYS describe a table before "
+                "writing SQL against it — never guess a column name."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "table": {
                         "type": "string",
-                        "description": "Schema-qualified table name, e.g. dbo.fct_sales.",
+                        "description": "Schema-qualified table name, as list_tables returns it.",
                     },
                     "source": _SOURCE_PROP,
                 },

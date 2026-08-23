@@ -412,8 +412,8 @@ def run_query(
         ...,
         examples=[
             {
-                "sql": "SELECT TOP 10 * FROM dbo.fct_revenue_summary",
-                "source": "contoso_warehouse",
+                "sql": "SELECT COUNT(*) AS n FROM <schema>.<table>",
+                "source": "<a name from list_sources>",
                 "maxRows": 100,
             }
         ],

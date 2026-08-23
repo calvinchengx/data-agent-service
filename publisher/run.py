@@ -1,6 +1,6 @@
 """Publish the top dashboard candidate, end to end.
 
-    python -m publisher.run --user carol@entraemulator.dev
+    python -m publisher.run --user <upn of a user who may publish>
 
 Reads the promoter's candidates, offers the highest-scoring one to every
 target `DAS_DASHBOARD_TARGETS` names, publishes it to each that accepts it,
@@ -94,7 +94,11 @@ def _dax_type(sql_type: str) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--user", default="carol@entraemulator.dev")
+    # WHO publishes is deployment configuration, not a default in code: a
+    # scheduled job reads it from DAS_PUBLISH_USER, a person passes --user.
+    ap.add_argument(
+        "--user", default=c.CFG.get("DAS_PUBLISH_USER", ""), help="the UPN to publish as"
+    )
     ap.add_argument("--candidates", default=str(CANDIDATES))
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
@@ -106,6 +110,9 @@ def main() -> int:
     released = json.loads(report_path.read_text()).get("released", [])
     if not released:
         print("the promoter released nothing; there is nothing to publish")
+        return 1
+    if not a.user:
+        print("no publishing identity: pass --user or set DAS_PUBLISH_USER")
         return 1
 
     token = identity.token_for(a.user)

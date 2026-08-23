@@ -106,6 +106,32 @@ def test_no_candidates_file_is_reported_rather_than_crashing(monkeypatch, tmp_pa
     assert "run `python -m promoter.run`" in capsys.readouterr().out
 
 
+def test_a_release_with_no_identity_is_refused_before_any_token_is_minted(
+    monkeypatch, tmp_path, capsys
+):
+    """Who publishes is configuration, not a default in code. With neither
+    --user nor DAS_PUBLISH_USER the job stops here, and says which."""
+    path = _candidate_file(tmp_path, "contoso_warehouse")
+    monkeypatch.setattr(
+        run.c, "CFG", {k: v for k, v in run.c.CFG.items() if k != "DAS_PUBLISH_USER"}
+    )
+    monkeypatch.setattr(run.identity, "token_for", lambda *_a, **_k: pytest.fail("token minted"))
+    monkeypatch.setattr("sys.argv", ["run", "--candidates", str(path)])
+    assert run.main() == 1
+    assert "DAS_PUBLISH_USER" in capsys.readouterr().out
+
+
+def test_the_publishing_identity_can_come_from_configuration(monkeypatch, tmp_path):
+    path = _candidate_file(tmp_path, "contoso_warehouse")
+    seen = []
+    monkeypatch.setattr(run.c, "CFG", {**run.c.CFG, "DAS_PUBLISH_USER": "job@example.test"})
+    monkeypatch.setattr(run.identity, "token_for", lambda upn: seen.append(upn) or "tok")
+    monkeypatch.setattr(run.c, "load_state", dict)
+    monkeypatch.setattr("sys.argv", ["run", "--candidates", str(path)])
+    run.main()
+    assert seen == ["job@example.test"]
+
+
 def test_an_empty_release_is_reported(monkeypatch, tmp_path, capsys):
     path = tmp_path / "candidates.json"
     path.write_text(json.dumps({"released": []}))
@@ -319,7 +345,9 @@ def test_a_candidate_from_another_engine_is_skipped_with_a_reason(monkeypatch, t
     path = _candidate_file(tmp_path, "contoso_support")
     monkeypatch.setattr(run.identity, "token_for", lambda *_a, **_k: "tok")
     monkeypatch.setattr(run.c, "load_state", lambda: {"warehouse_name": "contoso_warehouse"})
-    monkeypatch.setattr("sys.argv", ["run", "--candidates", str(path)])
+    monkeypatch.setattr(
+        "sys.argv", ["run", "--user", "someone@example.test", "--candidates", str(path)]
+    )
     assert run.main() == 1
     out = capsys.readouterr().out
     assert "powerbi cannot take" in out and "not the Fabric warehouse" in out
@@ -354,7 +382,9 @@ def test_the_cli_publishes_and_records_when_the_answers_agree(monkeypatch, tmp_p
         lambda *_a, **_k: [{"fct_revenue_summary[country]": "AU", "[Net Revenue]": 5.0}],
     )
     monkeypatch.setattr(publish, "record_lineage", lambda *a, **k: recorded.append(a))
-    monkeypatch.setattr("sys.argv", ["run", "--candidates", str(path)])
+    monkeypatch.setattr(
+        "sys.argv", ["run", "--user", "someone@example.test", "--candidates", str(path)]
+    )
 
     assert run.main() == 0
     assert recorded, "an agreeing dashboard was not recorded in the catalog"
@@ -392,7 +422,9 @@ def test_the_cli_refuses_and_records_nothing_when_they_disagree(monkeypatch, tmp
         lambda *_a, **_k: [{"fct_revenue_summary[country]": "AU", "[Revenue Usd]": 5.0}],
     )
     monkeypatch.setattr(publish, "record_lineage", lambda *a, **k: recorded.append(a))
-    monkeypatch.setattr("sys.argv", ["run", "--candidates", str(path)])
+    monkeypatch.setattr(
+        "sys.argv", ["run", "--user", "someone@example.test", "--candidates", str(path)]
+    )
 
     assert run.main() == 2
     assert recorded == []
@@ -533,7 +565,9 @@ def test_a_measure_no_target_can_express_is_skipped_before_anything_is_created(
     )
     monkeypatch.setattr(run.catalognames, "for_columns", dict)
     monkeypatch.setattr(publish, "publish", lambda *a, **k: published.append(a) or None)
-    monkeypatch.setattr("sys.argv", ["run", "--candidates", str(path)])
+    monkeypatch.setattr(
+        "sys.argv", ["run", "--user", "someone@example.test", "--candidates", str(path)]
+    )
 
     assert run.main() == 1, "a candidate nothing can express is not a successful run"
     out = capsys.readouterr().out
