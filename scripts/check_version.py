@@ -36,8 +36,24 @@ import tomllib
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 # Anything a reader could copy and run. Both surfaces publish these.
 TARGETS = ("docs/18-releases.md", "site/index.html", "README.md")
-PULL = re.compile(
-    r"(docker pull ghcr\.io/calvinchengx/data-agent-service/executor-(?:go|py):)(\d+\.\d+\.\d+)"
+# Each pattern is (prefix, version) so one substitution serves them all.
+#
+# "Only pull commands" was the original scope and it was too narrow. A release
+# pill at the top of the landing page states a version and LINKS to that
+# release, which tells a reader what is current at least as loudly as a pull
+# command does -- and it went on naming v0.1.0 after v0.1.1 shipped. v0.1.1 was
+# a SECURITY release (the executor-go comma-join authorization bypass), so the
+# front page was advertising, and linking to, the version with the hole in it.
+CURRENT = (
+    (
+        "pull command",
+        re.compile(
+            r"(docker pull ghcr\.io/calvinchengx/data-agent-service/executor-(?:go|py):)"
+            r"(\d+\.\d+\.\d+)"
+        ),
+    ),
+    ("release link", re.compile(r"(/releases/tag/v)(\d+\.\d+\.\d+)")),
+    ("release pill", re.compile(r"(<span>v)(\d+\.\d+\.\d+)(?=</span>)")),
 )
 PYPROJECT = ROOT / "pyproject.toml"
 
@@ -120,27 +136,32 @@ def main() -> int:
         return 1
 
     stale: list[str] = []
+    checked = 0
     for name in TARGETS:
         path = ROOT / name
         if not path.exists():
             continue
-        text = path.read_text()
-        found = PULL.findall(text)
-        wrong = [v for _, v in found if v != version]
-        if not wrong:
-            continue
-        if args.fix:
-            path.write_text(PULL.sub(rf"\g<1>{version}", text))
-            print(f"fixed {name}: {', '.join(sorted(set(wrong)))} -> {version}")
-        else:
-            stale.extend(f"  {name}: tells the reader to pull {v}" for v in sorted(set(wrong)))
+        text = original = path.read_text()
+        for what, pattern in CURRENT:
+            found = pattern.findall(text)
+            checked += len(found)
+            wrong = {m[1] for m in found if m[1] != version}
+            if not wrong:
+                continue
+            if args.fix:
+                text = pattern.sub(rf"\g<1>{version}", text)
+            else:
+                stale.extend(f"  {name}: {what} names {v}" for v in sorted(wrong))
+        if args.fix and text != original:
+            path.write_text(text)
+            print(f"fixed {name}")
 
     if stale:
-        print(f"pull commands naming a version that is not the released one ({version}):")
+        print(f"a reader is pointed at a version that is not the released one ({version}):")
         print("\n".join(stale))
         print("\nRun `python -m scripts.check_version --fix`.")
         return 1
-    print(f"every pull command names the released version ({version})")
+    print(f"{checked} version references all name the released version ({version})")
     return 0
 
 
