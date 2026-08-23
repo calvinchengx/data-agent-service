@@ -18,9 +18,12 @@ import dataclasses
 import hashlib
 import hmac
 import re
+from typing import Protocol
 
 import sqlglot
 from sqlglot import exp
+
+from promoter.audit import AuditLine
 
 # Buckets, not counts: "how many distinct values has this slot seen" is a
 # design question about the dashboard; the exact number edges toward
@@ -192,6 +195,71 @@ def canonicalise(sql: str, dialect: str = "") -> Template:
         dimensions=dimensions,
         slots=tuple(sorted(slots, key=lambda s: (s.column, s.type))),
     )
+
+
+class CanonicaliseError(Exception):
+    """A line that cannot be reduced to a template.
+
+    One exception rather than each surface's own parser errors, so the store
+    does not import `sqlglot` to learn that a statement did not parse -- and
+    so a second surface's failures are handled by code written before it
+    existed. `store.build` catching `sqlglot.errors.ParseError` directly was
+    the SQL surface leaking into the dispatcher.
+    """
+
+
+class Canonicaliser(Protocol):
+    """Reduce one audit line to a literal-free template.
+
+    The same seam the executors already have twice: `sqlguard` and `httpguard`
+    are one idea dispatched on `Source.surface`, and this is that idea on the
+    promoter's side of the log. §21 -- the fast path is built against this
+    protocol, never against `Template`, because a question that recurs against
+    a REST collection recurs exactly as much as one against a table.
+
+    What a surface must supply: a canonical form that collapses two runs of
+    the same intent, a hash of it, the entities read, and the slots where
+    literals were -- carrying the POSITION of each literal and never its
+    value (§17).
+    """
+
+    surface: str
+
+    def canonicalise(self, line: AuditLine, *, dialect: str = "") -> Template: ...
+
+
+class SqlCanonicaliser:
+    """SELECT statements, via sqlglot. The surface this started as."""
+
+    surface = "sql"
+
+    def canonicalise(self, line: AuditLine, *, dialect: str = "") -> Template:
+        try:
+            return canonicalise(line.sql, dialect)
+        except (sqlglot.errors.ParseError, sqlglot.errors.TokenError) as e:
+            raise CanonicaliseError(f"{line.source}: {e}") from None
+
+
+CANONICALISERS: dict[str, Canonicaliser] = {"sql": SqlCanonicaliser()}
+
+
+def canonicaliser_for(surface: str) -> Canonicaliser:
+    """The canonicaliser for a surface, or a refusal naming what exists.
+
+    An unknown surface is an ERROR rather than a fall back to SQL, for the
+    reason `backend_router.go` gives about source kinds: a default that
+    quietly handles the case it was not written for is how a gap survives a
+    green suite. Reducing a REST call with a SQL parser would not fail, it
+    would fail to CLUSTER -- and that reads as "nobody asks the same thing
+    twice" rather than as a missing adapter.
+    """
+    try:
+        return CANONICALISERS[surface]
+    except KeyError:
+        raise LookupError(
+            f"no canonicaliser for surface {surface!r} "
+            f"(built: {', '.join(sorted(CANONICALISERS)) or 'none'})"
+        ) from None
 
 
 def pseudonym(subject: str, key: bytes, window: str) -> str:

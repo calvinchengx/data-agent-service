@@ -13,10 +13,13 @@ import collections
 import dataclasses
 import os
 
-import sqlglot
-
 from promoter.audit import AuditLine
-from promoter.canonical import Template, canonicalise, pseudonym
+from promoter.canonical import (
+    CanonicaliseError,
+    Template,
+    canonicaliser_for,
+    pseudonym,
+)
 
 
 @dataclasses.dataclass
@@ -82,9 +85,15 @@ def build(
         if not line.subject:
             skipped.no_subject += 1
             continue
+        # Dispatched on the line's surface rather than assuming SQL. The
+        # dialect is passed for the surfaces that have one; a surface without
+        # dialects ignores it, the way `Source` carries `dsn` for one kind of
+        # backend and `base_url` for another.
         try:
-            template = canonicalise(line.sql, source_dialects.get(line.source, ""))
-        except (sqlglot.errors.ParseError, sqlglot.errors.TokenError):
+            template = canonicaliser_for(line.surface).canonicalise(
+                line, dialect=source_dialects.get(line.source, "")
+            )
+        except CanonicaliseError:
             skipped.unparseable += 1
             continue
 
