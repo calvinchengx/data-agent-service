@@ -152,7 +152,7 @@ footer a{text-decoration:none}
       <a class="btn ghost" href="#status">Honest status</a>
     </div>
     <div class="stats">
-      <div class="stat"><b>163</b><span>end-to-end witnesses</span></div>
+      <div class="stat"><b id="witness-count">&mdash;</b><span>end-to-end witnesses</span></div>
       <div class="stat"><b>28</b><span>contract checks, both executors</span></div>
       <div class="stat"><b>44</b><span>eval questions, 5 tiers</span></div>
       <div class="stat"><b>4</b><span>source adapters shipped</span></div>
@@ -483,5 +483,24 @@ ENV=prod make test  # the same checks against a real tenant</code></pre>
   </div>
 </footer>
 
+
+<script>
+  // The count is read from the same manifest the README badge reads, published
+  // beside this page by the docs-site workflow, in the manifest's own schema
+  // rather than the badge's. A number typed into the page
+  // went stale three times in one day, because witnesses are added faster than
+  // anyone remembers where the total is written down.
+  //
+  // The fallback is an em dash, not a number: if the manifest cannot be read,
+  // the page should say nothing rather than something possibly untrue.
+  fetch('witnesses-manifest.json')
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (d && d.total) {
+        document.getElementById('witness-count').textContent = d.total;
+      }
+    })
+    .catch(function () {});
+</script>
 </body>
 </html>
