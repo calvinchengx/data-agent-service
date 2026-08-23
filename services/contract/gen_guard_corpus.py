@@ -67,7 +67,10 @@ def statements() -> list[tuple[str, str, str]]:
             body = ast.dump(node)
             dialect = "duckdb" if "id='D'" in body else "tsql"
             for decorator in node.decorator_list:
-                if isinstance(decorator, ast.Call) and getattr(decorator.func, "attr", "") == "parametrize":
+                if (
+                    isinstance(decorator, ast.Call)
+                    and getattr(decorator.func, "attr", "") == "parametrize"
+                ):
                     for argument in decorator.args[1:]:
                         out += [(dialect, sql, "") for sql in string_literals(argument)]
     return out
