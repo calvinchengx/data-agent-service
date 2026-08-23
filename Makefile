@@ -117,6 +117,9 @@ format: ## Apply formatting and safe fixes — the only target that edits files
 	# so they drift unformatted while `make format` reports success.
 	docker run --rm -v "$(PWD):/src" -w /src/services/warehouse-query-go $(GOLANGCI) golangci-lint fmt --build-tags duckdb ./...
 
+http-corpus: ## Re-record the Python HTTP guard's verdict on every contract case
+	uv run python services/contract/gen_http_corpus.py
+
 guard-corpus: ## Re-record the Python guard's verdict on every contract statement
 	uv run python services/contract/gen_guard_corpus.py
 

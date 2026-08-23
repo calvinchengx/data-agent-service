@@ -190,6 +190,16 @@ jobs:
       # records are only worth anything if they still describe the guard, so
       # regenerate them and diff: a Python change that moves a verdict without
       # the Go side following it fails here rather than in production.
+      # The HTTP guard's corpus, held the same way as the SQL one: regenerate
+      # and diff, so a Python change that moves a verdict without the Go side
+      # following it fails here rather than in production.
+      - name: the recorded HTTP verdicts still describe the Python guard
+        working-directory: .
+        run: |
+          cp services/contract/http_corpus.json /tmp/http_corpus.json
+          uv run python services/contract/gen_http_corpus.py
+          diff /tmp/http_corpus.json services/contract/http_corpus.json \
+            && echo "the recorded HTTP verdicts are the Python guard's"
       - name: the recorded verdicts still describe the Python guard
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         working-directory: .

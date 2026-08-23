@@ -1,0 +1,141 @@
+{
+ "components": {
+  "schemas": {
+   "Invoice": {
+    "properties": {
+     "customer": {
+      "properties": {
+       "email": {
+        "type": "string"
+       },
+       "name": {
+        "type": "string"
+       }
+      },
+      "type": "object"
+     },
+     "id": {
+      "type": "string"
+     },
+     "netAmount": {
+      "type": "number"
+     }
+    },
+    "type": "object"
+   }
+  }
+ },
+ "openapi": "3.0.0",
+ "paths": {
+  "/invoices": {
+   "get": {
+    "operationId": "listInvoices",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "schema": {
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "status",
+      "schema": {
+       "enum": [
+        "open",
+        "paid"
+       ],
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/Invoice"
+         },
+         "type": "array"
+        }
+       }
+      }
+     }
+    },
+    "summary": "List invoices",
+    "tags": [
+     "invoices"
+    ]
+   },
+   "post": {
+    "operationId": "createInvoice",
+    "responses": {},
+    "tags": [
+     "invoices"
+    ]
+   }
+  },
+  "/invoices/{id}": {
+   "delete": {
+    "operationId": "deleteInvoice",
+    "responses": {},
+    "tags": [
+     "invoices"
+    ]
+   },
+   "get": {
+    "operationId": "getInvoice",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Invoice"
+        }
+       }
+      }
+     }
+    },
+    "tags": [
+     "invoices"
+    ]
+   }
+  },
+  "/search": {
+   "post": {
+    "operationId": "searchInvoices",
+    "responses": {},
+    "tags": [
+     "invoices"
+    ],
+    "x-read-only": true
+   }
+  },
+  "/secrets": {
+   "get": {
+    "operationId": "listSecrets",
+    "responses": {},
+    "tags": [
+     "secrets"
+    ]
+   }
+  }
+ },
+ "servers": [
+  {
+   "url": "https://billing.example.com"
+  }
+ ]
+}

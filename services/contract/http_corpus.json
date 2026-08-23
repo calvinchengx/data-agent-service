@@ -1,0 +1,312 @@
+{
+ "cases": [
+  {
+   "operation": "listInvoices",
+   "arguments": {},
+   "expect": "permitted",
+   "fragment": "",
+   "why": "the plain call, so a guard that refused everything would fail here",
+   "contract": true,
+   "verdict": {
+    "permitted": true,
+    "method": "get",
+    "url": "https://billing.example.com/invoices?limit=500",
+    "collection": "invoices",
+    "params": [
+     [
+      "limit",
+      "500"
+     ]
+    ],
+    "item_limit": 500,
+    "max_bytes": 1000,
+    "body": "",
+    "fields": [
+     "invoices.listInvoices.customer",
+     "invoices.listInvoices.customer.email",
+     "invoices.listInvoices.customer.name",
+     "invoices.listInvoices.id",
+     "invoices.listInvoices.netAmount"
+    ]
+   }
+  },
+  {
+   "operation": "nope",
+   "arguments": {},
+   "expect": "refused",
+   "fragment": "unknown",
+   "why": "an operation the spec does not describe. The spec IS the allow-list.",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "unknown operation 'nope'"
+   }
+  },
+  {
+   "operation": "listSecrets",
+   "arguments": {},
+   "expect": "refused",
+   "fragment": "collection",
+   "why": "a real operation in a collection this source does not permit",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "collection secrets is not queryable"
+   }
+  },
+  {
+   "operation": "searchInvoices",
+   "arguments": {},
+   "expect": "permitted",
+   "fragment": "",
+   "why": "a POST marked x-read-only, which is the only way a POST is callable",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "method": "post",
+    "url": "https://billing.example.com/search",
+    "collection": "invoices",
+    "params": [],
+    "item_limit": 500,
+    "max_bytes": 1000,
+    "body": "",
+    "fields": []
+   }
+  },
+  {
+   "operation": "listInvoices",
+   "arguments": {
+    "apiKey": "x"
+   },
+   "expect": "refused",
+   "fragment": "unknown parameter",
+   "why": "an undeclared parameter is refused rather than dropped: dropping it would run a call the caller did not ask for",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "unknown parameter(s): apiKey"
+   }
+  },
+  {
+   "operation": "getInvoice",
+   "arguments": {},
+   "expect": "refused",
+   "fragment": "required",
+   "why": "a required parameter left out",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "id is required"
+   }
+  },
+  {
+   "operation": "getInvoice",
+   "arguments": {
+    "id": "inv-1"
+   },
+   "expect": "permitted",
+   "fragment": "",
+   "why": "the same operation with it supplied",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "method": "get",
+    "url": "https://billing.example.com/invoices/inv-1",
+    "collection": "invoices",
+    "params": [],
+    "item_limit": 500,
+    "max_bytes": 1000,
+    "body": "",
+    "fields": [
+     "invoices.getInvoice.customer",
+     "invoices.getInvoice.customer.email",
+     "invoices.getInvoice.customer.name",
+     "invoices.getInvoice.id",
+     "invoices.getInvoice.netAmount"
+    ]
+   }
+  },
+  {
+   "operation": "listInvoices",
+   "arguments": {
+    "limit": "many"
+   },
+   "expect": "refused",
+   "fragment": "integer",
+   "why": "a parameter of the wrong type",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "limit must be a integer"
+   }
+  },
+  {
+   "operation": "listInvoices",
+   "arguments": {
+    "status": "cancelled"
+   },
+   "expect": "refused",
+   "fragment": "one of",
+   "why": "a value outside the enum the spec declares",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "status must be one of open, paid"
+   }
+  },
+  {
+   "operation": "listInvoices",
+   "arguments": {
+    "status": "open"
+   },
+   "expect": "permitted",
+   "fragment": "",
+   "why": "a value inside it",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "method": "get",
+    "url": "https://billing.example.com/invoices?limit=500&status=open",
+    "collection": "invoices",
+    "params": [
+     [
+      "limit",
+      "500"
+     ],
+     [
+      "status",
+      "open"
+     ]
+    ],
+    "item_limit": 500,
+    "max_bytes": 1000,
+    "body": "",
+    "fields": [
+     "invoices.listInvoices.customer",
+     "invoices.listInvoices.customer.email",
+     "invoices.listInvoices.customer.name",
+     "invoices.listInvoices.id",
+     "invoices.listInvoices.netAmount"
+    ]
+   }
+  },
+  {
+   "operation": "listInvoices",
+   "arguments": {
+    "limit": 100000
+   },
+   "expect": "permitted",
+   "fragment": "",
+   "why": "a caller asking for more than allowed is CLAMPED, not refused -- the SQL guard does the same with TOP",
+   "contract": true,
+   "verdict": {
+    "permitted": true,
+    "method": "get",
+    "url": "https://billing.example.com/invoices?limit=500",
+    "collection": "invoices",
+    "params": [
+     [
+      "limit",
+      "500"
+     ]
+    ],
+    "item_limit": 500,
+    "max_bytes": 1000,
+    "body": "",
+    "fields": [
+     "invoices.listInvoices.customer",
+     "invoices.listInvoices.customer.email",
+     "invoices.listInvoices.customer.name",
+     "invoices.listInvoices.id",
+     "invoices.listInvoices.netAmount"
+    ]
+   }
+  },
+  {
+   "operation": "listInvoices",
+   "arguments": {
+    "limit": 10
+   },
+   "expect": "permitted",
+   "fragment": "",
+   "why": "a smaller caller ceiling is honoured rather than raised",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "method": "get",
+    "url": "https://billing.example.com/invoices?limit=10",
+    "collection": "invoices",
+    "params": [
+     [
+      "limit",
+      "10"
+     ]
+    ],
+    "item_limit": 10,
+    "max_bytes": 1000,
+    "body": "",
+    "fields": [
+     "invoices.listInvoices.customer",
+     "invoices.listInvoices.customer.email",
+     "invoices.listInvoices.customer.name",
+     "invoices.listInvoices.id",
+     "invoices.listInvoices.netAmount"
+    ]
+   }
+  },
+  {
+   "operation": "getInvoice",
+   "arguments": {
+    "id": "a/../b"
+   },
+   "expect": "permitted",
+   "fragment": "",
+   "why": "a path parameter is substituted and ESCAPED. The verdict carries the built URL, so no unchecked string reaches an HTTP client.",
+   "contract": true,
+   "verdict": {
+    "permitted": true,
+    "method": "get",
+    "url": "https://billing.example.com/invoices/a%2F..%2Fb",
+    "collection": "invoices",
+    "params": [],
+    "item_limit": 500,
+    "max_bytes": 1000,
+    "body": "",
+    "fields": [
+     "invoices.getInvoice.customer",
+     "invoices.getInvoice.customer.email",
+     "invoices.getInvoice.customer.name",
+     "invoices.getInvoice.id",
+     "invoices.getInvoice.netAmount"
+    ]
+   }
+  },
+  {
+   "operation": "getInvoice",
+   "arguments": {
+    "id": "../../admin"
+   },
+   "expect": "permitted",
+   "fragment": "",
+   "why": "traversal in a path parameter, escaped the same way",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "method": "get",
+    "url": "https://billing.example.com/invoices/..%2F..%2Fadmin",
+    "collection": "invoices",
+    "params": [],
+    "item_limit": 500,
+    "max_bytes": 1000,
+    "body": "",
+    "fields": [
+     "invoices.getInvoice.customer",
+     "invoices.getInvoice.customer.email",
+     "invoices.getInvoice.customer.name",
+     "invoices.getInvoice.id",
+     "invoices.getInvoice.netAmount"
+    ]
+   }
+  }
+ ]
+}
