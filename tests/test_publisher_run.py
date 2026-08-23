@@ -18,6 +18,21 @@ from publisher.targets import Artefact, powerbi
 PBI = powerbi.PowerBITarget(workspace="ws", warehouse="wh", warehouse_name="contoso_warehouse")
 
 
+@pytest.fixture(autouse=True)
+def only_power_bi(monkeypatch):
+    """Pin the target list for every test in this module.
+
+    `targets.configured()` reads `DAS_DASHBOARD_TARGETS` out of the settings,
+    so without this these tests assert on whatever `.env` happens to say --
+    they passed on a laptop where it named only powerbi and failed in the
+    tools container where it also names superset. A unit test whose result
+    depends on ambient configuration reports the state of a machine.
+
+    Tests that care about the multi-target behaviour set it themselves.
+    """
+    monkeypatch.setitem(publish.c.CFG, "DAS_DASHBOARD_TARGETS", "powerbi")
+
+
 @pytest.mark.parametrize(
     ("sql_type", "expected"),
     [
@@ -593,3 +608,111 @@ def test_the_module_runs_as_a_command_and_reports_a_missing_candidates_file():
     )
     assert proc.returncode == 1, proc.stderr[-500:]
     assert "no candidates at" in proc.stdout and "promoter.run" in proc.stdout
+
+
+# --------------------------------------------- lineage across two engines --
+SOURCES = json.dumps(
+    [
+        {
+            "name": "contoso_warehouse",
+            "om_service_fqn": "fabric_contoso",
+            "item": "contoso_warehouse",
+            "schemas": ["dbo"],
+        },
+        {
+            "name": "contoso_support",
+            "om_service_fqn": "postgres_support",
+            "database": "support",
+            "schemas": ["support"],
+        },
+        {"name": "no_database", "om_service_fqn": "svc"},
+    ]
+)
+
+
+@pytest.mark.parametrize(
+    ("table", "source", "expected"),
+    [
+        ("dbo.fct_sales", "contoso_warehouse", "fabric_contoso.contoso_warehouse.dbo.fct_sales"),
+        ("support.tickets", "contoso_support", "postgres_support.support.support.tickets"),
+        # No schema on the table: the source's own first schema stands in.
+        ("tickets", "contoso_support", "postgres_support.support.support.tickets"),
+    ],
+)
+def test_the_lineage_fqn_follows_the_source_the_candidate_came_from(
+    monkeypatch, table, source, expected
+):
+    """It used to take `om_schema_fqn` from the seeded state, which is the
+    FABRIC warehouse's. Correct while Power BI was the only target, and
+    silently wrong the moment a candidate came from PostgreSQL -- the lookup
+    did not error, it found no table and recorded no edge, so a dashboard
+    landed in the catalog with no lineage and nothing said so."""
+    monkeypatch.setitem(publish.c.CFG, "DAS_SOURCES", SOURCES)
+    assert publish._table_fqn(table, source) == expected
+
+
+@pytest.mark.parametrize("source", ["", "unknown_source", "no_database"])
+def test_an_unknown_source_falls_back_to_the_seeded_warehouse(monkeypatch, source):
+    """What every caller meant before there was a choice of target."""
+    monkeypatch.setitem(publish.c.CFG, "DAS_SOURCES", SOURCES)
+    monkeypatch.setattr(publish.c, "load_state", lambda: {"om_schema_fqn": "svc.db.dbo"})
+    assert publish._table_fqn("dbo.fct_sales", source) == "svc.db.dbo.fct_sales"
+
+
+def test_the_asker_is_recorded_as_an_owner_reference(monkeypatch):
+    """`service` tier targets do not record who asked -- the tool holds its own
+    credential -- so the catalog is the only place it exists. A reference,
+    because OM HTML-escapes description prose and a sentence cannot be
+    resolved."""
+    sent = {}
+
+    def fake_om(method, path, body=None, **_kw):
+        if path.startswith("/users/name/"):
+            return {"id": "user-erin", "name": path.rsplit("/", 1)[1]}
+        if path == "/dashboards":
+            sent.update(body or {})
+            return {"id": "dash-1", "fullyQualifiedName": "svc.T"}
+        return {"id": "x"}
+
+    monkeypatch.setattr("seed.govern.om", fake_om)
+    monkeypatch.setattr(publish.c, "load_state", lambda: {"om_schema_fqn": "s.d.dbo"})
+    done = publish.Published(
+        title="T",
+        target="superset",
+        artefact=Artefact(kind="superset", ids={}, url="u"),
+        sql="SELECT 1",
+        rows_target=[],
+        rows_sql=[],
+        agrees=True,
+    )
+    publish.record_lineage(done, {"tables": []}, PBI, owner="erin@entraemulator.dev")
+    assert sent["owners"] == [{"id": "user-erin", "type": "user"}]
+    assert "erin@entraemulator.dev" in sent["description"], "the copy in prose is still useful"
+
+
+def test_an_owner_the_catalog_cannot_name_is_dropped_rather_than_guessed(monkeypatch):
+    """An owner OM cannot resolve is worse than none: it looks like provenance
+    and answers nothing."""
+    sent = {}
+
+    def fake_om(method, path, body=None, **_kw):
+        if path.startswith("/users/name/"):
+            return {"code": 404}
+        if path == "/dashboards":
+            sent.update(body or {})
+            return {"id": "d", "fullyQualifiedName": "svc.T"}
+        return {"id": "x"}
+
+    monkeypatch.setattr("seed.govern.om", fake_om)
+    monkeypatch.setattr(publish.c, "load_state", lambda: {"om_schema_fqn": "s.d.dbo"})
+    done = publish.Published(
+        title="T",
+        target="superset",
+        artefact=Artefact(kind="superset", ids={}, url="u"),
+        sql="SELECT 1",
+        rows_target=[],
+        rows_sql=[],
+        agrees=True,
+    )
+    publish.record_lineage(done, {"tables": []}, PBI, owner="nobody@example.com")
+    assert "owners" not in sent

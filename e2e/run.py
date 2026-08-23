@@ -1887,6 +1887,215 @@ def phase16() -> None:
     assert report.visual_type(tuple(candidate["dimensions"])) in {"card", "barChart", "tableEx"}
 
 
+def phase19() -> None:
+    """A second dashboard target, and the same Plan surviving it.
+
+    Power BI proves the promotion path against a tool with per-user identity.
+    This proves the CANDIDATE IR is real rather than Power BI's semantic model
+    wearing a dataclass: Superset takes a query, not a semantic model, and
+    every artefact still comes out of the same `Plan`.
+
+    Everything asserted here is created here. The candidate is built by the
+    promoter's own canonicaliser and title derivation, the dashboard is
+    published by this function, and the catalog entity is written by it -- no
+    step depends on a manual run having happened first. Three phases have
+    failed in CI for exactly that, and CI's catalog is empty every time.
+    """
+    import json as _json
+
+    from agent import identity
+    from promoter.canonical import canonicalise
+    from promoter.title import derive as derive_title
+    from publisher import plan as _plan
+    from publisher import publish, targets
+    from publisher.targets import superset as _superset
+    from seed.govern import om
+
+    state = c.load_state()
+    live = targets.configured(c.CFG, state)
+    # Narrowed to the concrete target, not the protocol: this witness asserts
+    # things only Superset has -- the vault reference it holds, the dataset it
+    # created -- and a protocol-typed handle would hide a rename behind an
+    # attribute error at witness time rather than at type-check time.
+    sup = next((t for t in live if isinstance(t, _superset.SupersetTarget)), None)
+    # The credential is a REFERENCE in the settings and a secret only in the
+    # vault. Asserted by resolving it, because a reference nobody resolves is
+    # indistinguishable from one that does not work -- and because `service`
+    # tier means this one credential is all that stands between the settings
+    # file and a shared password.
+    resolved = ""
+    if sup is not None:
+        resolved = sup.secret(sup.password_ref)
+    check(
+        "phase19",
+        "the superset credential is a vault reference that resolves",
+        sup is not None
+        and sup.password_ref.startswith("keyvault:")
+        and bool(resolved)
+        and resolved != sup.password_ref,
+        f"{sup.password_ref} -> {len(resolved)} chars from the vault"
+        if sup and resolved
+        else "not configured, or the reference did not resolve",
+    )
+    if sup is None:
+        return
+
+    # The candidate: a question against POSTGRES, which is the source Power BI
+    # cannot take. Before §20 this was dropped on the floor by `run.py` with a
+    # one-line print; the point of a second target is that it now lands.
+    template = canonicalise(
+        "SELECT a.team, AVG(t.resolution_minutes) AS c1 "
+        "FROM support.tickets t JOIN support.agents a ON a.agent_id = t.agent_id "
+        "WHERE t.status = 'open' GROUP BY a.team",
+        "postgres",
+    )
+    candidate = {
+        "title": derive_title(template, {}).text,
+        "source": "contoso_support",
+        "template_sql": template.sql,
+        "dialect": "postgres",
+        "tables": list(template.tables),
+        "measures": list(template.measures),
+        "dimensions": list(template.dimensions),
+        "slot_columns": [s_.column for s_ in template.slots],
+    }
+    pbi = next((t for t in live if t.kind == "powerbi"), None)  # protocol is enough here
+    check(
+        "phase19",
+        "a postgres candidate one target refuses is taken by the other",
+        sup.accepts(candidate, state) is None
+        and (pbi is None or pbi.accepts(candidate, state) is not None),
+        f"superset: yes · powerbi: {pbi.accepts(candidate, state) if pbi else 'not configured'}"[
+            :100
+        ],
+    )
+
+    publisher_token = identity.token_for("erin@entraemulator.dev")
+
+    def run_sql(source: str, sql: str):
+        base = GW + c.CFG.get("DAS_WAREHOUSE_MCP_PATH", "/warehouse/mcp")
+        _st, _hd, text = c.http(
+            "POST",
+            base,
+            headers={"Authorization": "Bearer " + publisher_token},
+            json_body={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "run_query", "arguments": {"sql": sql, "source": source}},
+            },
+        )
+        payload = _json.loads(text)["result"]
+        return _json.loads(payload["content"][0]["text"])["rows"]
+
+    columns = {
+        "support.tickets": [
+            {"name": "resolution_minutes", "dataType": "double"},
+            {"name": "status", "dataType": "string"},
+            {"name": "agent_id", "dataType": "int64"},
+        ],
+        "support.agents": [
+            {"name": "team", "dataType": "string"},
+            {"name": "agent_id", "dataType": "int64"},
+        ],
+    }
+    names = {"resolution_minutes": "Resolution Time", "team": "Support Team"}
+    done = publish.publish(
+        candidate,
+        target=sup,
+        user_token=publisher_token,
+        columns=columns,
+        names=names,
+        run_sql=run_sql,
+        who="erin@entraemulator.dev",
+    )
+    check(
+        "phase19",
+        "the dataset, chart and dashboard are all created in Superset",
+        all(done.artefact.ids.get(k) for k in ("database", "dataset", "chart", "dashboard")),
+        " · ".join(f"{k} {v}" for k, v in sorted(done.artefact.ids.items())),
+    )
+    check(
+        "phase19",
+        "Superset's own query layer answers what the executor answers",
+        done.agrees,
+        done.note,
+    )
+
+    # THE security property of a `service` tier target. Superset holds one
+    # credential and every viewer looks identical to it, so what bounds it is
+    # that the dataset IS the guarded template -- a SELECT, not a table grant.
+    # A dataset pointing at the table would let the same credential reach a
+    # column the executor's access rules withheld.
+    api = _superset.Client(sup.base, sup.username, resolved).login()
+    dataset = api.call("GET", f"/api/v1/dataset/{done.artefact.ids['dataset']}")["result"]
+    check(
+        "phase19",
+        "the dataset is the guarded template, not a grant on the table",
+        bool(dataset.get("sql"))
+        and dataset["sql"].strip() == _plan.build(candidate, columns, names).comparison_sql,
+        "virtual dataset carrying the template"
+        if dataset.get("sql")
+        else "PHYSICAL dataset: the service credential can read the whole table",
+    )
+    exposed = {col["column_name"] for col in dataset.get("columns", [])}
+    check(
+        "phase19",
+        "Superset sees only the columns the template projected",
+        bool(exposed) and exposed <= {"team", "c1"},
+        f"exposed {sorted(exposed)}",
+    )
+
+    # The pass-through metric. The guarded SQL already aggregated, so the
+    # chart must not aggregate again -- witnessed because COUNT would return 1
+    # for every group, which is a plausible number nobody would question.
+    ctx = _json.loads(done.artefact.query)
+    check(
+        "phase19",
+        "the chart re-reads the answer rather than re-aggregating it",
+        all(m["aggregate"] == _superset.PASS_THROUGH for m in ctx["queries"][0]["metrics"]),
+        f"metric aggregate {[m['aggregate'] for m in ctx['queries'][0]['metrics']]}",
+    )
+
+    fqn = publish.record_lineage(done, candidate, sup, owner="erin@entraemulator.dev")
+    dash = om("GET", f"/dashboards/name/{fqn.replace(' ', '_')}?fields=owners", ok=(200, 404))
+    check(
+        "phase19",
+        "the Superset dashboard is in the catalog under its own service",
+        isinstance(dash, dict) and dash.get("service", {}).get("name") == sup.catalog_service,
+        dash.get("fullyQualifiedName", "not found") if isinstance(dash, dict) else "not found",
+    )
+    # `service` tier means the TOOL did not record who asked. The catalog is
+    # the only place it exists, so it has to be a reference that resolves --
+    # not a sentence in the description, which OM HTML-escapes besides.
+    owners = (
+        [o.get("name") for o in (dash or {}).get("owners", [])] if isinstance(dash, dict) else []
+    )
+    check(
+        "phase19",
+        "the catalog names the asker as an owner, not as prose",
+        owners == ["erin"],
+        f"owners {owners}" if owners else "no owner reference; the asker exists only in prose",
+    )
+    lineage = (
+        om(
+            "GET",
+            f"/lineage/dashboard/{dash['id']}?upstreamDepth=1&downstreamDepth=0",
+            ok=(200, 404),
+        )
+        if isinstance(dash, dict) and dash.get("id")
+        else {}
+    )
+    nodes = {n["id"]: n.get("fullyQualifiedName", "") for n in (lineage or {}).get("nodes", [])}
+    upstream = {nodes.get(e["fromEntity"], "") for e in (lineage or {}).get("upstreamEdges", [])}
+    check(
+        "phase19",
+        "the dashboard's lineage reaches the postgres tables it reads",
+        any(t.rpartition(".")[2] in u for u in upstream for t in candidate["tables"]),
+        ", ".join(sorted(u for u in upstream if u)) or "no upstream lineage",
+    )
+
+
 # ---------------------------------------------------------------- quality --
 def lint_stages(makefile: str) -> tuple[list[str], list[str]]:
     """The stages of `make lint`, and any recipe line this cannot classify.
@@ -2587,6 +2796,7 @@ PHASES = {
     "phase15": phase15,
     "phase16": phase16,
     "phase17": phase17,
+    "phase19": phase19,
 }
 
 MANIFEST = pathlib.Path(__file__).resolve().parents[1] / "docs" / "witnesses.json"

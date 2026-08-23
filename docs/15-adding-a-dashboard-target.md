@@ -64,6 +64,19 @@ print, and nothing said what a person would have to change. Return the reason:
 `"'contoso_support' is not the Fabric warehouse; Direct Lake binds to a Fabric
 item"` is a sentence someone can act on.
 
+### If your tool renders a QUERY, the metric is a pass-through
+
+Power BI takes a semantic model over the source tables, so its measures do the
+aggregation. A tool that takes a query does not: `plan.comparison_sql` has
+already aggregated, and the dataset holds one row per group with the answer
+in it. Mirroring the measure's own function aggregates a second time.
+
+That is harmless for `SUM` and `AVG` over a single value and **wrong for
+`COUNT`, which returns 1 for every group** — a plausible number, on a
+dashboard, that nobody would question. `SupersetTarget` uses `MAX`, which is
+identity over one row per group for every measure kind the Plan emits. Check
+this against your tool with a `COUNT` template before you trust it.
+
 ### `evaluate` must go through the tool's own engine
 
 Not through a re-run of the SQL, and not through what you sent. The whole
@@ -91,6 +104,30 @@ the *template* as the dataset, not the table) and record the asker as owner in
 the catalog, because the tool did not.
 
 Do not label a target `"user"` because you would like it to be.
+
+Two things follow from `"service"` that are easy to skip:
+
+* **Bound what the credential can reach.** Publish the *template* as the
+  dataset, not the table. `SupersetTarget` sends `plan.comparison_sql` as a
+  virtual dataset, so Superset sees only the columns the template projected
+  and cannot widen the surface the executor's access rules narrowed. A
+  physical dataset would hand one shared credential the whole table.
+* **The catalog is the only record of who asked.** Pass `owner` to
+  `record_lineage`, which resolves it to an OpenMetadata `owners` reference —
+  `seed.authz.om_people()` provisions one user per persona for this. Do not
+  settle for the description: it is prose, and OM HTML-escapes it, so `@`
+  comes back as `&#64;`.
+
+### Do not resolve a secret in your constructor
+
+`targets.configured()` builds every target just to ask which one accepts a
+candidate. A `from_state` that reached a vault would make *listing* the
+targets need a credential — and unit tests that never touch Superset would
+fail on a missing `DAS_KEYVAULT_URL`. Keep the `keyvault:` reference in the
+dataclass and resolve it when a call is about to be made.
+
+`publisher/fabric.py` had the same defect one layer down, building a
+`Credential` at import. It is an easy shape to reproduce.
 
 ## Add it to the contract
 

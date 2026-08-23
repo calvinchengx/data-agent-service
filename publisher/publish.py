@@ -11,6 +11,7 @@ checking a dashboard after the first week.
 from __future__ import annotations
 
 import dataclasses
+import json
 
 from publisher import plan as _plan
 from publisher.targets import Artefact, DashboardTarget
@@ -139,14 +140,16 @@ def record_lineage(
     `owner` matters most where the target's `authz_tier` is `service`: the
     tool did not record who asked, so the catalog has to.
 
-    It goes in the DESCRIPTION, which is prose, and that is a compromise
-    rather than a design. OpenMetadata's structured place for this is
-    `owners`, an EntityReference to a user it knows -- and the personas are
-    Entra identities, not OM users, so there is nothing to reference yet.
-    Provisioning them is 19b's, because that is where a `service` tier target
-    makes the catalog the ONLY record of who asked. Note also that OM
-    HTML-escapes what it stores here (`@` comes back as `&#64;`), so anything
-    reading it back must compare against the escaped form.
+    It goes in `owners`, an EntityReference to a user OpenMetadata knows --
+    `seed.authz.om_people()` provisions one per persona for exactly this. It
+    used to go in the DESCRIPTION, which was prose and therefore the wrong
+    home for a fact, and lossy besides: OM HTML-escapes description text, so
+    `erin@entraemulator.dev` came back as `erin&#64;entraemulator.dev` and
+    every reader had to know that. A reference either resolves or does not.
+
+    The description still SAYS who asked, because a person reading the entity
+    should not have to expand a reference to learn it. But the description is
+    now the copy and `owners` is the record.
     """
     from seed.govern import om
 
@@ -174,6 +177,13 @@ def record_lineage(
             + (f" Asked for by {owner}." if owner else "")
         ),
     }
+    # `owners` is the record; a reference that does not resolve is dropped
+    # rather than guessed at, because an owner OM cannot name is worse than
+    # none -- it looks like provenance and answers nothing.
+    if owner:
+        person = om("GET", f"/users/name/{owner.partition('@')[0]}", ok=(200, 404))
+        if isinstance(person, dict) and person.get("id"):
+            body["owners"] = [{"id": person["id"], "type": "user"}]
     dashboard = om("PUT", "/dashboards", body, ok=(200, 201))
 
     # The edges are the point. A dashboard entity on its own says a report
@@ -182,7 +192,9 @@ def record_lineage(
     # it. Recorded per table the template actually read, not per table in the
     # schema.
     for table in candidate.get("tables", []):
-        found = om("GET", f"/tables/name/{_table_fqn(table)}", ok=(200, 404))
+        found = om(
+            "GET", f"/tables/name/{_table_fqn(table, candidate.get('source', ''))}", ok=(200, 404)
+        )
         if not isinstance(found, dict) or not found.get("id"):
             continue
         om(
@@ -200,9 +212,27 @@ def record_lineage(
     return fqn
 
 
-def _table_fqn(table: str) -> str:
-    """`schema.table` as the catalog names it, from the seeded service."""
-    state = c.load_state()
-    schema_fqn = state.get("om_schema_fqn", "")
-    _, _, name = table.partition(".")
-    return f"{schema_fqn}.{name or table}"
+def _table_fqn(table: str, source: str = "") -> str:
+    """`schema.table` as the catalog names it, for the source it came from.
+
+    One rule for every engine: `service.database.schema.table`, read out of
+    `DAS_SOURCES` so it follows whatever the source was registered as. It used
+    to take `om_schema_fqn` from the seeded state, which is the FABRIC
+    warehouse's -- correct while Power BI was the only target, and silently
+    wrong the moment a candidate came from PostgreSQL. The lineage did not
+    error; it simply found no table and recorded no edge, which is the failure
+    this whole file exists to make impossible.
+    """
+    schema, _, name = table.partition(".")
+    if not name:
+        schema, name = "", table
+    for src in json.loads(c.CFG.get("DAS_SOURCES", "[]")):
+        if src.get("name") != source:
+            continue
+        service = src.get("om_service_fqn", "")
+        database = src.get("database") or src.get("item") or ""
+        if service and database:
+            return f"{service}.{database}.{schema or (src.get('schemas') or [''])[0]}.{name}"
+    # No source named, or one registered without a database: the seeded
+    # warehouse, which is what every caller meant before there was a choice.
+    return f"{c.load_state().get('om_schema_fqn', '')}.{name}"

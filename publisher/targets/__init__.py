@@ -67,9 +67,12 @@ class DashboardTarget(Protocol):
 def registry() -> dict[str, Any]:
     # Imported here so the package can be read without every target's
     # dependencies being importable.
-    from publisher.targets import powerbi
+    from publisher.targets import powerbi, superset
 
-    return {powerbi.PowerBITarget.kind: powerbi.PowerBITarget}
+    return {
+        powerbi.PowerBITarget.kind: powerbi.PowerBITarget,
+        superset.SupersetTarget.kind: superset.SupersetTarget,
+    }
 
 
 def configured(cfg: dict, state: dict) -> list[DashboardTarget]:

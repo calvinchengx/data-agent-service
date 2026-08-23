@@ -240,6 +240,38 @@ def comparison_sql(template_sql: str, dialect: str = "") -> str:
     return tree.sql(dialect=dialect or None)
 
 
+def projection(comparison_sql: str, dialect: str = "") -> list[str]:
+    """The output column names of the comparison SQL, in order.
+
+    A target that renders the template as a query (rather than as a semantic
+    model over the source tables) has to name the columns the template
+    PRODUCES -- `c1`, not `resolution_minutes`. The Plan carries the measures
+    and dimensions but not their output aliases, because Power BI never needed
+    them: DAX names its own columns and `compare()` matches rows as sets.
+
+    Read from the SQL rather than assumed from the order, and the caller
+    checks the count against its own dimensions and measures. An alias list
+    that does not line up is a template this generator will not render, which
+    is the same refusal `table_of` makes for the same reason.
+    """
+    import sqlglot
+    from sqlglot import exp
+
+    tree = sqlglot.parse_one(comparison_sql, read=dialect or None)
+    names: list[str] = []
+    for item in tree.expressions:
+        if isinstance(item, exp.Alias):
+            names.append(item.alias)
+        elif isinstance(item, exp.Column):
+            names.append(item.name)
+        else:
+            raise Unsupported(
+                f"a projected expression with no name: {item.sql()!r}; "
+                "a rendered query has to be able to name every column it returns"
+            )
+    return names
+
+
 def build(
     candidate: Mapping, columns: Mapping[str, Sequence[Mapping]], names: Mapping[str, str]
 ) -> Plan:

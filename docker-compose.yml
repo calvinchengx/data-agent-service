@@ -2,7 +2,10 @@
 #
 # Every dependency is a PUBLISHED image, pinned (discipline rule 1: emulators
 # and OpenMetadata are used as-is — no build:, no forks). Only this repo's own
-# services are built from source.
+# services are built from source — plus `superset`, which adds the database
+# drivers Apache Superset's production image deliberately ships without and
+# tells the deployer to install. Nothing upstream is patched; see
+# docker/superset/Dockerfile for why that is a different thing from a fork.
 #
 # Issuer invariant (the family's one rule): entra advertises PUBLIC_ORIGIN and
 # every peer repeats the same issuer string verbatim.
@@ -296,6 +299,86 @@ services:
       timeout: 3s
       retries: 20
 
+  # --------------------------------------------------------------- superset
+  # The second dashboard target (§20). Power BI proves the promotion path
+  # against a tool with per-user identity; Superset proves the SAME Plan
+  # survives contact with one that has none -- which is what makes the
+  # candidate IR real rather than Power BI's semantic model wearing a
+  # dataclass.
+  #
+  # Its own metadata database, exactly as OpenMetadata has one. Superset's own
+  # documentation excludes SQLite from production, and a local shape that
+  # production would reject is the emulator-only path this repo refuses.
+  superset-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: ${SUPERSET_DB_PASSWORD:-superset-local-only}
+      POSTGRES_DB: superset
+    volumes:
+      - superset-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset -d superset"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot, like om-migrate: schema, admin, and the built-in roles. Separate
+  # from the server because a webserver that migrates on boot races itself the
+  # moment there is more than one replica.
+  superset-init:
+    build:
+      context: .
+      dockerfile: docker/superset/Dockerfile
+    depends_on:
+      superset-db:
+        condition: service_healthy
+    environment: &superset-env
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-local-only-not-a-production-secret-0123456789abcdef}
+      SUPERSET_METADATA_URI: postgresql+psycopg2://superset:${SUPERSET_DB_PASSWORD:-superset-local-only}@superset-db:5432/superset
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+    volumes:
+      - ./docker/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+    user: root
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        superset db upgrade
+        superset fab create-admin --username "${SUPERSET_ADMIN:-das-publisher}" \
+          --firstname Data --lastname Agent --email das@entraemulator.dev \
+          --password "${SUPERSET_ADMIN_PASSWORD:-superset-local-only}" || true
+        superset init
+
+  superset:
+    build:
+      context: .
+      dockerfile: docker/superset/Dockerfile
+    depends_on:
+      superset-db:
+        condition: service_healthy
+      superset-init:
+        condition: service_completed_successfully
+    environment: *superset-env
+    volumes:
+      - ./docker/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+    user: root
+    ports:
+      - "${SUPERSET_PORT:-8088}:8088"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        exec gunicorn --bind 0.0.0.0:8088 --workers 2 --timeout 120 \
+          "superset.app:create_app()"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8088/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
   # ------------------------------------------------- data-agent-service (ours)
   # The executor. Reaches Fabric's TDS front as the ASKING USER (OBO) and holds
   # no secret in its environment: its managed identity is discovered through the
@@ -401,6 +484,7 @@ services:
 volumes:
   tools-venv:
   postgres-data:
+  superset-db-data:
   entra-data:
   fabric-data:
   om-db-data:

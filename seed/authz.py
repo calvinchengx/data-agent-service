@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from typing import NamedTuple
 
 from seed import common as c
@@ -406,6 +407,77 @@ def add_to_group(group_id: str, principal_id: str) -> None:
         raise SystemExit(f"group membership failed: {st} {b[:200]}")
 
 
+def superset_credential() -> str:
+    """Superset's admin password, into Key Vault, never onto disk.
+
+    Superset is `authz_tier: service` (§20): it holds one credential and every
+    viewer looks identical to it. That makes WHERE the credential lives the
+    only thing standing between a settings file and a shared password, so it
+    goes in the vault and `.env` carries `keyvault:superset-admin` -- the same
+    contract the catalog bots and the APIM subscription key already have, and
+    the one `write_env` refuses to let anyone break.
+
+    The value is whatever bootstrapped the container. In Azure the admin is
+    created by the deployment and this seeds the reference to it; locally the
+    compose default is the value, and that is the ONE thing that differs
+    between the two -- a default, not a code path.
+    """
+    name = "superset-admin"
+    value = os.environ.get("SUPERSET_ADMIN_PASSWORD", "superset-local-only")
+    c.store_secret(name, value)
+    c.log(f"superset admin credential stored as keyvault:{name}")
+    return f"keyvault:{name}"
+
+
+def om_people() -> dict[str, str]:
+    """Each persona as an OpenMetadata USER, so ownership can name them.
+
+    OpenMetadata knew only the role bots. That was enough while every
+    publication carried the asker in an on-behalf-of token, because the tool
+    itself recorded who acted. It stops being enough the moment a target's
+    `authz_tier` is `service` (§20): the tool records its own credential, and
+    the catalog becomes the only place the asking person appears at all.
+
+    The publisher was writing them into the entity DESCRIPTION, which is prose
+    -- and prose is the wrong home for a fact. It is also lossy: OM
+    HTML-escapes description text, so `erin@entraemulator.dev` comes back as
+    `erin&#64;entraemulator.dev`, and anything reading it has to know that.
+    `owners` is an EntityReference, and a reference either resolves or does
+    not.
+
+    NOT bots. A bot is a thing the system acts as; these are the people it
+    acts for, and conflating them would make every promoted dashboard look
+    self-owned. The OM name is the local part -- OM names do not carry `@` --
+    and the address lives in `email`, which is what the person is actually
+    identified by.
+    """
+    from seed import govern as g
+
+    out: dict[str, str] = {}
+    for p in PERSONAS:
+        upn = str(p["upn"])
+        local = upn.partition("@")[0]
+        user = g.get_opt(f"/users/name/{local}")
+        if not user:
+            user = g.put(
+                "/users",
+                {
+                    "name": local,
+                    "email": upn,
+                    "displayName": str(p["displayName"]),
+                    "isBot": False,
+                    "description": (
+                        f"{p['displayName']} ({p['role'] or 'no role'}). Present so a promoted "
+                        "dashboard can name who asked for it, including where the "
+                        "publishing target has no per-user identity."
+                    ),
+                },
+            )
+        out[upn] = user.get("fullyQualifiedName", local)
+        c.log(f"catalog user {local} for {upn}")
+    return out
+
+
 def main() -> dict:
     st = c.load_state()
     app_id = st["apps"]["middle_tier"]
@@ -435,11 +507,14 @@ def main() -> dict:
         )
 
     bots = om_role_bots()
+    catalog_people = om_people()
+    superset_credential()
     out = {
         "app_roles": sorted(roles),
         "groups": ROLE_GROUPS,
         "personas": assigned,
         "catalog_bots": bots,
+        "catalog_users": catalog_people,
         "access_rules": ACCESS_RULES,
         "group_role_map": {name: role for role, name in ROLE_GROUPS.items()},
     }
