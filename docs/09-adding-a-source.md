@@ -129,6 +129,8 @@ product built into it:
 `host.docker.internal` because the product's stack is a different compose
 project on the same host; in Azure it is the workspace URL.
 
+### The Databricks product: the credential reaches it, the rows do not come back
+
 **What that run proved.** The product's PAT, put in *our* Key Vault, was
 resolved by the executor's own managed identity, reached the product's
 workspace, and authenticated: statements executed and returned `SUCCEEDED`.
@@ -147,6 +149,57 @@ response that contains `[[119]]`. Two smaller gaps sit behind it:
 `information_schema.tables` is a stub that returns no rows, and a two-part
 `schema.table` name is not resolved against the request's catalog.
 `docs/upstream-issues.md` 12–14 carry the repros.
+
+### The Fabric product: both halves, witnessed
+
+The same exercise against `fabric-platform-notebook-pipelines` with
+`contoso-data-product-fabric-notebook-pipelines` built into it went all the
+way through. One `DAS_SOURCES` entry, no code:
+
+```json
+{"name": "contoso_product", "kind": "fabric", "dialect": "tsql",
+ "authz_tier": "service", "om_service_fqn": "contoso-fabric",
+ "tds_server": "host.docker.internal:11433",
+ "database": "<the warehouse's item id>", "schemas": ["dbo"],
+ "credential": "keyvault:contoso-fabric-product-token"}
+```
+
+`database` is the warehouse's **item id** rather than its name, because the
+emulator's TDS surface takes the workspace from the server name's first DNS
+label and `host.docker.internal` is not a workspace
+(`docs/upstream-issues.md` 16). Addressing by id is configuration, not a code
+path, and it is the emulator's own documented alternative.
+
+The credential is a token minted by the PRODUCT's Entra, put in our Key
+Vault. That is what `authz_tier: service` means here: the product's tenant
+has no trust with ours, so it cannot tell our callers apart, and per-user
+authorization is the gateway's and `DAS_ACCESS_RULES`'s alone.
+
+| | result |
+|---|---|
+| `SELECT COUNT(*) FROM dbo.fct_sales` | **474,044** — the family's canonical `sale_lines` |
+| `SELECT SUM(revenue_usd) FROM dbo.fct_revenue_summary` | **129,341,157.67** — its canonical revenue |
+| `describe_table dbo.dim_customer` as `Data.Finance` | 6 columns |
+| the same as `Data.Analyst` | 4 columns, **2 withheld** |
+| audit, every line | `authz_tier=service credential=stored` |
+| Python executor and Go executor | identical answers, identical withholding |
+
+The third and fourth rows are the point worth stating plainly: **our access
+rules govern a data product this repository did not build**, because the
+withholding is decided here from the caller's role and not by the source.
+
+The catalog half worked too — `search_metadata` through the gateway returned
+`contoso-fabric.contoso-analytics.warehouse.fct_revenue_summary` beside our
+own `fabric_contoso.contoso_warehouse.dbo.fct_revenue_summary`. One catalog,
+two services, `om_service_fqn` telling a source which one is its own. Be
+aware of how those entries got there: the product's govern step defaults
+`OM_URL` to `localhost:8585` and its steps run on the host, so it catalogued
+itself into THIS repository's OpenMetadata rather than its own
+(`docs/upstream-issues.md` 17). They were removed afterwards. The grounding
+model is right; that particular run proved it by accident.
+
+No `e2e.run` witness for this either, for the same reason as Databricks: it
+needs a second stack, and CI has one.
 
 **The catalog half is blocked separately.** The product registers its domain,
 its databaseService and its six metrics in its own OpenMetadata, and records
