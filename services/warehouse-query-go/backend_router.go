@@ -15,15 +15,17 @@ import (
 // fallback to Fabric. A default that quietly handles the case it was not
 // written for is how this gap survived a green contract suite.
 type router struct {
-	tds      Backend
-	postgres Backend
-	duckdb   Backend
+	tds        Backend
+	postgres   Backend
+	duckdb     Backend
+	databricks Backend
 }
 
 var _ Backend = (*router)(nil)
 
 func newRouter() *router {
-	return &router{tds: NewTdsBackend(), postgres: NewPostgresBackend(), duckdb: NewDuckDBBackend()}
+	return &router{tds: NewTdsBackend(), postgres: NewPostgresBackend(),
+		duckdb: NewDuckDBBackend(), databricks: NewDatabricksBackend()}
 }
 
 func (r *router) backendFor(src Source) (Backend, error) {
@@ -36,6 +38,8 @@ func (r *router) backendFor(src Source) (Backend, error) {
 		return r.postgres, nil
 	case "duckdb":
 		return r.duckdb, nil
+	case "databricks":
+		return r.databricks, nil
 	default:
 		return nil, fmt.Errorf("source %s has kind %q, which this executor has no adapter for", src.Name, src.Kind)
 	}

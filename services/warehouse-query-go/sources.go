@@ -38,6 +38,13 @@ type Source struct {
 	DSN string `json:"dsn"`
 	// duckdb and any other embedded engine: the database file
 	Path string `json:"path"`
+	// databricks: the workspace and the SQL warehouse inside it. The adapter
+	// speaks the Statement Execution API over HTTP rather than a driver --
+	// that is the surface Databricks documents for exactly this, and it needs
+	// no ODBC and no cgo.
+	Host        string `json:"host"`
+	WarehouseID string `json:"warehouse_id"`
+	Catalog     string `json:"catalog"`
 	// Which contract's operations apply. A SQL source has tables and
 	// statements, an HTTP one has operations and calls, and `list_sources`
 	// reports which so a caller need not infer it from the kind.

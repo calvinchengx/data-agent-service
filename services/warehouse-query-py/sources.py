@@ -390,6 +390,14 @@ class DatabricksBackend:
         return columns, [list(r) for r in data]
 
     def list_tables(self, src: Source, principal_token: str) -> list[dict]:
+        # An empty allow-list means nothing is allowed, not that the question
+        # is unrestricted. Without this the WHERE clause became `IN ()` — a
+        # syntax error the warehouse rejects, so a misconfigured source failed
+        # with the engine's parser message rather than with its own empty list.
+        # Found while porting this adapter to Go: the port returned nothing and
+        # the two disagreed.
+        if not src.schemas:
+            return []
         out = self._statement(
             src,
             principal_token,
