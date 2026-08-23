@@ -40,6 +40,54 @@ def check(phase: str, name: str, ok: bool, detail: str = "") -> bool:
     return ok
 
 
+# Directories no repository tracks, and one of which (`.git`) stores every
+# value the working tree ever held -- so searching it would report a secret
+# that has been REMOVED as though it were still there.
+_UNTRACKED_DIRS = frozenset(
+    {
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+        "__pycache__",
+        "_site",
+        "node_modules",
+        "reports",
+        "target",
+    }
+)
+
+# The password has to be LITERAL in exactly one place: the environment the
+# database container reads, because that container has no identity to fetch it
+# with (seed/provision.py says so where it stores it). `.env` is that place,
+# `.env.example` is its template, and docker-compose.yml is `${POSTGRES_PASSWORD}`
+# read back out of it. Exempting only the last of the three -- which this did --
+# exempts the file that RECEIVES the value while flagging the two that supply it.
+_BOOTSTRAP_FILES = frozenset({".env", ".env.example", "docker-compose.yml"})
+
+
+def _files_containing(needle: bytes) -> list[str]:
+    """Every file under the repository root whose bytes contain `needle`.
+
+    Paths are returned relative to the root, so a caller can exempt one by the
+    name it is committed under.
+    """
+    root = pathlib.Path(__file__).resolve().parents[1]
+    hits: list[str] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        if _UNTRACKED_DIRS & set(path.relative_to(root).parts):
+            continue
+        try:
+            if needle in path.read_bytes():
+                hits.append(str(path.relative_to(root)))
+        except OSError:
+            continue
+    return sorted(hits)
+
+
 def claims(token: str) -> dict:
     p = token.split(".")[1]
     p += "=" * (-len(p) % 4)
@@ -2519,18 +2567,19 @@ def quality() -> None:
         secret = json.loads(body)["value"]
         # The witness reads the secret to look for it; a repository that
         # contains it anywhere has not moved it, only copied it.
-        found = subprocess.run(
-            ["git", "grep", "-lF", secret],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        # docker-compose.yml is exempt: the database container reads its own
-        # password from the environment and has no identity to fetch one with.
+        #
+        # Walked in Python rather than by `git grep`, which is what this was
+        # and which raised FileNotFoundError here: the witnesses run in the
+        # tools container and it ships no git. The check had therefore never
+        # run in CI -- every run since it was written stopped at the seed
+        # first -- so it only ever passed on a host that happened to have the
+        # binary. Walking the tree also asks the better question: an UNTRACKED
+        # file holding the password is still a file holding the password.
+        #
         leaked.extend(
             f"{src['name']}: its password is in {path}"
-            for path in found.stdout.split()
-            if path != "docker-compose.yml"
+            for path in _files_containing(secret.encode())
+            if path not in _BOOTSTRAP_FILES
         )
     check(
         "quality",

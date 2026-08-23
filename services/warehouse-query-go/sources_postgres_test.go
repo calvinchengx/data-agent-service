@@ -14,7 +14,7 @@ func pgSource() Source {
 	return Source{
 		Name: "contoso_support", Kind: "postgres", Dialect: "postgres",
 		AuthzTier: "service", Schemas: []string{"support"}, Database: "support",
-		DSN: "postgresql://das:das-local-only@postgres:5432/support",
+		DSN: "postgresql://das:fixture-password@postgres:5432/support",
 	}
 }
 
@@ -66,7 +66,7 @@ func TestServiceTierIgnoresTheCallersToken(t *testing.T) {
 	if strings.Contains(dsn, "a-user-token") {
 		t.Fatal("a service-tier connection carried the caller's token")
 	}
-	if !strings.Contains(dsn, "das-local-only") {
+	if !strings.Contains(dsn, "fixture-password") {
 		t.Fatal("the configured credential was not used")
 	}
 }
