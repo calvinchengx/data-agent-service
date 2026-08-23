@@ -120,6 +120,10 @@ func Guard(sql string, p Policy) (*Verdict, error) {
 		return nil, err
 	}
 
+	if err := refuseJoinWithoutFrom(tree); err != nil {
+		return nil, err
+	}
+
 	tables, err := tablesRead(tree, p)
 	if err != nil {
 		return nil, err
@@ -143,6 +147,9 @@ func Guard(sql string, p Policy) (*Verdict, error) {
 	rewritten, err := sqlglot.Generate(tree, p.Dialect)
 	if err != nil {
 		return nil, denied("could not rewrite the statement for %s: %v", p.Dialect, err)
+	}
+	if err := verifyCeilingSurvived(rewritten, rowLimit, p); err != nil {
+		return nil, err
 	}
 
 	return &Verdict{
@@ -246,6 +253,29 @@ func refuseFunctionsUsedAsTables(tree *sqlglot.Expression, p Policy) error {
 			renderNode(inner, p), quotedSchemas(p))
 	}
 	return nil
+}
+
+// refuseJoinWithoutFrom refuses a query whose joins have nothing to join to.
+//
+// `SELECT 1 JOIN dbo.a` parses into a Select with a join and no FROM, and is
+// written back as `SELECT 1, dbo.a` -- a projection list. The guard would
+// report dbo.a as a table read, build the access decision and the audit line
+// from that, and then hand the engine a statement that reads nothing. Found by
+// fuzzing for the property that re-guarding the guard's own output must report
+// the same tables; both implementations had it.
+func refuseJoinWithoutFrom(tree *sqlglot.Expression) error {
+	var err error
+	tree.Walk(func(n *sqlglot.Expression) bool {
+		if err != nil {
+			return false
+		}
+		if n.Class == "Select" && n.Args["joins"] != nil && n.Args["from_"] == nil {
+			err = denied("a JOIN with no FROM clause names a table the query does not read")
+			return false
+		}
+		return true
+	})
+	return err
 }
 
 // tablesRead is rule 5: every table reference resolves inside an allowed
@@ -468,6 +498,42 @@ func newStar() *sqlglot.Expression {
 func topDialect(p Policy) bool {
 	cfg, ok := sqlglot.ConfigFor(p.Dialect)
 	return ok && cfg.Tables.LimitIsTop
+}
+
+// verifyCeilingSurvived reads the rewritten statement back and checks it still
+// says what the verdict says.
+//
+// Writing the ceiling into the text can change what the text means. A column
+// called PERCENT is the case that found this: `SELECT PERCENT FROM dbo.a`
+// becomes `SELECT TOP 500 PERCENT FROM dbo.a`, which T-SQL reads as a
+// PROPORTION and answers with every row -- while the verdict says 500 and the
+// audit line records a capped query. That is the same hole `TOP 100 PERCENT`
+// opened, arriving through the rewrite instead of through the caller.
+//
+// Rather than enumerate the words that could collide, read the result back.
+// Found by fuzzing for the property that the guard's own output must guard the
+// same way; both implementations had it.
+func verifyCeilingSurvived(rewritten string, rowLimit int, p Policy) error {
+	const cannot = "the row ceiling could not be applied without changing what the statement means"
+
+	again, err := sqlglot.ParseOne(rewritten, p.Dialect)
+	if err != nil {
+		return denied("%s", cannot)
+	}
+	limit, _ := again.Args["limit"].(*sqlglot.Expression)
+	if limit == nil {
+		return denied("%s", cannot)
+	}
+	if options, _ := limit.Args["limit_options"].(*sqlglot.Expression); options != nil {
+		if options.Args["percent"] == true {
+			return denied("%s", cannot)
+		}
+	}
+	value, _ := limit.Args["expression"].(*sqlglot.Expression)
+	if value.Name() != strconv.Itoa(rowLimit) {
+		return denied("%s", cannot)
+	}
+	return nil
 }
 
 // callerLimit is the row limit the caller asked for, or 0 if there isn't one.

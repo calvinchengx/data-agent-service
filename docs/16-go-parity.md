@@ -116,18 +116,50 @@ for one bypass is then a case for both guards, automatically.
 **Deliverable:** it becomes impossible to pin a guard fix in one implementation
 and not the other.
 
-## Phase C — differential fuzzing in CI
+## Phase C — fuzz the guard for what nobody wrote down
 
-Generate SQL — grammar-based, seeded, a few thousand statements per run —
-feed every statement to both guards, and fail the build on any disagreement
-about refuse/allow or about the tables read.
+**Done.** `services/warehouse-query-go/guard_fuzz_test.go` fuzzes the Go guard
+for properties rather than answers. Every case in the corpus is a statement
+somebody thought of; the bypass that started all of this was not.
 
-This catches **divergence**, and only divergence: if both guards share a blind
-spot, fuzzing agrees with itself. That is why Phase A comes first. With both
-guards failing closed, a divergence is almost always one guard's grammar being
-wider than the other's, which is exactly the thing to find.
+What must hold for **every** statement the guard permits:
 
-**Deliverable:** a `fuzz` job in CI, fast enough to run on every push.
+1. the statement it hands back parses;
+2. guarding that statement again permits it and reports the same tables — a
+   guard whose own output it would refuse is a filter with a blind spot;
+3. **every** table in the statement it hands back is in the list it reported —
+   the comma-join bypass, written as a property;
+4. every reported table is in an allowed schema;
+5. the ceiling is real and no higher than the policy's.
+
+It found two bugs **in both implementations at once**, in under twenty seconds.
+
+**`SELECT 1 JOIN dbo.a`** — a join with nothing to join to. sqlglot parses it
+into a Select with a join and no FROM and writes it back as `SELECT 1, dbo.a`,
+a projection list. Both guards reported `dbo.a` as read, built the access
+decision and the audit line on it, and handed the engine a statement that reads
+nothing.
+
+**`SELECT PERCENT FROM dbo.a`** — a column called PERCENT. The ceiling rewrite
+produces `SELECT TOP 500 PERCENT FROM dbo.a`, which T-SQL reads as a
+**proportion** and answers with every row, while the verdict says 500 and the
+audit records a capped query. That is the hole `TOP 100 PERCENT` opened,
+arriving through our own rewrite instead of through the caller — and it would
+not have been found by adding more cases, because the input is unremarkable.
+
+The fix for the second is the general one: read the rewritten statement back
+and check the ceiling survived as the count we wrote, rather than enumerate the
+words that might collide with it. Both statements are now in the corpus and
+replayed as fuzz seeds.
+
+Run longer than CI does:
+
+```sh
+cd services/warehouse-query-go
+go test -run Fuzz -fuzz FuzzGuardedStatementsKeepTheirPromises -fuzztime 10m
+```
+
+Twelve million executions have found nothing since.
 
 ## Phase D — the missing adapters and surface
 

@@ -151,6 +151,17 @@ def guard(sql: str, policy: Policy) -> Verdict:
                 f"only tables in {sorted(policy.allowed_schemas)} may be read"
             )
 
+    # 4c. A JOIN with no FROM is not a query. sqlglot parses `SELECT 1 JOIN
+    #     dbo.a` into a Select with a join and no from_, and writes it back as
+    #     `SELECT 1, dbo.a` -- a projection list. The guard would report
+    #     dbo.a as a table read, build the access decision and the audit line
+    #     from that, and then hand the engine a statement that reads nothing.
+    #     Found by fuzzing the Go guard for the property that re-guarding its
+    #     own output must report the same tables; both implementations had it.
+    for select in tree.find_all(exp.Select):
+        if select.args.get("joins") and not select.args.get("from_"):
+            raise Denied("a JOIN with no FROM clause names a table the query does not read")
+
     # 5. table references must live in an allowed schema of this source
     tables: set[str] = set()
     allowed = {s.lower() for s in policy.allowed_schemas}
@@ -189,13 +200,50 @@ def guard(sql: str, policy: Policy) -> Verdict:
         raise Denied("the query reads no table")
 
     # 6. row ceiling — rewrite rather than trust the caller
+    columns = _columns_read(tree, tables)
     limited, row_limit = _apply_limit(root, policy)
+    rewritten = limited.sql(dialect=policy.dialect)
+    _verify_ceiling_survived(rewritten, row_limit, policy)
     return Verdict(
-        sql=limited.sql(dialect=policy.dialect),
+        sql=rewritten,
         tables=tuple(sorted(tables)),
         row_limit=row_limit,
-        columns=_columns_read(tree, tables),
+        columns=columns,
     )
+
+
+def _verify_ceiling_survived(rewritten: str, row_limit: int, policy: Policy) -> None:
+    """Read the rewritten statement back and check it still says what we meant.
+
+    Writing the ceiling into the text can change what the text means. A column
+    called PERCENT is the case that found this: `SELECT PERCENT FROM dbo.a`
+    becomes `SELECT TOP 500 PERCENT FROM dbo.a`, which T-SQL reads as a
+    PROPORTION and answers with every row — while the verdict says 500 and the
+    audit line records a capped query. That is the same hole `TOP 100 PERCENT`
+    opened, arriving through the rewrite instead of through the caller.
+
+    Rather than enumerate the words that could collide, read the result back:
+    if the ceiling did not survive as the count we wrote, refuse. Found by
+    fuzzing the Go guard for the property that its own output must guard the
+    same way; both implementations had it.
+    """
+    try:
+        again = sqlglot.parse_one(rewritten, read=policy.dialect)
+    except Exception:  # noqa: BLE001 — an unreadable rewrite is a failed rewrite
+        raise Denied(
+            "the row ceiling could not be applied without changing what the statement means"
+        ) from None
+    limit = again.args.get("limit")
+    options = limit.args.get("limit_options") if limit is not None else None
+    if (
+        limit is None
+        or (options is not None and options.args.get("percent"))
+        or limit.expression is None
+        or limit.expression.name != str(row_limit)
+    ):
+        raise Denied(
+            "the row ceiling could not be applied without changing what the statement means"
+        )
 
 
 def _columns_read(tree: exp.Expression, tables: set[str]) -> tuple[str, ...]:

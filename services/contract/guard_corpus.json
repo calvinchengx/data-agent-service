@@ -226,6 +226,18 @@
   },
   {
    "dialect": "duckdb",
+   "sql": "SELECT 1 JOIN main.tickets",
+   "expect": "refused",
+   "fragment": "JOIN with no FROM",
+   "why": "The same hole in the other dialect. An embedded engine has no database-side permission behind the guard, so a table reported but not read is the whole of what the audit knows.",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "a JOIN with no FROM clause names a table the query does not read"
+   }
+  },
+  {
+   "dialect": "duckdb",
    "sql": "SELECT 1; DROP TABLE main.tickets",
    "expect": "refused",
    "fragment": "one statement",
@@ -752,6 +764,18 @@
   },
   {
    "dialect": "tsql",
+   "sql": "SELECT 1 JOIN dbo.fct_sales",
+   "expect": "refused",
+   "fragment": "JOIN with no FROM",
+   "why": "A join with nothing to join to. sqlglot writes it back as a projection list, so the guard would report a table the rewritten statement never reads -- the access decision and the audit line built on a table that is not touched. Found by fuzzing, in both implementations at once.",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "a JOIN with no FROM clause names a table the query does not read"
+   }
+  },
+  {
+   "dialect": "tsql",
    "sql": "SELECT 1; DROP TABLE dbo.fct_sales",
    "expect": "refused",
    "fragment": "one statement",
@@ -760,6 +784,18 @@
    "verdict": {
     "permitted": false,
     "reason": "exactly one statement is allowed"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT PERCENT FROM dbo.fct_sales",
+   "expect": "refused",
+   "fragment": "changing what the statement means",
+   "why": "A column called PERCENT. Writing the ceiling in front of it produces `SELECT TOP 500 PERCENT ...`, which T-SQL reads as a proportion and answers with every row, while the verdict claims 500 -- the same hole TOP 100 PERCENT opened, arriving through the rewrite instead of the caller. Found by fuzzing, in both implementations at once.",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "the row ceiling could not be applied without changing what the statement means"
    }
   },
   {
