@@ -59,6 +59,29 @@ SEARCHED = ("e2e", "tests", "scripts", "services", "agent", "publisher", "promot
 READS = re.compile(r"""["'](?:\.\./)*((?:docs/[^"']+\.(?:md|json))|README\.md|SECURITY\.md)["']""")
 OPENS = ("read_text", "open(", "Path(", "read_bytes", "glob(")
 
+# Go names a path in SEGMENTS -- `filepath.Join(root, "examples", "README.md")`
+# -- so the single-literal pattern above cannot see it. fabric-emulator's own
+# exception is exactly this shape, in a Go test, which is why this exists at
+# all rather than being someone else's problem later.
+GO_OPENS = ("ReadFile", "os.Open", "filepath.Join", "ioutil.ReadFile")
+GO_LITERAL = re.compile(r'"([^"\n]+)"')
+
+
+def _go_path(line: str) -> str | None:
+    """Rejoin the string segments on a line into a path, if it names a document.
+
+    Best effort and deliberately over-eager: a path this MISSES stays
+    skippable, which is the unsafe direction. A path it invents merely runs
+    more than it had to.
+    """
+    parts = [
+        p for p in GO_LITERAL.findall(line) if (p and "/" not in p) or p.endswith((".md", ".json"))
+    ]
+    if not parts or not parts[-1].endswith((".md", ".json")):
+        return None
+    joined = "/".join(p.strip("/") for p in parts if p not in ("", "."))
+    return joined or None
+
 
 def documents_read() -> dict[str, set[str]]:
     """Every document a checker opens, and which files open it."""
@@ -67,12 +90,20 @@ def documents_read() -> dict[str, set[str]]:
         base = ROOT / directory
         if not base.is_dir():
             continue
-        for path in base.rglob("*.py"):
+        for path in sorted([*base.rglob("*.py"), *base.rglob("*.go")]):
             # Not itself: the docstring above names the documents it protects,
             # and a checker that reports its own prose is noise.
             if path.resolve() == pathlib.Path(__file__).resolve():
                 continue
+            go = path.suffix == ".go"
             for line in path.read_text(errors="replace").splitlines():
+                if go:
+                    if not any(o in line for o in GO_OPENS):
+                        continue
+                    doc = _go_path(line)
+                    if doc:
+                        found.setdefault(doc, set()).add(str(path.relative_to(ROOT)))
+                    continue
                 if not any(o in line for o in OPENS):
                     continue
                 for doc in READS.findall(line):
