@@ -756,6 +756,55 @@ tightening it is a deliberate change. And `L3-unsegmented` remains a question
 whose premise the seed never implemented; it should be fixed in the seed or
 withdrawn, not scored.
 
+### Three ways a long run has lied to us
+
+Each of these produced a plausible number rather than an error, which is what
+makes them worth naming. A harness that crashes is a nuisance; a harness that
+returns a believable wrong answer is a research hazard.
+
+**1. A missing gateway credential.** The first ablation reported a delta of
+zero. `mcp_config` read the catalog's subscription key from `os.environ`, which
+is empty on the host because the setting lives in `.env`, so APIM rejected the
+catalog route and the *with-catalog* arm ran without a catalog. A zero delta is
+exactly what a sceptic expects, which is what made it dangerous: it confirmed
+the null rather than announcing itself. Settings are now read through
+configuration.
+
+**2. A token that expired mid-run.** A persona token lives **one hour**;
+`eval-cli.sh` minted them once and exported them; a four-arm run takes several
+hours. Every arm after the first ran with no warehouse. `identity.token_for`
+had cached the supplied token for five minutes and then re-read the same dead
+value from the environment forever, on the reasoning that a token handed to us
+has no known expiry — but a JWT carries its own `exp`, so there was nothing to
+guess. The arm scored **3.4% where the previous model scored 88.9%**, and from
+the number alone that is not distinguishable from a weaker model that genuinely
+needs the catalog's prose. It was very nearly reported as the item 5 finding.
+
+What gave it away was not the score but the *answers*: they said "the warehouse
+query tools are not available in this session", and the ones that did complete
+were correct and well-sourced. A model that had lost its catalog could not have
+written them.
+
+Fixed in two places, because either alone still fails. Tokens now read their
+own expiry and renew through `DAS_TOKEN_REFRESH_CMD`. And the run now refuses
+to score what it could not measure: the session's `init` event lists its MCP
+servers and tools, so a server that did not connect raises `HarnessBroken`
+instead of producing an answer.
+
+**3. A timeout that took three arms with it.** Described below.
+
+The distinction the third fix draws is the one that matters. **A timeout is the
+agent failing — that is data, and it scores as a miss. A missing server is US
+failing — that is a bug, and it halts.** A harness that cannot tell "the tool
+said no" from "there was no tool" will eventually report the second as a
+finding.
+
+A closing caution on the guard itself: it was verified against a real `init`
+event before being trusted, because a guard whose names do not match what
+arrives iterates over nothing and passes vacuously — the same silent no-op it
+exists to catch. The servers report as `warehouse` and `catalog` with status
+`connected`, and all eight expected tool names arrive.
+
 ### An operational note this run paid for
 
 The first contoso attempt died on its fourth arm when a single `claude -p` call
