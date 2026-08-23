@@ -263,8 +263,8 @@ def ask(
     If it fails twice it raises, and the run stops. A retry that keeps going
     forever would be the silent-failure bug wearing a different hat.
     """
-    last: HarnessBroken | None = None
-    for attempt in range(max(1, attempts)):
+    tries = max(1, attempts)
+    for attempt in range(tries):
         try:
             return _ask_once(
                 question,
@@ -277,10 +277,17 @@ def ask(
                 timeout=timeout,
             )
         except HarnessBroken as e:
-            last = e
-            if attempt + 1 < max(1, attempts):
-                print(f"  harness fault, retrying once: {e}", flush=True)
-    raise last
+            # A bare `raise` on the final attempt, rather than keeping the
+            # exception in a variable and raising it after the loop. Two
+            # reasons: it re-raises with the ORIGINAL traceback, so the
+            # failing call is still in it; and the loop then provably either
+            # returns or raises, where `raise last` left the checker unable to
+            # rule out `None` -- true only because `max(1, attempts)`
+            # guarantees one pass, which is a long way from this line.
+            if attempt + 1 >= tries:
+                raise
+            print(f"  harness fault, retrying once: {e}", flush=True)
+    raise AssertionError("unreachable: every pass of the loop returns or raises")
 
 
 def _ask_once(
