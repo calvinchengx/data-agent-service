@@ -44,6 +44,12 @@ The whole of sqlglot is ~29,000 lines before the generator and 856 expression
 node classes. The port does not start there. It starts with the subset the
 guard needs and grows outward, and each tier is a shippable state.
 
+The tiers are ordered by NEED, not by breadth, and one of them is not grammar
+at all: Tier 1.5 deepens the verification of what is already ported, because
+that is where the bugs turned out to be. "In order" therefore means in the
+order the evidence justifies, and Tier 2's entry condition is written down
+rather than assumed.
+
 ### Tier 1 — the guard's needs (the executor switches over here)
 
 | Component | Reference | Port |
@@ -108,6 +114,56 @@ C (differential fuzzing), Phase D (the Go DuckDB, HTTP and Databricks
 adapters), and Phase E (running the contract against both executors on every
 build), none of which is port work.
 
+### Tier 1.5 — properties over the grammar already ported
+
+**The next tier is not more grammar.** Nothing the service is held to is
+unparsed — 105/105, 29/29, 13/13, zero in every category — and no statement in
+sqlglot's own 2,171 is parsed into a *different* tree. On those two numbers
+Tier 2 looks like the obvious next step, and it is not.
+
+In fifteen minutes, feeding the generator's output back through the parser
+found **three real bugs**, every one inside grammar the port already handles:
+
+* a quote inside a Databricks string written as `''''`, which Databricks reads
+  as two adjacent empty strings concatenated — a silently different value;
+* `TOP` with a non-literal count written without the parentheses T-SQL
+  requires, producing SQL neither the reference nor the port can read;
+* `parseTop` accepting only a bare number, so the port could not read back the
+  `TOP (A)` it writes for a `LIMIT A` it had just parsed.
+
+None was visible to any of the three verification methods below, and the reason
+generalises: **all three are corpus comparisons.** They compare the port to the
+reference over a fixed set of statements, so they find a bug only where some
+fixture already exercises the construct. The risk left in this port is depth,
+not breadth, and depth is bought with properties rather than with fixtures.
+
+The work, roughly a week:
+
+1. **Operator adjacency, then the read-back fuzz into CI.** `~ *` is written
+   `~*` and lexes back as one token. `unary` already spaces `- -5`, but only
+   when the operand begins with the operator's own last character; the rule it
+   wants is "space it when joining would form a longer token", which needs the
+   keyword trie rather than a character comparison. With that fixed,
+   `FuzzGeneratedSQLCanBeReadBack` can run in CI beside the panic target.
+
+2. **Batched differential fuzzing** — the one that changes what is findable.
+   A fuzzer cannot call the Python oracle: at 130k executions a second, a
+   round trip per input is four orders of magnitude too slow. So the targets
+   written so far can only assert properties that hold *independently of the
+   reference*, and that cost two candidate properties outright — tree
+   round-trip stability and join-without-`FROM` both turned out to be things
+   sqlglot itself does not guarantee, so asserting them reported the
+   reference's behaviour as the port's bug.
+
+   Decoupling the two speeds gives the oracle back. Fuzz in Go to COLLECT
+   interesting inputs; then batch the corpus through the oracle offline, diff
+   the trees, and promote any divergence into the permanent fixture corpus.
+   `testdata/fuzz` stops being a pile of crash inputs and becomes a differential
+   corpus that grows itself.
+
+3. **Seed the fuzz corpus from the service corpus.** Real statements find
+   realistic neighbours; `((((` does not.
+
 ### What Tier 2 gets built from
 
 Not from this list. The guard records the construct it could not read, so the
@@ -142,8 +198,22 @@ says what sqlglot can parse; it does not say what anyone asks this service.
 
 Window functions, `GROUP BY` extensions, `QUALIFY`, `PIVOT`/`UNPIVOT`,
 `VALUES`, the full function catalogue for the four dialects, `CAST`/`TRY_CAST`
-with the type grammar. Driven by sqlglot's dialect fixtures: the tier is done
-when `tests/dialects/test_{tsql,postgres,duckdb,databricks}.py` round-trip.
+with the type grammar. Done when
+`tests/dialects/test_{tsql,postgres,duckdb,databricks}.py` round-trip.
+
+**Its trigger is the refusal counts, not the end of Tier 1.** Nothing on that
+list is currently known to be wanted: every statement this service is held to
+already parses, and the instrument that would say otherwise shipped only
+recently. The 29% of sqlglot's corpus the port does not read is honest
+headroom, not a backlog — most of it is DML, DDL and dialects nobody here
+queries.
+
+Starting Tier 2 before the counts arrive means choosing between windows,
+`PIVOT` and the type grammar by guessing, which is the guess the instrument
+exists to replace. It has already been earned once: the service corpus found
+two bugs — `nulls_first` and typed division — that 2,171 reference fixtures
+could not see, because a corpus tells you what a parser CAN read and never
+what anyone asks it to.
 
 ### Tier 3 — the rest of sqlglot
 
@@ -173,6 +243,22 @@ fraction of the reference corpus parses identically, per dialect, and the
 README shows it. A statement the port cannot parse is a **refusal** in the
 guard and a **gap** in the report — never a silent divergence.
 
+**What all three miss, and it is the same blind spot.** Every one is a
+comparison over a FIXED corpus, so each can only find a bug where some fixture
+already exercises the construct. A generator that writes SQL this parser reads
+differently is invisible to the first: both sides are compared to each other,
+they agree, and both are wrong. Three such bugs were found in fifteen minutes
+by feeding output back through input — see Tier 1.5 — and none of the three
+methods here could have found any of them, at any corpus size, because no
+fixture contained the construct.
+
+So a fourth method belongs beside them: **properties, fuzzed.** Two are in the
+repository now — the parser never panics, and what the generator writes the
+parser can read. They are deliberately narrow, because a fuzzer cannot call
+the oracle, and a property stronger than the oracle's own guarantees reports
+the REFERENCE's behaviour as this port's bug. That happened twice while
+writing them.
+
 ## What the port is not
 
 * Not yet `sqlglot-go` in the full sense of "sqlglot, in Go" — Tier 3 is
@@ -200,14 +286,21 @@ guard and a **gap** in the report — never a silent divergence.
 
 ## Estimate
 
-| Tier | Size | Time |
-|---|---|---|
-| 1 — guard's needs, executor switched | ~6,000–8,000 lines | 3–4 weeks |
-| 2 — full SELECT for four dialects | ~6,000 more | 3–4 weeks |
-| differential harness (built first, used throughout) | ~800 | 3 days |
+| Tier | Size | Time | Starts when |
+|---|---|---|---|
+| 1 — guard's needs, executor switched | ~6,000–8,000 lines | 3–4 weeks | **done** |
+| 1.5 — properties over what is ported | ~400 | ~1 week | **now** |
+| 2 — full SELECT for four dialects | ~6,000 more | 3–4 weeks | the refusal counts name a construct |
+| differential harness (built first, used throughout) | ~800 | 3 days | done |
 
 Tier 1 first, with the harness before any parser code — so the first parser
 commit is already measured against the reference.
+
+The "starts when" column is the part worth keeping. Tier 2 does not follow
+Tier 1 because it is numbered next; it follows evidence that someone is being
+refused for something on its list. Until then the return on a week of
+properties is higher than on a month of grammar, and today's three bugs are
+the argument.
 
 ## Relationship to the parity plan
 
