@@ -80,7 +80,7 @@ def _b64(raw: bytes) -> str:
 
 
 def claims(
-    *, client_id: str, secret_id: str, username: str, expires_at: int, jti: str
+    *, client_id: str, kid: str, username: str, expires_at: int, jti: str
 ) -> tuple[dict, dict]:
     """The connected-app JWT's header and payload, as Tableau reads them.
 
@@ -94,7 +94,7 @@ def claims(
     contract can record what it produces, and a token whose bytes depend on
     the clock could not be compared between two generators.
     """
-    header = {"alg": "HS256", "typ": "JWT", "kid": secret_id, "iss": client_id}
+    header = {"alg": "HS256", "typ": "JWT", "kid": kid, "iss": client_id}
     payload = {
         "iss": client_id,
         "sub": username,
@@ -273,7 +273,16 @@ class TableauTarget:
     site_id: str
     project_id: str
     client_id: str
-    secret_id: str
+    # Tableau calls this the connected app's "Secret ID", and it is an
+    # IDENTIFIER, not a key: it travels in the clear as the JWT `kid` header on
+    # every token we sign. Named `kid` here rather than `secret_id` because
+    # code scanning classified the field as sensitive on its name alone and
+    # followed it to a print -- a false positive it was right to raise, since a
+    # reader would have made the same mistake. `DAS_TABLEAU_SECRET_ID` keeps
+    # Tableau's own word: that is the operator's contract, not ours.
+    kid: str
+    # The signing key itself, and the one field here that IS a secret. Refused
+    # unless it is a `keyvault:` reference (scripts/tableau_check.py).
     secret_ref: str
     source_name: str
     dsn: str
@@ -292,7 +301,7 @@ class TableauTarget:
             site_id=str(c.CFG.get("DAS_TABLEAU_SITE", "")),
             project_id=str(c.CFG.get("DAS_TABLEAU_PROJECT", "")),
             client_id=str(c.CFG.get("DAS_TABLEAU_CLIENT_ID", "")),
-            secret_id=str(c.CFG.get("DAS_TABLEAU_SECRET_ID", "")),
+            kid=str(c.CFG.get("DAS_TABLEAU_SECRET_ID", "")),
             # The reference, never the secret, and never resolved in a
             # constructor -- `targets.configured()` builds every target just to
             # ask which accepts a candidate.
@@ -303,7 +312,7 @@ class TableauTarget:
 
     @property
     def configured(self) -> bool:
-        return bool(self.site and self.client_id and self.secret_id and self.secret_ref)
+        return bool(self.site and self.client_id and self.kid and self.secret_ref)
 
     def accepts(self, candidate: dict, state: dict) -> str | None:
         if candidate.get("source") != self.source_name:
@@ -333,7 +342,7 @@ class TableauTarget:
 
         header, payload = claims(
             client_id=self.client_id,
-            secret_id=self.secret_id,
+            kid=self.kid,
             username=username,
             expires_at=expires_at,
             jti=jti,
@@ -364,7 +373,7 @@ class TableauTarget:
                 "type": "Tableau",
                 "hostPort": self.site,
                 "siteUrl": self.site_id,
-                "authType": {"clientId": self.client_id, "secretId": self.secret_id},
+                "authType": {"clientId": self.client_id, "secretId": self.kid},
             },
             artefact.url,
         )

@@ -45,7 +45,7 @@ EXPIRES_AT = 1_800_000_000
 JTI = "00000000-0000-4000-8000-0000000000jt"
 TABLEAU_SECRET = "not-a-real-connected-app-secret"
 CLIENT_ID = "00000000-0000-4000-8000-000000client"
-SECRET_ID = "00000000-0000-4000-8000-000000secret"
+KID = "00000000-0000-4000-8000-000000secret"
 
 CASES: list[dict[str, Any]] = [
     {
@@ -216,7 +216,7 @@ def _tableau_token(plan: _plan.Plan) -> dict:
     """
     header, payload = tableau.claims(
         client_id=CLIENT_ID,
-        secret_id=SECRET_ID,
+        kid=KID,
         username="erin@entraemulator.dev",
         expires_at=EXPIRES_AT,
         jti=JTI,

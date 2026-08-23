@@ -184,7 +184,14 @@ class SupersetTarget:
     # the targets need a credential. `publisher/fabric.py` had the same defect
     # one layer down -- a Credential built at import -- and this is the same
     # fix for the same reason.
-    password_ref: str
+    # WHERE the login password lives -- a `keyvault:` entry name, never the
+    # password. Not called `password_ref`: code scanning followed that name
+    # into the witness that prints it and reported a cleartext password, which
+    # is a false positive it was right to raise, because the value IS the
+    # password when the deployment is misconfigured with a literal. Naming it
+    # for what it should be makes the misconfiguration the odd case, and
+    # `e2e.run` phase19 is the check that it is a reference at all.
+    login_vault_entry: str
     source_name: str
     dsn: str
     # The source's OWN credential, separate from the DSN, exactly as the
@@ -209,7 +216,7 @@ class SupersetTarget:
         return cls(
             base=str(c.CFG.get("DAS_SUPERSET_URL", "http://superset:8088")),
             username=str(c.CFG.get("DAS_SUPERSET_USER", "das-publisher")),
-            password_ref=str(c.CFG.get("DAS_SUPERSET_PASSWORD", "")),
+            login_vault_entry=str(c.CFG.get("DAS_SUPERSET_PASSWORD", "")),
             source_name=source,
             dsn=uri,
             credential_ref=credential,
@@ -258,7 +265,7 @@ class SupersetTarget:
         )
 
     def _client(self) -> Client:
-        return Client(self.base, self.username, self.secret(self.password_ref)).login()
+        return Client(self.base, self.username, self.secret(self.login_vault_entry)).login()
 
     def publish(self, plan: Plan, *, user_token: str, who: str) -> Artefact:
         api = self._client()

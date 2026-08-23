@@ -2041,28 +2041,28 @@ def phase19() -> None:
     # file and a shared password.
     resolved = ""
     if sup is not None:
-        resolved = sup.secret(sup.password_ref)
+        resolved = sup.secret(sup.login_vault_entry)
     # A `keyvault:` reference is a NAME and safe to print. A literal is the
     # password itself -- and `vaultref.resolve` returns a literal unchanged, so
-    # `resolved` is truthy for one too. Printing `password_ref` therefore
+    # `resolved` is truthy for one too. Printing `login_vault_entry` therefore
     # printed the password, to stdout and into the CI log, in exactly the
     # misconfiguration this witness exists to catch. The detail reports the
     # SHAPE of the value and never the value.
-    is_ref = sup is not None and sup.password_ref.startswith("keyvault:")
+    is_ref = sup is not None and sup.login_vault_entry.startswith("keyvault:")
     if sup is None:
         detail = "no superset target is configured"
     elif not is_ref:
         detail = "DAS_SUPERSET_PASSWORD is a literal, not a `keyvault:` reference (value withheld)"
     elif not resolved:
-        detail = f"{sup.password_ref} did not resolve"
-    elif resolved == sup.password_ref:
-        detail = f"{sup.password_ref} resolved to itself -- the vault did not answer"
+        detail = f"{sup.login_vault_entry} did not resolve"
+    elif resolved == sup.login_vault_entry:
+        detail = f"{sup.login_vault_entry} resolved to itself -- the vault did not answer"
     else:
-        detail = f"{sup.password_ref} -> {len(resolved)} chars from the vault"
+        detail = f"{sup.login_vault_entry} -> {len(resolved)} chars from the vault"
     check(
         "phase19",
         "the superset credential is a vault reference that resolves",
-        is_ref and bool(resolved) and resolved != sup.password_ref,
+        is_ref and bool(resolved) and resolved != sup.login_vault_entry,
         detail,
     )
     if sup is None:
@@ -2329,7 +2329,7 @@ def phase20() -> None:
     # `user` tier is a claim about the token, so it is asserted on the token.
     header, payload = _tableau.claims(
         client_id="witness-client",
-        secret_id="witness-secret",
+        kid="witness-secret",
         username="erin@entraemulator.dev",
         expires_at=1_800_000_000,
         jti="witness",

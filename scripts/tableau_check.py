@@ -97,7 +97,7 @@ def main() -> int:
     required = {
         "DAS_TABLEAU_URL": target.site,
         "DAS_TABLEAU_CLIENT_ID": target.client_id,
-        "DAS_TABLEAU_SECRET_ID": target.secret_id,
+        "DAS_TABLEAU_SECRET_ID": target.kid,
         "DAS_TABLEAU_SECRET": target.secret_ref,
     }
     missing = [k for k, v in required.items() if not v]
@@ -120,7 +120,7 @@ def main() -> int:
     # (publisher/targets/tableau.py). The signing key is `secret_ref`,
     # which this command refuses to accept unless it is a vault reference.
     print(
-        f"  app       client {target.client_id}  secret id {target.secret_id}"
+        f"  app       client {target.client_id}  secret id {target.kid}"
         "  (an identifier, not the key)"
     )
 

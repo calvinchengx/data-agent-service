@@ -61,7 +61,7 @@ def a_target(**over) -> SupersetTarget:
     base = {
         "base": "http://superset:8088",
         "username": "das-publisher",
-        "password_ref": "keyvault:superset-admin",
+        "login_vault_entry": "keyvault:superset-admin",
         "source_name": "contoso_support",
         "dsn": "postgresql://das@postgres:5432/support",
         "credential_ref": "keyvault:das-support-db-password",
@@ -303,7 +303,7 @@ def test_find_returns_none_when_nothing_matches(server):
 
 def test_evaluate_refuses_an_empty_result_block(server):
     base = server({**LOGIN, **CSRF, "/api/v1/chart/data": (200, {"result": []})})
-    target = a_target(base=base, password_ref="literal", credential_ref="")
+    target = a_target(base=base, login_vault_entry="literal", credential_ref="")
     art = superset.Artefact(kind="superset", ids={}, query=json.dumps({"queries": []}))
     with pytest.raises(SupersetError, match="no result block"):
         target.evaluate(art, a_plan(), user_token="")
@@ -312,7 +312,7 @@ def test_evaluate_refuses_an_empty_result_block(server):
 def test_evaluate_returns_the_rows_superset_answered(server):
     rows = [{"team": "Billing", "Resolution Time": 210.0}]
     base = server({**LOGIN, **CSRF, "/api/v1/chart/data": (200, {"result": [{"data": rows}]})})
-    target = a_target(base=base, password_ref="literal", credential_ref="")
+    target = a_target(base=base, login_vault_entry="literal", credential_ref="")
     art = superset.Artefact(kind="superset", ids={}, query=json.dumps({"queries": []}))
     assert target.evaluate(art, a_plan(), user_token="") == rows
 
@@ -335,7 +335,7 @@ def test_publish_creates_the_dataset_from_the_template_not_the_table(server):
             "/api/v1/dashboard/": (200, {"id": 4}),
         }
     )
-    target = a_target(base=base, password_ref="literal", credential_ref="")
+    target = a_target(base=base, login_vault_entry="literal", credential_ref="")
     art = target.publish(a_plan(), user_token="", who="erin@entraemulator.dev")
     assert art.ids == {"database": "1", "dataset": "2", "chart": "3", "dashboard": "4"}
 
@@ -364,7 +364,7 @@ def test_republishing_updates_the_dataset_and_chart_rather_than_duplicating(serv
             "/api/v1/chart/3": (200, {"id": 3}),
         }
     )
-    target = a_target(base=base, password_ref="literal", credential_ref="")
+    target = a_target(base=base, login_vault_entry="literal", credential_ref="")
     art = target.publish(a_plan(), user_token="", who="erin@entraemulator.dev")
     assert art.ids == {"database": "1", "dataset": "2", "chart": "3", "dashboard": "4"}
     creates = [s for s in Recorder.seen if s[0] == "POST" and "security" not in s[1]]
@@ -398,7 +398,7 @@ def test_from_state_reads_the_source_out_of_the_settings(monkeypatch):
     target = SupersetTarget.from_state({})
     assert target.dsn == "postgresql://das@postgres:5432/support"
     assert target.credential_ref == "keyvault:pg"
-    assert target.password_ref == "keyvault:superset-admin"
+    assert target.login_vault_entry == "keyvault:superset-admin"
     assert target.schema == "support"
 
 

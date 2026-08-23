@@ -67,7 +67,7 @@ def a_target(**over) -> TableauTarget:
         "site_id": "dasdev",
         "project_id": "proj-1",
         "client_id": "client-1",
-        "secret_id": "secret-1",
+        "kid": "secret-1",
         "secret_ref": "keyvault:tableau-connected-app",
         "source_name": "contoso_support",
         "dsn": DSN,
@@ -222,7 +222,7 @@ def test_the_token_names_the_asking_person_not_the_application():
     direct trust does not act as itself -- it acts as the user it names, and
     VizQL Data Service applies THAT user's row-level security."""
     header, payload = tableau.claims(
-        client_id="c", secret_id="s", username="erin@entraemulator.dev", expires_at=1, jti="j"
+        client_id="c", kid="s", username="erin@entraemulator.dev", expires_at=1, jti="j"
     )
     assert payload["sub"] == "erin@entraemulator.dev"
     assert payload["iss"] == "c" and payload["aud"] == "tableau"
@@ -231,15 +231,13 @@ def test_the_token_names_the_asking_person_not_the_application():
 
 
 def test_the_scopes_are_narrow_enough_to_be_worth_stating():
-    _h, payload = tableau.claims(client_id="c", secret_id="s", username="u", expires_at=1, jti="j")
+    _h, payload = tableau.claims(client_id="c", kid="s", username="u", expires_at=1, jti="j")
     assert set(payload["scp"]) == set(tableau.SCOPES)
     assert not any("delete" in s for s in payload["scp"]), "publishing does not need deletion"
 
 
 def test_the_token_verifies_against_its_own_secret():
-    header, payload = tableau.claims(
-        client_id="c", secret_id="s", username="u", expires_at=1, jti="j"
-    )
+    header, payload = tableau.claims(client_id="c", kid="s", username="u", expires_at=1, jti="j")
     signed = tableau.token(secret="shh", header=header, payload=payload)
     head_b64, payload_b64, sig_b64 = signed.split(".")
 
@@ -253,9 +251,7 @@ def test_the_token_verifies_against_its_own_secret():
 
 
 def test_a_different_secret_produces_a_different_signature():
-    header, payload = tableau.claims(
-        client_id="c", secret_id="s", username="u", expires_at=1, jti="j"
-    )
+    header, payload = tableau.claims(client_id="c", kid="s", username="u", expires_at=1, jti="j")
     assert tableau.token(secret="a", header=header, payload=payload) != tableau.token(
         secret="b", header=header, payload=payload
     )
@@ -264,7 +260,7 @@ def test_a_different_secret_produces_a_different_signature():
 def test_the_token_is_a_pure_function_of_its_inputs():
     """The contract records it, so a token whose bytes moved with the clock
     could not be compared between two generators."""
-    args = {"client_id": "c", "secret_id": "s", "username": "u", "expires_at": 1, "jti": "j"}
+    args = {"client_id": "c", "kid": "s", "username": "u", "expires_at": 1, "jti": "j"}
     h1, p1 = tableau.claims(**args)
     h2, p2 = tableau.claims(**args)
     assert tableau.token(secret="x", header=h1, payload=p1) == tableau.token(
@@ -325,7 +321,7 @@ def test_a_source_with_no_dsn_is_refused_with_the_reason():
     assert reason and "no DSN" in reason
 
 
-@pytest.mark.parametrize("missing", ["site", "client_id", "secret_id", "secret_ref"])
+@pytest.mark.parametrize("missing", ["site", "client_id", "kid", "secret_ref"])
 def test_an_unconfigured_site_is_a_reason_a_person_can_read(missing):
     """There is no Tableau container, so this is the state every CI run is in.
     It must read as `no tenant yet`, pointing at the ledger that says so --
@@ -339,7 +335,7 @@ def test_an_unconfigured_site_is_a_reason_a_person_can_read(missing):
 def test_the_generator_works_without_a_site_because_that_is_the_point():
     """The whole reason the phase splits here: a workbook is a pure function
     of the Plan, and needs no tenant at all."""
-    target = a_target(site="", client_id="", secret_id="", secret_ref="")
+    target = a_target(site="", client_id="", kid="", secret_ref="")
     assert target.configured is False
     assert "<relation" in target.artefacts(a_plan())["workbook.twb"]
 
