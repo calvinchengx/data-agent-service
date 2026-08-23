@@ -41,7 +41,7 @@ var _ Backend = (*DuckDBBackend)(nil)
 // duckDBSupported is true in this build; see sources_duckdb_absent.go.
 const duckDBSupported = true
 
-// The concrete type, not Backend: the tag-off variant in
+// NewDuckDBBackend returns the concrete type, not Backend: the tag-off variant in
 // sources_duckdb_absent.go returns the interface, and the two never compile
 // together. Returning it here would only cost the tests the pool() they test.
 func NewDuckDBBackend() *DuckDBBackend { return &DuckDBBackend{pools: map[string]*sql.DB{}} }
