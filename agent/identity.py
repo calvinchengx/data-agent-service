@@ -28,9 +28,12 @@ the same checks run against the emulators and against Azure.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import shlex
 import ssl
+import subprocess
 import sys
 import time
 import urllib.error
@@ -73,6 +76,64 @@ def env_key(user: str) -> str:
     return "DAS_TOKEN_" + user.upper().replace("@", "_").replace(".", "_").replace("-", "_")
 
 
+def _claims(token: str) -> dict:
+    """The token's own claims, without verifying it.
+
+    Reading `exp` rather than trusting a supplier's word: a token handed to us
+    carries its expiry inside it, so there is no need to guess.
+    """
+    try:
+        part = token.split(".")[1]
+        return json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+    except Exception:  # noqa: BLE001 — an unreadable token is simply not usable
+        return {}
+
+
+def _expiry(token: str) -> float:
+    """When this token stops working. Unknown expiry is treated as five
+    minutes, which is the old behaviour and the safe direction to be wrong in."""
+    return float(_claims(token).get("exp") or (time.time() + 300))
+
+
+def _expired(token: str) -> bool:
+    return _expiry(token) - 60 <= time.time()
+
+
+def _refresh(user: str) -> str:
+    """Re-mint a supplied token by running the command the wrapper gave us.
+
+    `DAS_TOKEN_REFRESH_CMD` receives the UPN as its single argument and prints
+    a token. It exists because of where the harness runs, not because of what
+    it talks to: the eval driver runs on the HOST, where the tenant is not
+    resolvable, so the only way to obtain a token is to ask something inside
+    the compose network. In production the host reaches the tenant and this is
+    unset, so nothing here is a production code path -- it is the same
+    arrangement as the tokens themselves, which are also minted inside and
+    handed over.
+    """
+    command = os.environ.get("DAS_TOKEN_REFRESH_CMD", "").strip()
+    if not command:
+        return ""
+    try:
+        out = subprocess.run(
+            [*shlex.split(command), user],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=True,
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        raise SignInUnavailable(
+            f"the token for {user} expired and DAS_TOKEN_REFRESH_CMD could not mint "
+            f"another: {e}. A long run must be able to renew, or every arm after the "
+            f"first hour silently loses its tools."
+        ) from None
+    for line in reversed((out.stdout or "").splitlines()):
+        if line.strip().count(".") == 2:
+            return line.strip()
+    return ""
+
+
 def token_for(user: str | None = None, password: str | None = None) -> str:
     """A token for the asking user, cached until shortly before it expires."""
     user = user or os.environ.get("DAS_USER", "")
@@ -81,11 +142,22 @@ def token_for(user: str | None = None, password: str | None = None) -> str:
         return hit[1]
 
     supplied = os.environ.get(env_key(user), "")
-    if supplied:
-        # No expiry is known for a token handed to us; trust the supplier and
-        # let the resource reject it if it is stale.
-        _CACHE[user] = (time.time() + 300, supplied)
+    if supplied and not _expired(supplied):
+        _CACHE[user] = (_expiry(supplied), supplied)
         return supplied
+    if supplied:
+        # The supplied token has run out. Caching it for another five minutes
+        # and letting the resource reject it is what this used to do, and it
+        # cost a six-hour run: the tokens are minted once by the wrapper, they
+        # live an hour, and every arm after the first ran with no warehouse at
+        # all. The model then answered "the warehouse query tools are not
+        # available", which scores as a bad answer rather than as a broken
+        # harness -- a silent failure that looked exactly like a finding.
+        refreshed = _refresh(user)
+        if refreshed:
+            os.environ[env_key(user)] = refreshed
+            _CACHE[user] = (_expiry(refreshed), refreshed)
+            return refreshed
 
     if MODE == "token":
         raise SignInUnavailable(

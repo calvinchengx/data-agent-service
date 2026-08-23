@@ -81,6 +81,17 @@ export DAS_SQL_PROXY=1
 export DAS_HARNESS_AUTH=token
 while IFS= read -r line; do export "${line?}"; done <<< "$MINTED"
 echo "tokens minted: $(echo "$MINTED" | wc -l | tr -d ' ') personas"
+
+# A persona token lives ONE HOUR and a four-arm run takes several, so minting
+# once is not enough -- and the way it fails is silent. The warehouse MCP
+# server simply stops connecting, the model answers "the warehouse query tools
+# are not available", and the arm records a low score that reads as a weak
+# model rather than as an expired credential. That cost a six-hour run.
+#
+# So the harness is given a way to renew. It runs this with the UPN appended
+# and reads a token from the last line. It has to go through the container for
+# the same reason the first mint did: the tenant is not resolvable from here.
+export DAS_TOKEN_REFRESH_CMD="$PWD/scripts/mint-token.sh"
 export DAS_SOURCES
 DAS_SOURCES=$(python3 scripts/host_sources.py)
 

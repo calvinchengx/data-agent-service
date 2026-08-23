@@ -157,6 +157,54 @@ def mcp_config(token: str, *, om: bool, catalog: str = "full") -> dict:
     return {"mcpServers": servers}
 
 
+class HarnessBroken(Exception):
+    """The run could not measure what it claims to measure.
+
+    Distinct from a bad answer ON PURPOSE. A timeout is the agent failing, and
+    is scored as a miss; a missing MCP server is US failing, and scoring it as
+    a miss produces a number that looks exactly like a finding. That happened:
+    persona tokens live an hour, the wrapper minted them once, and every arm
+    after the first ran with no warehouse. The model said so plainly -- "the
+    warehouse query tools are not available in this session" -- and the arm
+    recorded 3.4%, which reads as a weak model rather than as a broken run.
+
+    So this halts. Completed arms are already written to disk, so stopping
+    costs the arm in flight and nothing before it.
+    """
+
+
+def _check_tools(events: list[dict], expected: list[str]) -> None:
+    """Did the tools this arm is defined by actually arrive?
+
+    Checked against the session's own `init` event rather than inferred from
+    behaviour, because the failure is silent by construction: a model with no
+    warehouse still answers, and answers plausibly.
+    """
+    init = next(
+        (e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), None
+    )
+    if init is None:
+        return  # no init event to judge by; let the answer stand
+    broken = [
+        s.get("name")
+        for s in (init.get("mcp_servers") or [])
+        if s.get("name") in ("warehouse", "catalog") and s.get("status") != "connected"
+    ]
+    if broken:
+        raise HarnessBroken(
+            f"MCP server(s) {', '.join(sorted(broken))} did not connect. The arm cannot "
+            f"measure what it claims to. Usual cause: the persona token expired mid-run "
+            f"(they live an hour) -- set DAS_TOKEN_REFRESH_CMD so it can be renewed."
+        )
+    missing = [name for name in expected if name not in set(init.get("tools") or [])]
+    if missing:
+        raise HarnessBroken(
+            f"the session is missing {len(missing)} expected tool(s): "
+            f"{', '.join(sorted(missing)[:4])}. An agent that cannot call a tool answers "
+            f"from its own knowledge, which scores as a confident wrong answer."
+        )
+
+
 def _tool_calls(events: list[dict]) -> list[agent_mod.ToolCall]:
     """Reconstruct the tool calls from the stream.
 
@@ -273,6 +321,7 @@ def ask(
         message = event.get("message") or {}
         if message.get("usage"):
             usage = usage or message["usage"]
+    _check_tools(events, allowed)
     if not text:
         text = (proc.stderr or "")[-400:] or "(no answer)"
     return agent_mod.Answer(
