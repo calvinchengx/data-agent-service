@@ -110,9 +110,21 @@
         "type": { "const": "answer" },
         "text": { "type": "string" },
         "path": {
-          "type": "string",
-          "enum": ["catalog", "warehouse", "multi"],
-          "description": "What answered. `catalog`: the catalog alone, no statement ran. `warehouse`: one source. `multi`: more than one source, or a divergence arm. A client may build latency policy on this; the service does not."
+          "type": "object",
+          "description": "How the answer was reached, split so a client can act on it without knowing this service's domain. `speed` is the general fact -- `fast` means nothing beyond metadata was consulted and the answer arrives in a fraction of the time; `full` means the sources were queried. A client builds latency policy on `speed` alone. `detail` names what actually answered in this service's own vocabulary and is for display and diagnostics; a client that switches on it is coupling itself to a warehouse.",
+          "properties": {
+            "speed": {
+              "type": "string",
+              "enum": ["fast", "full"],
+              "description": "`fast`: no statement or call ran. `full`: at least one did."
+            },
+            "detail": {
+              "type": "string",
+              "enum": ["catalog", "warehouse", "multi"],
+              "description": "`catalog`: the catalog alone. `warehouse`: one source. `multi`: more than one source, or a divergence arm."
+            }
+          },
+          "required": ["speed", "detail"]
         },
         "result": {
           "type": ["object", "null"],
@@ -133,17 +145,22 @@
           },
           "required": ["value", "label"]
         },
-        "definitions_applied": {
+        "provenance": {
           "type": "array",
-          "description": "Every catalog definition the answer depends on. Empty when the catalog was withheld, which is what makes the attribution metric scoreable.",
+          "description": "Every stated meaning the answer depends on, and where each was read from. In this service they are catalog definitions; the shape is deliberately general, because \"the answer rests on these stated meanings, from these sources\" is what a client renders and it is true of more than a glossary. Empty when the catalog was withheld, which is what makes the attribution metric scoreable.",
           "items": {
             "type": "object",
             "properties": {
-              "term": { "type": "string" },
-              "definition": { "type": "string" },
-              "source_fqn": { "type": "string", "description": "The OpenMetadata entity it was read from." }
+              "term": { "type": "string", "description": "What was defined." },
+              "statement": { "type": "string", "description": "The definition, as the source words it." },
+              "source": { "type": "string", "description": "The entity it was read from -- an OpenMetadata FQN here." },
+              "kind": {
+                "type": "string",
+                "description": "What sort of statement this is, in the service's vocabulary: `glossary_term`, `metric`, `column_description`. A client may show it; it must not depend on the set.",
+                "default": "glossary_term"
+              }
             },
-            "required": ["term", "definition", "source_fqn"]
+            "required": ["term", "statement", "source"]
           }
         },
         "sources": { "type": "array", "items": { "type": "string" } },
@@ -159,7 +176,7 @@
           "description": "Reserved for phase 2: what the answer would have been without the catalog, and why it differs. Always null in phase 1."
         }
       },
-      "required": ["text", "path", "definitions_applied", "sources", "tables", "sql", "caveats"]
+      "required": ["text", "path", "provenance", "sources", "tables", "sql", "caveats"]
     },
 
     "abstention": {

@@ -107,19 +107,22 @@ class Answer:
         return seen
 
     @property
-    def path(self) -> str:
-        """What answered: the catalog alone, one source, or more than one.
+    def path(self) -> dict:
+        """How the answer was reached: `{speed, detail}`.
 
         Mechanical, like `abstained`: the contract (agent/contract/events.schema.json)
-        lets a client build latency policy on this, so it must be derived from
-        what ran and never from what the prose says.
+        lets a client build latency policy on `speed`, so it must be derived
+        from what ran and never from what the prose says. `detail` names what
+        answered in this service's vocabulary and is for display -- a client
+        that switches on it is coupling itself to a warehouse.
         """
         n = len(self.sources)
-        return "catalog" if n == 0 else "warehouse" if n == 1 else "multi"
+        detail = "catalog" if n == 0 else "warehouse" if n == 1 else "multi"
+        return {"speed": "fast" if n == 0 else "full", "detail": detail}
 
     @property
-    def definitions_applied(self) -> list[dict]:
-        """Catalog definitions the run read, as {term, definition, source_fqn}.
+    def provenance(self) -> list[dict]:
+        """Stated meanings the answer rests on, as {term, statement, source, kind}.
 
         Derived from catalog tool RESULTS that carry a description alongside a
         name, which is the shape OpenMetadata's entity tools return. Best
@@ -139,7 +142,14 @@ class Answer:
                     fqn = str(ent.get("fullyQualifiedName") or "").strip()
                     if term and definition and fqn and fqn not in seen:
                         seen.add(fqn)
-                        out.append({"term": term, "definition": definition, "source_fqn": fqn})
+                        out.append(
+                            {
+                                "term": term,
+                                "statement": definition,
+                                "source": fqn,
+                                "kind": "glossary_term",
+                            }
+                        )
         return out
 
     @property

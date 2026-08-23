@@ -285,8 +285,8 @@ def behaviour(ask: Ask, alice: str, bob: str) -> None:
     term = next(e for e in evs if e["type"] in TERMINAL)
     if term["type"] == "answer":
         check(
-            "a catalog-only answer reports path=catalog and an empty sql[]",
-            term["path"] == "catalog" and term["sql"] == [],
+            "a catalog-only answer reports path.speed=fast and an empty sql[]",
+            term["path"]["speed"] == "fast" and term["sql"] == [],
             f"path={term['path']} sql={len(term['sql'])}",
         )
     else:
@@ -348,7 +348,7 @@ def main() -> int:
         for name in (
             "a user with no role on the source gets refusal, never answer",
             "a question the catalog cannot ground emits abstention with search terms",
-            "a catalog-only answer reports path=catalog and an empty sql[]",
+            "a catalog-only answer reports path.speed=fast and an empty sql[]",
             'a second ask in a conversation can resolve "that team" from the first',
         ):
             skip(name, "needs --behaviour and ANTHROPIC_API_KEY")

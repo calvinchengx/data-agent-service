@@ -164,7 +164,7 @@ def test_answer_stream_shape(service):
     assert types.count("step") == 2 and types.count("milestone") == 2
     answer = next(e for e in evs if e["type"] == "answer")
     assert (
-        answer["path"] == "warehouse"
+        answer["path"] == {"speed": "full", "detail": "warehouse"}
         and answer["sql"] == ["SELECT 1", "SELECT 1"]
         and answer["result"]["rows"] == [[1]]
     )

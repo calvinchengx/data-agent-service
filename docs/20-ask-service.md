@@ -102,16 +102,32 @@ never be able to smooth a refusal into something that sounds like an answer.
 Separate event types make that impossible by construction rather than by
 instruction.
 
-**`answer` is fields, with the prose alongside.** `path` says what answered
-(`catalog` — no statement ran; `warehouse` — one source; `multi`).
-`result` is rows; `headline` is present only when one figure is the salient
-result, which most answers do not have. `definitions_applied` lists every
-catalog definition the answer depends on, with the entity it was read from,
-and is empty when the catalog was withheld — which is what keeps the
-attribution metric in `docs/07-evaluation.md` scoreable over this surface.
-`caveats` carries what the catalog itself raised. A client that renders must
-show them; a client that speaks must say them. `text` is kept so the CLI
-prints exactly what it prints now.
+**`answer` is fields, with the prose alongside.** `result` is rows;
+`headline` is present only when one figure is the salient result, which most
+answers do not have. `caveats` carries what the catalog itself raised — a
+client that renders must show them, a client that speaks must say them.
+`text` is kept so the CLI prints exactly what it prints now.
+
+Two fields are split rather than flat, and for one reason: **a client written
+against this contract should work against a service that has no catalog at
+all.**
+
+* **`path` is `{speed, detail}`.** `speed` is `fast` (nothing beyond metadata
+  was consulted) or `full` (the sources were queried) — the general fact, and
+  the only one a client should build latency policy on. `detail` names what
+  answered in this service's own words (`catalog`, `warehouse`, `multi`) and
+  is for display and diagnostics. A client that switches on `detail` has
+  coupled itself to a warehouse.
+* **`provenance` replaces a list of glossary definitions.** Each entry is
+  `{term, statement, source, kind}` — "the answer rests on these stated
+  meanings, from these sources", which is what a client renders and is true of
+  more than a glossary. Here they are catalog definitions and `kind` is
+  `glossary_term`; a client may show `kind` and must not depend on the set.
+  Empty when the catalog was withheld, which is what keeps the attribution
+  metric in `docs/07-evaluation.md` scoreable over this surface.
+
+Neither of the flat forms would have allowed that, and both were cheap to
+change while this contract had one consumer and no released client.
 
 ## Four promises, and their limits
 
@@ -205,7 +221,7 @@ every run emits exactly one branch open and one close
 every terminal event is followed by exactly one done
 done.steps equals the step events emitted, before any drop
 a step's ms matches the executor's audit line for the same call
-a catalog-only answer reports path=catalog and an empty sql[]
+a catalog-only answer reports path.speed=fast and an empty sql[]
 a second ask in a conversation can resolve "that team" from the first
 ```
 

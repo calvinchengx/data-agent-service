@@ -258,7 +258,7 @@ def _terminal(ticket: Ticket, a: agent_mod.Answer) -> str:
         path=a.path,
         result=_result(a),
         headline=None,
-        definitions_applied=a.definitions_applied,
+        provenance=a.provenance,
         sources=a.sources,
         tables=sorted(a.tables),
         sql=a.sql,
