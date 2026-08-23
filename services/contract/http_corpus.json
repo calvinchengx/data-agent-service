@@ -307,6 +307,20 @@
      "invoices.getInvoice.netAmount"
     ]
    }
+  },
+  {
+   "operation": "getInvoice",
+   "arguments": {
+    "id": ""
+   },
+   "expect": "refused",
+   "fragment": "cannot be empty",
+   "why": "an empty path parameter collapses its segment, so `/invoices/{id}` becomes `/invoices/` -- the LIST endpoint. The guard authorised getInvoice and the request would have read every invoice: a role permitted one could read all of them. Found by fuzzing, in both implementations at once.",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "id is a path parameter and cannot be empty"
+   }
   }
  ]
 }

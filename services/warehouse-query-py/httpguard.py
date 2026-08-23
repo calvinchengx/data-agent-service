@@ -345,7 +345,12 @@ def guard(operation_id: str, arguments: dict, operations: dict[str, Operation], 
     if op.page_size_param:
         asked = values.get(op.page_size_param)
         try:
-            limit = min(int(asked), policy.max_items) if asked else policy.max_items
+            # A non-positive page size is not a smaller ceiling, it is no
+            # ceiling: plenty of APIs read `limit=0` as unlimited, so a verdict
+            # promising 0 items would have fetched every one. Treated as
+            # unspecified. Found by fuzzing the Go guard, which found it here too.
+            wanted = int(asked) if asked else 0
+            limit = min(wanted, policy.max_items) if wanted > 0 else policy.max_items
         except ValueError:
             limit = policy.max_items
         values[op.page_size_param] = str(limit)
@@ -357,6 +362,16 @@ def guard(operation_id: str, arguments: dict, operations: dict[str, Operation], 
         if name not in values:
             continue
         if parameter.location == "path":
+            # An EMPTY path parameter collapses its segment, and that changes
+            # which endpoint is called: `getInvoice` with `id=""` builds
+            # `/invoices/`, the LIST endpoint. This guard authorised
+            # `invoices.getInvoice` and the request would have read every
+            # invoice — so a role permitted one could read all of them.
+            #
+            # Found by fuzzing the Go guard's properties, which found it here
+            # too: both implementations had it, exactly as with the comma join.
+            if not values[name]:
+                raise Denied(f"{name} is a path parameter and cannot be empty")
             path = path.replace("{" + name + "}", urllib.parse.quote(values[name], safe=""))
         elif parameter.location == "body":
             body_values[name] = _native(values[name], parameter)

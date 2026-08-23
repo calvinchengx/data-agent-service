@@ -475,7 +475,12 @@ func GuardHTTP(operationID string, arguments map[string]any,
 	limit := p.MaxItems
 	if op.PageSizeParam != "" {
 		if asked, ok := values[op.PageSizeParam]; ok && asked != "" {
-			if n, err := strconv.Atoi(asked); err == nil && n < p.MaxItems {
+			// A NON-POSITIVE page size is not a smaller ceiling, it is no
+			// ceiling: plenty of APIs read `limit=0` as unlimited, so a
+			// verdict promising 0 items would have fetched every one. Treated
+			// as unspecified, which is what the policy's own ceiling is for.
+			// Found by fuzzing, in both implementations at once.
+			if n, err := strconv.Atoi(asked); err == nil && n > 0 && n < p.MaxItems {
 				limit = n
 			}
 		}
@@ -492,6 +497,17 @@ func GuardHTTP(operationID string, arguments map[string]any,
 		}
 		switch prm.Location {
 		case "path":
+			// An EMPTY path parameter collapses its segment, and that changes
+			// which endpoint is called: `getInvoice` with `id=""` builds
+			// `/invoices/`, the LIST endpoint. The guard authorised
+			// `invoices.getInvoice` and the request would have read every
+			// invoice -- so a role permitted one could read all of them.
+			//
+			// Found by fuzzing this guard's own properties, in both
+			// implementations at once, exactly as the comma-join bypass was.
+			if text == "" {
+				return nil, denied("%s is a path parameter and cannot be empty", prm.Name)
+			}
 			urlPath = strings.ReplaceAll(urlPath, "{"+prm.Name+"}", pyQuote(text))
 		case "body":
 			bodyValues[prm.Name] = nativeValue(text, prm)
