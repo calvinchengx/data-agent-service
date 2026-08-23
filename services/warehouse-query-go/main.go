@@ -106,7 +106,10 @@ func routes() *http.ServeMux {
 	// operations and not call them has been shown a surface that is not there.
 	mux.HandleFunc("GET /operations", handleListOperations)
 	mux.HandleFunc("GET /operations/{operation}", handleDescribeOperation)
-	mux.HandleFunc("POST /operations/call", handleCallOperation)
+	// POST /call, not /operations/call: the Python executor's path, and a
+	// client written against one executor must reach the other. Guessed wrong
+	// first and the conformance suite said so -- 405 rather than a refusal.
+	mux.HandleFunc("POST /call", handleCallOperation)
 	mux.HandleFunc("POST /mcp", handleMCP)
 	mux.HandleFunc("GET /mcp", handleMCPStream)
 	mux.HandleFunc("POST /om/mcp", handleCatalogMCP)

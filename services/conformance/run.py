@@ -116,6 +116,31 @@ def conform(base: str) -> None:
     names = [s["name"] for s in body["sources"]] if st == 200 else []
     check("GET /sources lists the configured sources", st == 200 and bool(names), str(names))
 
+    configured = body.get("sources", []) if st == 200 else []
+    # Every source says which contract applies to it. This read None for every
+    # source against the Go executor -- including the SQL ones, which was the
+    # tell, since the REST source declares surface:"http" explicitly.
+    surfaces = {s["name"]: s.get("surface") for s in configured}
+    check(
+        "every source declares its surface",
+        bool(surfaces) and all(v in ("sql", "http") for v in surfaces.values()),
+        ", ".join(f"{k}={v}" for k, v in sorted(surfaces.items())),
+    )
+    # Collections or schemas, never both: the same idea on the two surfaces,
+    # and a source carrying both invites a caller to read the one that does
+    # not apply.
+    wrong = [
+        s["name"]
+        for s in configured
+        if ("collections" in s) == ("schemas" in s)
+        or ("collections" in s) != (s.get("surface") == "http")
+    ]
+    check(
+        "a source lists collections or schemas, whichever its surface has",
+        not wrong,
+        ", ".join(wrong) or f"{len(configured)} sources",
+    )
+
     st, body = ex.rest("GET", "/tables", carol)
     tables = [t["qualifiedName"] for t in body.get("tables", [])] if st == 200 else []
     check(
@@ -179,14 +204,78 @@ def conform(base: str) -> None:
         info.get("name", ""),
     )
 
+    # ---- HTTP surface, against whichever source declares one -------------
+    #
+    # Exercised rather than merely published. The Go adapter agreed with the
+    # Python one on 46 operations of a real OpenAPI document the first time
+    # both were pointed at it -- and that was checked BY HAND, which is not a
+    # guarantee. These are the same three calls, run against whichever
+    # executor is up.
+    http_named = [name for name, surface in surfaces.items() if surface == "http"]
+    if http_named:
+        source = http_named[0]
+        st, listed = ex.rest("GET", f"/operations?source={source}", carol)
+        operations = listed.get("operations", []) if st == 200 else []
+        check(
+            "GET /operations lists an http source's operations",
+            st == 200 and bool(operations),
+            f"{len(operations)} operations from {source}",
+        )
+        # Every row carries what a caller needs to act: the id to describe and
+        # the qualified name the access rules are written against.
+        shaped = [
+            o
+            for o in operations
+            if not (o.get("operation") and o.get("qualifiedName") and o.get("method"))
+        ]
+        check(
+            "each operation carries its id, qualified name and method",
+            operations and not shaped,
+            str(shaped[:2]) if shaped else f"{len(operations)} rows",
+        )
+
+        if operations:
+            one = operations[0]["operation"]
+            st, described = ex.rest("GET", f"/operations/{one}?source={source}", carol)
+            check(
+                "GET /operations/{id} describes parameters and fields",
+                st == 200 and described.get("qualifiedName") == operations[0]["qualifiedName"],
+                f"{one}: {len(described.get('fields') or [])} fields, "
+                f"{len(described.get('parameters') or [])} parameters",
+            )
+
+            # The guard, over HTTP. An undeclared parameter is refused rather
+            # than dropped -- dropping it would run a call nobody asked for --
+            # and the reason names the rule, because the agent reads it.
+            st, refused = ex.rest(
+                "POST",
+                "/call",
+                carol,
+                {"source": source, "operation": one, "arguments": {"notAParameter": "x"}},
+            )
+            detail = str(refused.get("detail") or refused)
+            check(
+                "an undeclared parameter is refused by name",
+                st == 400 and "unknown parameter" in detail.lower(),
+                f"status {st}: {detail[:90]}",
+            )
+
+        st, _ = ex.rest("GET", f"/operations/nope_not_here?source={source}", carol)
+        check(
+            "an operation the spec does not describe is not found",
+            st in (403, 404),
+            f"status {st}",
+        )
+
     st, payload = ex.rpc("tools/list", {}, carol)
     tools = [t["name"] for t in (payload.get("result") or {}).get("tools", [])] if st == 200 else []
-    # The SQL surface is the contract both implementations must satisfy. The
-    # HTTP surface is optional and all-or-nothing: an executor that publishes
-    # some of `list_operations`, `describe_operation` and `call_operation` but
-    # not the others would leave a client able to find an operation and unable
-    # to call it. Optional rather than required because the Go executor has no
-    # REST adapter — recorded in ADR 0001 and docs/parity.md, not implied here.
+    # Both surfaces are now the contract. The HTTP one is all-or-nothing --
+    # an executor publishing some of `list_operations`, `describe_operation`
+    # and `call_operation` but not the others would leave a client able to find
+    # an operation and unable to call it -- and it used to be OPTIONAL because
+    # the Go executor had no REST adapter. It has one (Phase D2), so the
+    # exemption is gone: an executor that drops the surface now fails here
+    # rather than being quietly excused.
     core = {
         "list_sources",
         "list_tables",
@@ -202,8 +291,8 @@ def conform(base: str) -> None:
         str(sorted(published)),
     )
     check(
-        "the http surface is published whole or not at all",
-        published & http_surface in (set(), http_surface),
+        "the http surface is published whole, by both implementations",
+        http_surface <= published,
         f"{sorted(published & http_surface)} of {sorted(http_surface)}",
     )
     check(

@@ -101,7 +101,7 @@ func TestTheThreeHTTPRoutesArePublishedTogether(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/operations"},
 		{http.MethodGet, "/operations/listInvoices"},
-		{http.MethodPost, "/operations/call"},
+		{http.MethodPost, "/call"},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
 		w := httptest.NewRecorder()
@@ -297,7 +297,7 @@ func TestTheHTTPHandlersRequireABearerToken(t *testing.T) {
 	}{
 		{http.MethodGet, "/operations", handleListOperations},
 		{http.MethodGet, "/operations/listInvoices", handleDescribeOperation},
-		{http.MethodPost, "/operations/call", handleCallOperation},
+		{http.MethodPost, "/call", handleCallOperation},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
 		w := httptest.NewRecorder()
@@ -365,7 +365,7 @@ func TestTheHTTPHandlersAnswerARealRequest(t *testing.T) {
 		t.Errorf("an operation the role may not reach was listed: %s", body)
 	}
 
-	req, _ := http.NewRequest(http.MethodPost, server.URL+"/operations/call",
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/call",
 		strings.NewReader(`{"source":"billing","operation":"listInvoices","arguments":{}}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
@@ -375,7 +375,7 @@ func TestTheHTTPHandlersAnswerARealRequest(t *testing.T) {
 	}
 
 	// A body that is not JSON is the caller's mistake, and named as one.
-	req, _ = http.NewRequest(http.MethodPost, server.URL+"/operations/call",
+	req, _ = http.NewRequest(http.MethodPost, server.URL+"/call",
 		strings.NewReader(`{`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	if status, _ := doRequest(t, server, req); status != http.StatusBadRequest {
