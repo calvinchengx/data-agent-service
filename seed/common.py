@@ -378,11 +378,30 @@ def connect_source(src: dict):
     if kind == "postgres":
         import psycopg
 
-        dsn = src.get("dsn") or ""
-        if not dsn:
-            raise SystemExit(f"source {src.get('name')} has no dsn")
-        return psycopg.connect(dsn, connect_timeout=15)
+        return psycopg.connect(**postgres_connect_args(src), connect_timeout=15)
     raise SystemExit(f"no harness connection for source kind {kind!r}")
+
+
+def postgres_connect_args(src: dict) -> dict:
+    """How to reach a PostgreSQL source: its DSN, and the password from
+    wherever that source keeps it.
+
+    The executor makes the same decision (`services/warehouse-query-py/
+    sources.py`), and the seed has to agree with it or `make seed` succeeds
+    against a database the running service cannot open. A source with a
+    `credential` keeps its password in the vault and NOT in its DSN, so this
+    is the only place the seed learns it.
+    """
+    dsn = src.get("dsn") or ""
+    if not dsn:
+        raise SystemExit(f"source {src.get('name')} has no dsn")
+    args: dict = {"conninfo": dsn}
+    credential = (src.get("credential") or "").strip()
+    if credential:
+        import vaultref
+
+        args["password"] = vaultref.resolve(credential)
+    return args
 
 
 def source_for(workspace: str, item: str) -> dict:

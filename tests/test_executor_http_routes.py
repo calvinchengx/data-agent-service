@@ -86,10 +86,14 @@ def _wire(monkeypatch):
     """Both sources configured, the network faked, the token trivially resolved."""
     monkeypatch.setattr(app_mod, "SOURCES", {"billing": HTTP_SOURCE, "warehouse": SQL_SOURCE})
     monkeypatch.setattr(app_mod, "DEFAULT_SOURCE", "", raising=False)
-    monkeypatch.setattr(app_mod, "_principal_token", lambda src, p: "service-token")
-    # `_http_token` runs for real, so the credential branch is exercised rather
-    # than mocked away; only the vault behind it is faked. The resolver is the
-    # SHARED one (`vaultref`), not a second implementation in the executor.
+    # The token decision runs for real -- tier, stored credential, identity --
+    # and only what lies behind it is faked: the managed identity, the OBO
+    # exchange, and the vault. The resolver is the SHARED one (`vaultref`),
+    # not a second implementation in the executor.
+    monkeypatch.setattr(app_mod.CRED, "managed_identity_token", lambda audience: "service-token")
+    monkeypatch.setattr(
+        app_mod.CRED, "on_behalf_of", lambda token, scope, cache_key=None: "service-token"
+    )
     monkeypatch.setattr(app_mod.vaultref, "resolve", lambda v, **kw: f"secret-{v}")
     # Permissive by default. The tests that are ABOUT authorization set their
     # own rules; leaving whatever `.env` says ambient would make every other
@@ -326,6 +330,47 @@ def test_a_stored_credential_is_resolved_and_used_as_the_bearer():
         name="x", kind="rest", surface="http", authz_tier="service", credential="keyvault:om-bot"
     )
     assert app_mod._http_token(src, _principal()) == "secret-keyvault:om-bot"
+
+
+# The decision is the source's TIER and CREDENTIAL, never its engine. The
+# same four outcomes for a warehouse, a database and an API.
+@pytest.mark.parametrize("kind", ["fabric", "postgres", "databricks", "rest"])
+def test_the_token_decision_does_not_depend_on_the_engine(kind):
+    extra = {"surface": "http", "spec": "x"} if kind == "rest" else {}
+    stored = sources_mod.Source(
+        name="s", kind=kind, authz_tier="service", credential="keyvault:c", **extra
+    )
+    assert app_mod._principal_token(stored, _principal()) == "secret-keyvault:c"
+    assert app_mod._credential_kind(stored) == "stored"
+
+    identity = sources_mod.Source(name="s", kind=kind, authz_tier="service", **extra)
+    assert app_mod._principal_token(identity, _principal()) == "service-token"
+    assert app_mod._credential_kind(identity) == "identity"
+
+    user = sources_mod.Source(name="s", kind=kind, authz_tier="user", **extra)
+    assert app_mod._principal_token(user, _principal()) == "service-token"  # the OBO stub
+    assert app_mod._credential_kind(user) == "user"
+
+    wrong = sources_mod.Source(name="s", kind=kind, authz_tier="user", credential="k", **extra)
+    with pytest.raises(app_mod.HTTPException) as e:
+        app_mod._principal_token(wrong, _principal())
+    assert e.value.status_code == 500
+
+
+def test_the_audit_line_says_what_a_service_source_was_reached_with(
+    client, signing_key, monkeypatch
+):
+    """`authz_tier=service` says the engine never saw the user; `credential`
+    says what it saw instead. Both, or a reviewer cannot reconstruct either."""
+    seen = []
+    monkeypatch.setattr(app_mod, "audit", lambda **kw: seen.append(kw))
+    monkeypatch.setattr(
+        sources_mod.RestBackend, "_fetch", lambda self, url, token, **kw: json.dumps(SPEC).encode()
+    )
+    r = client.get("/operations?source=billing", headers=auth(signing_key))
+    assert r.status_code == 200, r.text
+    lines = [json.dumps(kw) for kw in seen if kw.get("op") == "list_operations"]
+    assert lines and all('"credential": "identity"' in line for line in lines), lines
 
 
 def test_a_non_json_response_is_refused_by_the_route(client, signing_key, monkeypatch):

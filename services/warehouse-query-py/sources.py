@@ -55,8 +55,13 @@ class Source:
     collections: tuple[str, ...] = ()
     max_items: int = 500
     max_bytes: int = 200_000
-    # How to authenticate when the API does not federate with Entra:
-    # "keyvault:<secret-name>". Only meaningful for authz_tier=service.
+    # How to authenticate when the engine does not federate with Entra:
+    # "keyvault:<secret-name>" -- a Databricks PAT, a Snowflake or PostgreSQL
+    # password, an API key. Only for authz_tier=service: a shared credential
+    # cannot carry the caller's permissions, and a source claiming both is
+    # refused at start-up. For a SQL engine it goes where the OBO token would
+    # have gone (the bearer, or the DSN password); the DSN itself must then
+    # carry no password, so that there is exactly one and it is not on disk.
     credential: str = ""
     # duckdb — the database file, or ":memory:"
     path: str = ""
@@ -236,8 +241,15 @@ class PostgresBackend:
     def _connect(self, src: Source, token: str | None):
         import psycopg
 
-        if src.authz_tier == "user":
-            # Azure Database for PostgreSQL: the access token is the password.
+        # The password comes from the token decision in two cases: a `user`
+        # source (Azure Database for PostgreSQL -- the access token IS the
+        # password) and a `service` source with a stored credential (a plain
+        # PostgreSQL -- the credential is the password, and load_sources has
+        # refused a DSN that also carries one, so the secret has one home and
+        # it is not a settings file). A `service` source with neither is
+        # connected exactly as its DSN says; this service's own identity token
+        # is not a PostgreSQL password and is not sent as one.
+        if src.authz_tier == "user" or src.credential:
             return psycopg.connect(src.dsn, password=token, connect_timeout=15)
         return psycopg.connect(src.dsn, connect_timeout=15)
 
@@ -760,7 +772,31 @@ def load_sources() -> dict[str, Source]:
             )
         if src.kind in EMBEDDED_KINDS and not src.path:
             raise ValueError(f"source {src.name} is {src.kind} but names no `path`")
+        if src.credential and src.authz_tier == "user":
+            raise ValueError(
+                f"source {src.name} has a stored credential but claims authz_tier=user; "
+                "a shared credential cannot carry the caller's permissions"
+            )
+        if src.credential and dsn_has_password(src.dsn):
+            raise ValueError(
+                f"source {src.name} has a stored credential AND a password in its dsn; "
+                "keep the credential and drop the password, so the secret has one home"
+            )
     return out
+
+
+def dsn_has_password(dsn: str) -> bool:
+    """Whether a connection string carries a password inline -- in the URL
+    form (`postgresql://user:secret@host/db`, `?password=`), or in the
+    key=value form (`host=… password=…`)."""
+    if not dsn:
+        return False
+    from urllib.parse import parse_qs, urlsplit
+
+    if "://" in dsn:
+        parts = urlsplit(dsn)
+        return parts.password is not None or "password" in parse_qs(parts.query)
+    return any(part.split("=", 1)[0].strip() == "password" for part in dsn.split())
 
 
 def http_backend_for(src: Source) -> HttpBackend:
@@ -795,6 +831,7 @@ __all__ = [
     "Source",
     "SourceBackend",
     "backend_for",
+    "dsn_has_password",
     "guard",
     "load_sources",
 ]

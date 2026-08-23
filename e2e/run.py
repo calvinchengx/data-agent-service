@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 
 from seed import common as c
@@ -703,7 +704,6 @@ def phase7() -> None:
     failure belongs to the harness rather than to the agent — which is the
     whole reason this baseline exists.
     """
-    import subprocess
 
     out = subprocess.run(
         [sys.executable, "-m", "evals.runner", "--agent", "gold"],
@@ -828,7 +828,6 @@ def phase9() -> None:
     contract is real (it runs, against whichever executor is up) and that the
     comparison the plan promised was actually measured.
     """
-    import subprocess
 
     out = subprocess.run(
         [sys.executable, "-m", "services.conformance.run"],
@@ -902,7 +901,6 @@ def phase10() -> None:
     official MCP SDK — an implementation with no knowledge of this server and
     no reason to be accommodating.
     """
-    import subprocess
 
     out = subprocess.run(
         [sys.executable, "-m", "e2e.clients.run"],
@@ -951,7 +949,6 @@ def phase11() -> None:
     the template describes real resources, and that the settings a tenant needs
     are written down rather than remembered.
     """
-    import subprocess
 
     audit = subprocess.run(
         [sys.executable, "scripts/check_prod_paths.py", "--strict", "--quiet"],
@@ -1187,7 +1184,6 @@ def phase13() -> None:
     through the same gateway, guard, rules and catalog as the first — and that
     the evaluation of it is honest about what the catalog is worth.
     """
-    import subprocess
 
     from agent import identity
 
@@ -1858,7 +1854,6 @@ def phase16() -> None:
     # candidate file this witness writes -- so the CLI's own argument
     # handling, target resolution and exit code are covered by something
     # other than a monkeypatched unit test.
-    import subprocess
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -1960,7 +1955,6 @@ def quality() -> None:
     the Go toolchain are not in this container — but a stage can never again
     be missing merely because nobody noticed it appear.
     """
-    import subprocess
 
     def gate(name: str, argv: list[str], cwd: str | None = None) -> None:
         out = subprocess.run(argv, capture_output=True, text=True, check=False, cwd=cwd)
@@ -2135,6 +2129,51 @@ def quality() -> None:
         "a credential the seed writes reaches the settings file as a reference, not a value",
         not literal,
         ", ".join(literal) if literal else f"{len(written_by_seed)} checked, all references",
+    )
+
+    # A SOURCE's own credential is the same rule one layer down. The support
+    # database's password used to sit inside its DSN, which is a settings file
+    # holding a secret however it is spelled. Now the DSN names a user and the
+    # password is a `keyvault:` reference the executor resolves with its own
+    # identity -- so this asserts the query still works AND that the value is
+    # in no file in the repository.
+    stored_sources = [
+        src
+        for src in json.loads(c.CFG.get("DAS_SOURCES", "[]"))
+        if str(src.get("credential", "")).startswith("keyvault:")
+    ]
+    leaked = []
+    for src in stored_sources:
+        name = src["credential"].split(":", 1)[1]
+        st, _, body = c.http(
+            "GET",
+            f"{c.CFG['DAS_KEYVAULT_URL'].rstrip('/')}/secrets/{name}?api-version=7.5",
+            headers=c.bearer("https://vault.azure.net"),
+        )
+        if st != 200:
+            leaked.append(f"{src['name']}: {name} is not in the vault")
+            continue
+        secret = json.loads(body)["value"]
+        # The witness reads the secret to look for it; a repository that
+        # contains it anywhere has not moved it, only copied it.
+        found = subprocess.run(
+            ["git", "grep", "-lF", secret],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        # docker-compose.yml is exempt: the database container reads its own
+        # password from the environment and has no identity to fetch one with.
+        leaked.extend(
+            f"{src['name']}: its password is in {path}"
+            for path in found.stdout.split()
+            if path != "docker-compose.yml"
+        )
+    check(
+        "quality",
+        "a source's password lives in the vault, and the DSN in the settings file has none",
+        bool(stored_sources) and not leaked,
+        ", ".join(leaked) if leaked else f"{len(stored_sources)} source(s), password vault-only",
     )
 
     # A rule that names a TAG withholds the right columns, in a catalog whose

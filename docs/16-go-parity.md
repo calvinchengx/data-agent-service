@@ -13,7 +13,7 @@ drifted without anyone noticing for two phases.
 | Fabric / Azure SQL / Synapse (TDS) | ✅ | ✅ | — |
 | PostgreSQL | ✅ | ✅ | — |
 | DuckDB | ✅ | ✅ opt-in, `-tags duckdb` — decided, not pending | see D1 |
-| Databricks | ✅ unwitnessed | ❌ | adapter |
+| Databricks | ✅ unwitnessed | ❌ | adapter (a PAT is configurable in both since `credential` covers SQL sources; the adapter itself is Python-only) |
 | HTTP surface (`list_operations`, `describe_operation`, `call_operation`) | ✅ | ❌ | three operations + `httpguard` |
 | REST adapter | ✅ | ❌ | adapter |
 | SQL guard | parser-backed | parser-backed | — |

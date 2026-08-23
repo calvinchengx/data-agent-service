@@ -278,13 +278,74 @@ func sourceNames() []string {
 
 // principalToken is the token the query runs under: the USER's, exchanged
 // on-behalf-of, unless the source cannot honour a user identity.
+//
+// A `service` source reaches its engine with ONE of two things, and the audit
+// line names which: a stored credential (a PAT, a password, an API key, for an
+// engine with no Entra trust), or this service's own managed identity. Which
+// ENGINE it is never enters the decision; the adapter gets a string. The
+// Python executor decides this identically.
 func principalToken(src Source, p *Principal) (string, error) {
 	if src.AuthzTier != "user" {
+		if src.Credential != "" {
+			return storedCredential(src)
+		}
 		return cred.ManagedIdentityToken(envOr("DAS_SQL_AUDIENCE", "https://database.windows.net"))
+	}
+	if src.Credential != "" {
+		// LoadSources refuses this at start-up; a Source built any other way
+		// meets the same rule here.
+		return "", &configError{fmt.Sprintf("source %s has a stored credential but claims "+
+			"authz_tier=user; a shared credential cannot carry the caller's permissions", src.Name)}
 	}
 	scope := envOr("DAS_SQL_SCOPE",
 		envOr("DAS_SQL_AUDIENCE", "https://database.windows.net")+"/user_impersonation")
 	return cred.OnBehalfOf(p.Token, scope, p.key())
+}
+
+// tokenFailure reports why no credential could be produced: the deployment's
+// fault (a misconfigured source) is a 500 in its own words; anything else is
+// the token exchange, a 502, and "for you" because it is the caller's own
+// identity that could not be exchanged.
+func tokenFailure(err error) (int, string) {
+	var cfg *configError
+	if errors.As(err, &cfg) {
+		return http.StatusInternalServerError, cfg.msg
+	}
+	return http.StatusBadGateway, "could not obtain a data-plane token for you: " + err.Error()
+}
+
+// configError is a refusal that is the deployment's fault, not the caller's:
+// reported as 500 with its text, where an engine failure would be 502.
+type configError struct{ msg string }
+
+func (e *configError) Error() string { return e.msg }
+
+// storedCredential resolves a `service` source's configured credential. A
+// value with a scheme that is not `keyvault:` is refused rather than sent: a
+// mistyped reference handed to the engine as a bearer would fail with an
+// error about the header rather than about the typo.
+func storedCredential(src Source) (string, error) {
+	if scheme, _, found := strings.Cut(src.Credential, ":"); found && !isVaultRef(src.Credential) {
+		return "", &configError{fmt.Sprintf("source %s: credential scheme %q is not recognised; "+
+			"use `%s<name>` or a literal with no scheme", src.Name, scheme, vaultRefPrefix)}
+	}
+	value, err := resolveRef(src.Credential)
+	if err != nil {
+		return "", fmt.Errorf("source %s: %w", src.Name, err)
+	}
+	return value, nil
+}
+
+// credentialKind is what a source was reached with, for the audit line: the
+// caller's own identity, a stored credential, or this service's identity.
+func credentialKind(src Source) string {
+	if src.AuthzTier == "user" {
+		return "user"
+	}
+	if src.Credential != "" {
+		return "stored"
+	}
+	return "identity"
 }
 
 var denialMarkers = []string{"access denied", "permission was denied", "principal has no role",
@@ -377,7 +438,8 @@ func handleTables(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := principalToken(src, p)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "could not obtain a data-plane token for you: "+err.Error())
+		status, msg := tokenFailure(err)
+		writeError(w, status, msg)
 		return
 	}
 	tables, err := backend.ListTables(r.Context(), src, token)
@@ -425,7 +487,8 @@ func handleDescribe(w http.ResponseWriter, r *http.Request) {
 func describe(ctx context.Context, src Source, table string, p *Principal) (*Described, int, error) {
 	token, err := principalToken(src, p)
 	if err != nil {
-		return nil, http.StatusBadGateway, err
+		status, msg := tokenFailure(err)
+		return nil, status, errors.New(msg)
 	}
 	described, err := backend.Describe(ctx, src, table, token)
 	if err != nil {
@@ -527,8 +590,8 @@ func runQuery(ctx context.Context, src Source, sqlText string, requested int,
 	}
 	token, err := principalToken(src, p)
 	if err != nil {
-		return nil, nil, http.StatusBadGateway,
-			fmt.Errorf("could not obtain a data-plane token for you: %w", err)
+		status, msg := tokenFailure(err)
+		return nil, nil, status, errors.New(msg)
 	}
 	result, err := backend.Run(ctx, src, verdict, token)
 	if err != nil {
@@ -543,6 +606,7 @@ func runQuery(ctx context.Context, src Source, sqlText string, requested int,
 	audit("op", "run_query", "user", p.Name, "oid", p.OID, "client", p.Client, "roles", p.Roles, "source", src.Name,
 		"verdict", "ok", "tables", verdict.Tables, "rows", result.RowCount,
 		"ms", time.Since(started).Milliseconds(), "authz_tier", src.AuthzTier,
+		"credential", credentialKind(src),
 		"sql", truncate(verdict.SQL, 1000))
 	return result, verdict, http.StatusOK, nil
 }

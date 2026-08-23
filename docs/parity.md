@@ -25,6 +25,7 @@ same check has been watched passing against a real tenant.
 |---|---|---|---|
 | Warehouse holds the seeded data, aggregates agree with facts | 🟢 | `e2e.run` phase1 | not yet |
 | Catalog carries schema, glossary, metrics, and a read-only bot | 🟢 | `e2e.run` phase2 | not yet |
+| A source's password lives in Key Vault, not in its DSN; both executors resolve it | 🟢 | `e2e.run` quality, unit tests both languages | not yet |
 | Managed identity (App Service protocol) | 🟢 | `e2e.run` phase3 | not yet |
 | Infrastructure definition parses, and declares what the runbook copies | 🟢 | `e2e.run` phase11, `terraform validate` | not yet |
 | App registration, exposed scope and federated credential are declared | 🟢 | `terraform validate` | not yet — and the emulator cannot witness the federated path at all (upstream #6) |

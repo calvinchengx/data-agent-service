@@ -127,6 +127,8 @@ def test_the_publishing_identity_can_come_from_configuration(monkeypatch, tmp_pa
     monkeypatch.setattr(run.c, "CFG", {**run.c.CFG, "DAS_PUBLISH_USER": "job@example.test"})
     monkeypatch.setattr(run.identity, "token_for", lambda upn: seen.append(upn) or "tok")
     monkeypatch.setattr(run.c, "load_state", dict)
+    # Which targets are live is a different question, asked after this one.
+    monkeypatch.setattr(run.targets, "configured", lambda cfg, state: [])
     monkeypatch.setattr("sys.argv", ["run", "--candidates", str(path)])
     run.main()
     assert seen == ["job@example.test"]

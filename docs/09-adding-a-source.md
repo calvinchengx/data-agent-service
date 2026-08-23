@@ -68,6 +68,48 @@ the difference as behaviour: on a `service`-tier source two personas issuing
 the same query both succeed and both audit `authz_tier=service`; on a
 `user`-tier source the persona without a grant is refused **by the source**.
 
+## The credential a `service` source uses
+
+A `user` source reaches its engine with the caller's own token, exchanged
+on-behalf-of. A `service` source reaches it with one of two things, and
+`credential` decides which:
+
+```json
+{"name": "contoso_support", "kind": "postgres", "authz_tier": "service",
+ "dsn": "postgresql://das@postgres:5432/support",
+ "credential": "keyvault:das-support-db-password"}
+
+{"name": "contoso_gold", "kind": "databricks", "authz_tier": "service",
+ "host": "https://…", "warehouse_id": "…",
+ "credential": "keyvault:contoso-databricks-pat"}
+```
+
+With no `credential`, the source is reached with **this service's managed
+identity** — right for an engine that federates with Entra. With one, the
+value is resolved from Key Vault with that same identity and handed to the
+engine wherever its password goes: the bearer for Databricks and for an HTTP
+API, the DSN password for PostgreSQL. **Which engine it is never enters the
+decision** — the adapter is given a string.
+
+Three rules, all refused at start-up rather than at the first query:
+
+| | Why |
+|---|---|
+| `credential` + `authz_tier: user` | a shared credential cannot carry the caller's permissions, and the audit line would then say it did |
+| `credential` + a password in the `dsn` | two homes for one secret, and one of them is a settings file. Keep the credential, drop the password |
+| a scheme that is not `keyvault:` | a mistyped reference sent as a bearer fails at the engine with a message about the header, not about the typo. A value with no scheme at all is a literal, which is right for a key someone pastes in |
+
+The audit line carries `credential=user|stored|identity` beside `authz_tier`.
+The tier says the engine never saw the caller; this says what it saw instead,
+and without both a reviewer can reconstruct neither.
+
+**This is what makes a published data product consumable.** A Databricks
+warehouse wants a PAT, a Snowflake account wants a password, a plain
+PostgreSQL wants a password — none of them federate with Entra, and before
+this the only way to reach them was to write the secret into `DAS_SOURCES`.
+`e2e.run` quality asserts that no source's password appears in any file in
+this repository.
+
 ## What the second source found, within minutes
 
 Both of these were live defects that one engine could never have surfaced:

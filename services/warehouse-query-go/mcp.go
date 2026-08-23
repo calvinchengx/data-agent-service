@@ -277,7 +277,8 @@ func callTool(r *http.Request, p *Principal, name string, raw json.RawMessage) m
 	case "list_tables":
 		token, err := principalToken(src, p)
 		if err != nil {
-			return textContent("could not obtain a data-plane token for you: "+err.Error(), true)
+			_, msg := tokenFailure(err)
+			return textContent(msg, true)
 		}
 		tables, err := backend.ListTables(r.Context(), src, token)
 		if err != nil {

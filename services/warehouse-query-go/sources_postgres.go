@@ -39,11 +39,14 @@ func NewPostgresBackend() *PostgresBackend {
 
 // dsnFor returns the connection string to use for this caller.
 //
-// For a `user` tier source the caller's token replaces the password, which is
-// how Azure Database for PostgreSQL authenticates an Entra principal. For a
-// `service` tier source the configured credential is used unchanged and the
-// token is ignored — deliberately, because pretending otherwise would imply a
-// per-user guarantee the engine is not making.
+// The password comes from the token decision in two cases: a `user` source
+// (Azure Database for PostgreSQL -- the access token IS the password) and a
+// `service` source with a stored credential (a plain PostgreSQL -- the
+// credential is the password, and LoadSources has refused a DSN that also
+// carries one, so the secret has one home and it is not a settings file). A
+// `service` source with neither is connected exactly as its DSN says; this
+// service's own identity token is not a PostgreSQL password and is not sent
+// as one. The Python executor connects identically.
 func dsnFor(src Source, token string) (string, error) {
 	if src.DSN == "" {
 		return "", fmt.Errorf("source %s has no dsn", src.Name)
@@ -52,7 +55,7 @@ func dsnFor(src Source, token string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("source %s has an unparseable dsn: %w", src.Name, err)
 	}
-	if src.AuthzTier == "user" {
+	if src.AuthzTier == "user" || src.Credential != "" {
 		user := ""
 		if parsed.User != nil {
 			user = parsed.User.Username()

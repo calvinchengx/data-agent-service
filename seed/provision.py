@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import time
 
 from seed import common as c
@@ -112,8 +113,22 @@ def provision_postgres(dataset: str, ds, reset: bool) -> dict:
     src = c.source_by_name(ds.SOURCE_NAME)
     if not src.get("dsn"):
         raise SystemExit(f"source {ds.SOURCE_NAME} has no dsn; add one to DAS_SOURCES")
+    # A source that keeps its password in the vault needs it PUT there before
+    # anything connects. The value comes from the one place it must still be
+    # literal -- the environment the database container itself reads -- and
+    # this is the hand-off from that bootstrap to every later reader.
+    credential = (src.get("credential") or "").strip()
+    if credential.startswith("keyvault:"):
+        password = os.environ.get("POSTGRES_PASSWORD", "")
+        if not password:
+            raise SystemExit(
+                f"source {ds.SOURCE_NAME} reads its password from {credential}, and "
+                "POSTGRES_PASSWORD is unset, so there is nothing to store there"
+            )
+        c.store_secret(credential.split(":", 1)[1], password)
     data = ds.generate()
-    with psycopg.connect(src["dsn"], connect_timeout=20) as conn, conn.cursor() as cur:
+    connect = c.postgres_connect_args(src)
+    with psycopg.connect(**connect, connect_timeout=20) as conn, conn.cursor() as cur:
         # Identifiers are composed rather than interpolated: the names come from
         # a dataset module rather than from input, but composing costs nothing
         # and keeps the shape that would be safe if that ever changed.

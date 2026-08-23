@@ -118,8 +118,9 @@ def pg_source(**kw) -> Source:
         authz_tier=kw.get("authz_tier", "service"),
         om_service_fqn="postgres_support",
         schemas=("support",),
-        dsn="postgresql://u:p@host/db",
+        dsn=kw.get("dsn", "postgresql://u:p@host/db"),
         database="support",
+        credential=kw.get("credential", ""),
     )
 
 
@@ -233,6 +234,15 @@ def test_postgres_passes_the_token_as_the_password_only_for_user_tier(monkeypatc
     PostgresBackend()._connect(pg_source(authz_tier="service"), "the-token")
     assert "password" not in seen, "a service-tier connection must not send the user's token"
 
+    # A service source WITH a stored credential: what arrives here is that
+    # credential (app._principal_token resolved it), and it is the password.
+    seen.clear()
+    PostgresBackend()._connect(
+        pg_source(authz_tier="service", credential="keyvault:pg", dsn="postgresql://u@host/db"),
+        "the-resolved-secret",
+    )
+    assert seen.get("password") == "the-resolved-secret"
+
 
 # ------------------------------------------------------------ databricks --
 def test_databricks_posts_a_statement_and_reads_the_result(monkeypatch):
@@ -305,6 +315,66 @@ def test_load_sources_reads_the_configured_list(monkeypatch):
     loaded = load_sources()
     assert set(loaded) == {"w"}
     assert loaded["w"].dialect == "tsql"
+
+
+# A stored credential is a property of the SOURCE, not of an engine. These
+# pin the two start-up refusals and the one form the secret may take.
+def _source_json(**fields) -> str:
+    import json as _json
+
+    base = {
+        "name": "x",
+        "kind": "postgres",
+        "dialect": "postgres",
+        "authz_tier": "service",
+        "om_service_fqn": "p",
+        "schemas": ["s"],
+        "dsn": "postgresql://u@host/db",
+    }
+    return _json.dumps([{**base, **fields}])
+
+
+def test_a_stored_credential_on_a_user_source_is_refused_at_startup(monkeypatch):
+    monkeypatch.setenv("DAS_SOURCES", _source_json(authz_tier="user", credential="keyvault:pg"))
+    with pytest.raises(ValueError, match="cannot carry the caller's permissions"):
+        load_sources()
+
+
+@pytest.mark.parametrize(
+    "dsn",
+    [
+        "postgresql://u:secret@host/db",
+        "postgresql://u@host/db?password=secret",
+        "host=host user=u password=secret dbname=db",
+    ],
+)
+def test_a_credential_and_a_dsn_password_together_are_refused(monkeypatch, dsn):
+    """Two passwords is not a precedence question; it is a secret with two
+    homes, one of which is a settings file."""
+    monkeypatch.setenv("DAS_SOURCES", _source_json(credential="keyvault:pg", dsn=dsn))
+    with pytest.raises(ValueError, match="one home"):
+        load_sources()
+
+
+def test_a_credential_on_any_service_source_loads(monkeypatch):
+    for kind, extra in (
+        ("postgres", {"dsn": "postgresql://u@host/db"}),
+        ("databricks", {"host": "https://dbx", "warehouse_id": "w", "catalog": "c"}),
+        ("fabric", {"workspace": "w", "item": "i"}),
+    ):
+        monkeypatch.setenv("DAS_SOURCES", _source_json(kind=kind, credential="keyvault:s", **extra))
+        assert load_sources()["x"].credential == "keyvault:s"
+
+
+def test_dsn_has_password_reads_both_forms():
+    assert not sources_mod.dsn_has_password("")
+    assert not sources_mod.dsn_has_password("postgresql://u@host/db")
+    assert not sources_mod.dsn_has_password("host=h user=u dbname=d")
+    assert sources_mod.dsn_has_password("postgresql://u:p@host/db")
+    assert sources_mod.dsn_has_password("postgresql://u@host/db?password=p")
+    assert sources_mod.dsn_has_password("host=h password=p")
+    # `password` inside a value is not a password key
+    assert not sources_mod.dsn_has_password("host=h application_name=password_rotator")
 
 
 def test_load_sources_rejects_nonsense(monkeypatch):

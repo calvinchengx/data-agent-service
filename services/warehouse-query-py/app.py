@@ -235,10 +235,28 @@ def _source(name: str | None):
 def _principal_token(src, p: Principal) -> str:
     """The token the query runs under. `authz_tier=user` means the USER's own
     permissions apply at the engine; `service` means they do not, and the audit
-    record says so."""
+    record says so.
+
+    A `service` source reaches its engine with ONE of two things, and the audit
+    line names which: a stored credential (`credential: "keyvault:<name>"` --
+    a PAT, a password, an API key, for an engine with no Entra trust), or this
+    service's own managed identity. Which ENGINE it is never enters the
+    decision; that is the adapter's concern, and the adapter gets a string.
+    """
     if src.authz_tier != "user":
+        if src.credential:
+            return _stored_credential(src)
         return CRED.managed_identity_token(
             os.environ.get("DAS_SQL_AUDIENCE", "https://database.windows.net")
+        )
+    if src.credential:
+        # load_sources refuses this at start-up; a Source built any other way
+        # meets the same rule here, because the audit line would otherwise
+        # claim the caller's permissions applied to a shared credential.
+        raise HTTPException(
+            500,
+            f"source {src.name} has a stored credential but claims authz_tier=user; "
+            "a shared credential cannot carry the caller's permissions",
         )
     try:
         # The scope the SOURCE needs, not one global setting: a Databricks
@@ -250,42 +268,39 @@ def _principal_token(src, p: Principal) -> str:
 
 
 def _http_token(src, p: Principal) -> str:
-    """The credential an HTTP source is reached with.
-
-    Three cases, in the order they are tried:
-
-    * a stored credential (`credential: "keyvault:<name>"`) — for an API that
-      does not federate with Entra at all. It is only honoured for a
-      `service` tier source, because sending a shared credential while
-      claiming the caller's permissions apply would be a lie the audit line
-      would then repeat;
-    * otherwise the same token any other source gets — on-behalf-of for a
-      `user` tier source, the service's own for a `service` one.
-    """
-    if src.credential:
-        if src.authz_tier == "user":
-            raise HTTPException(
-                500,
-                f"source {src.name} has a stored credential but claims authz_tier=user; "
-                "a shared credential cannot carry the caller's permissions",
-            )
-        scheme, sep, _ = src.credential.partition(":")
-        if sep and not vaultref.is_reference(src.credential):
-            # `vaultref` treats a non-reference as a literal, which is right
-            # for a subscription key a person pastes in. A source credential
-            # that looks like a mistyped scheme is not that: sending
-            # `vault:name` as a bearer token would fail at the API with an
-            # error about the header rather than about the typo.
-            raise HTTPException(
-                500,
-                f"source {src.name}: credential scheme {scheme!r} is not recognised; "
-                f"use `{vaultref.PREFIX}<name>` or a literal with no scheme",
-            )
-        try:
-            return vaultref.resolve(src.credential)
-        except LookupError as e:
-            raise HTTPException(502, f"source {src.name}: {e}") from None
+    """The credential an HTTP source is reached with: the same decision as
+    every other source. Kept as a name because the HTTP routes read better
+    saying what they mean; the rule lives in `_principal_token`."""
     return _principal_token(src, p)
+
+
+def _stored_credential(src) -> str:
+    """The configured credential of a `service` source, resolved."""
+    scheme, sep, _ = src.credential.partition(":")
+    if sep and not vaultref.is_reference(src.credential):
+        # `vaultref` treats a non-reference as a literal, which is right for
+        # a key a person pastes in. A source credential that looks like a
+        # mistyped scheme is not that: sending `vault:name` as a bearer token
+        # would fail at the engine with an error about the header rather
+        # than about the typo.
+        raise HTTPException(
+            500,
+            f"source {src.name}: credential scheme {scheme!r} is not recognised; "
+            f"use `{vaultref.PREFIX}<name>` or a literal with no scheme",
+        )
+    try:
+        return vaultref.resolve(src.credential)
+    except LookupError as e:
+        raise HTTPException(502, f"source {src.name}: {e}") from None
+
+
+def _credential_kind(src) -> str:
+    """What a `service` source was reached with, for the audit line: the
+    stored credential, or this service's identity. A reader of the log can
+    then tell not only that the engine never saw the user, but what it saw."""
+    if src.authz_tier == "user":
+        return "user"
+    return "stored" if src.credential else "identity"
 
 
 def audit(**kw) -> None:
@@ -481,6 +496,7 @@ def run_query(
         rows=result["rowCount"],
         ms=ms,
         authz_tier=src.authz_tier,
+        credential=_credential_kind(src),
         sql=verdict.sql[:1000],
     )
     return {
@@ -559,6 +575,7 @@ def _op_list(p: Principal, source: str | None) -> dict:
         count=len(allowed),
         ms=int((time.time() - t0) * 1000),
         authz_tier=src.authz_tier,
+        credential=_credential_kind(src),
     )
     return {"source": src.name, "operations": allowed}
 
@@ -604,6 +621,7 @@ def _op_describe(p: Principal, operation: str, source: str | None) -> dict:
         operation=operation,
         withheld=len(hidden),
         authz_tier=src.authz_tier,
+        credential=_credential_kind(src),
     )
     return {"source": src.name, **out}
 
@@ -691,6 +709,7 @@ def _op_call(p: Principal, body: dict) -> dict:
         withheld=withheld,
         ms=ms,
         authz_tier=src.authz_tier,
+        credential=_credential_kind(src),
     )
     out = {**result, "items": items, "source": src.name, "elapsedMs": ms}
     if withheld:
@@ -1000,6 +1019,7 @@ def _dispatch(p: Principal, name: str, args: dict) -> dict:
                 rows=result["rowCount"],
                 ms=ms,
                 authz_tier=src.authz_tier,
+                credential=_credential_kind(src),
                 sql=verdict.sql[:1000],
                 via="mcp",
             )

@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -37,6 +38,11 @@ type Source struct {
 	DSN string `json:"dsn"`
 	// duckdb and any other embedded engine: the database file
 	Path string `json:"path"`
+	// How to authenticate when the engine does not federate with Entra:
+	// "keyvault:<secret-name>" -- a PAT, a password, an API key. Only for
+	// authz_tier=service, and the DSN must then carry no password, so that the
+	// secret has exactly one home and it is not a settings file.
+	Credential string `json:"credential"`
 }
 
 // embeddedKinds are engines that are a library reading a file rather than a
@@ -105,6 +111,14 @@ func LoadSources() (map[string]Source, error) {
 					"source %s is duckdb, but this executor was built without DuckDB support; "+
 						"rebuild with `-tags duckdb` (docs/16-go-parity.md)", s.Name)
 			}
+		}
+		if s.Credential != "" && s.AuthzTier == "user" {
+			return nil, fmt.Errorf("source %s has a stored credential but claims authz_tier=user; "+
+				"a shared credential cannot carry the caller's permissions", s.Name)
+		}
+		if s.Credential != "" && dsnHasPassword(s.DSN) {
+			return nil, fmt.Errorf("source %s has a stored credential AND a password in its dsn; "+
+				"keep the credential and drop the password, so the secret has one home", s.Name)
 		}
 		out[s.Name] = s
 	}
@@ -445,4 +459,31 @@ func jsonable(value any) any {
 	default:
 		return v
 	}
+}
+
+// dsnHasPassword reports whether a connection string carries a password
+// inline -- in the URL form (`postgresql://user:secret@host/db`, `?password=`)
+// or the key=value form (`host=… password=…`).
+func dsnHasPassword(dsn string) bool {
+	if dsn == "" {
+		return false
+	}
+	if strings.Contains(dsn, "://") {
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			return false
+		}
+		if parsed.User != nil {
+			if _, set := parsed.User.Password(); set {
+				return true
+			}
+		}
+		return parsed.Query().Has("password")
+	}
+	for _, part := range strings.Fields(dsn) {
+		if key, _, _ := strings.Cut(part, "="); strings.TrimSpace(key) == "password" {
+			return true
+		}
+	}
+	return false
 }
