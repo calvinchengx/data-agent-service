@@ -382,6 +382,11 @@ services:
       IDENTITY_ENDPOINT: "https://entra-emulator:8443/msi/token"
       IDENTITY_HEADER: "${DAS_MI_HEADER:-managed-identity-secret}"
       DAS_ASK_PORT: "8091"
+      # Where this service's model calls go. Empty means the agent's own
+      # setting (DAS_LLM_BASE_URL, or the API); `make conformance-ask` sets
+      # it to the llm-stub for the transport checks and unsets it after.
+      DAS_LLM_BASE_URL: "${DAS_ASK_LLM_BASE_URL:-${DAS_LLM_BASE_URL:-}}"
+      ANTHROPIC_API_KEY: "${DAS_ASK_LLM_KEY:-${ANTHROPIC_API_KEY:-}}"
     volumes:
       - ./:/app:ro
       - tools-venv:/app/.venv

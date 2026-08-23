@@ -85,7 +85,9 @@ class Ask:
         )
         out: list[dict] = []
         deadline = time.time() + limit_s
-        with urllib.request.urlopen(req, timeout=limit_s) as r:
+        # The same TLS context every harness uses, so the gateway's local
+        # certificate is handled once, in seed.common, and not here.
+        with urllib.request.urlopen(req, timeout=limit_s, context=c._SSL) as r:
             buf: list[str] = []
             while time.time() < deadline:
                 line = r.readline().decode()
@@ -318,9 +320,16 @@ def main() -> int:
     ap.add_argument("--base", default=c.CFG.get("DAS_ASK_URL", "http://ask:8091"))
     ap.add_argument("--name", default=None)
     ap.add_argument(
+        "--via-gateway",
+        action="store_true",
+        help="reach the service through the gateway's /ask route, as a client would",
+    )
+    ap.add_argument(
         "--behaviour", action="store_true", help="also run the checks that need a model"
     )
     a = ap.parse_args()
+    if a.via_gateway:
+        a.base = c.CFG["DAS_APIM_BASE"].rstrip("/") + "/ask"
 
     print(f"\nconformance (ask): {a.name or a.base}")
     alice = token("alice@entraemulator.dev")  # Data.Analyst

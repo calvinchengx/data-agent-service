@@ -1,12 +1,15 @@
 # The ask service
 
-> **Status: written, not yet witnessed against the stack.** The contract
-> (`agent/contract/`), the service (`agent/server.py`), the conformance suite
-> (`agent/conformance/run.py`) and the gateway route (`seed/apim.py`) exist.
-> `tests/test_ask_server.py` proves the transport semantics in-process with
-> the verifier and the model stubbed. `make conformance-ask` against the
-> running stack, and the e2e witness, have not been run; until they have, the
-> row in `parity.md` reads *not yet* and nothing here is claimed as working.
+> **Status: transport witnessed locally; behaviour not yet.** `make
+> conformance-ask` passes 24/24 against the service directly and 24/24
+> through the gateway's `/ask` route, with the model replaced by the
+> `llm-stub` — which proves tickets, streams, replay, ownership, cancel and
+> `done`, and proves that Server-Sent Events survive the gateway. The four
+> behaviour checks (refusal, abstention, `path`, conversation memory) need a
+> model and read *skipped* until `ARGS=--behaviour ASK_LLM=real` has been run
+> with a key; nothing about them is claimed here until then. A stub answers
+> in one hop in milliseconds, so a long stream's keep-alives across the
+> gateway's idle timeout are also not yet witnessed.
 
 Ask a question, get a ticket back before anything runs, watch the work as a
 stream of events, and receive the answer when there is one — or the abstention,

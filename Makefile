@@ -138,11 +138,16 @@ conformance-one: ## The contract against one implementation (DAS_EXECUTOR=py|go)
 ask-serve: ## The ask service, behind the gateway at /ask (docs/20-ask-service.md)
 	docker compose --profile ask up -d --build --wait ask
 
-conformance-ask: ## The ask contract (agent/contract/) against the running service; --behaviour needs a model key
+conformance-ask: ## The ask contract (agent/contract/) direct AND through the gateway; ARGS=--behaviour needs a model key
 	# Transport checks run against the llm-stub, so CI proves the plumbing
-	# without paying for a model; behaviour checks need ANTHROPIC_API_KEY.
-	$(MAKE) --no-print-directory ask-serve
-	$(TOOLS) python -m agent.conformance.run --name "ask service" $(ARGS)
+	# without paying for a model: ASK_LLM=stub (the default) points the ask
+	# service at it for this run and nothing else. Behaviour checks need a
+	# real model: ASK_LLM=real ARGS=--behaviour with ANTHROPIC_API_KEY set.
+	DAS_ASK_LLM_BASE_URL=$(if $(filter real,$(ASK_LLM)),,http://llm-stub:8095/anthropic) \
+	DAS_ASK_LLM_KEY=$(if $(filter real,$(ASK_LLM)),,stub) \
+	docker compose --profile ask up -d --build --force-recreate --wait ask
+	$(TOOLS) python -m agent.conformance.run --name "ask service, direct" $(ARGS)
+	$(TOOLS) python -m agent.conformance.run --via-gateway --name "ask service, via the gateway" $(ARGS)
 
 typecheck: ## Python types only
 	$(TY) check
