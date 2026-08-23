@@ -504,17 +504,31 @@ would sharpen them, and is the first item below.
 naive floor, and repeats all landed and are folded into the results. Three
 items remain.
 
-**Sample.** This is now the binding constraint, and the paired tests show
-exactly why: support's nine L3 questions cannot reach p < 0.05 no matter how
-one-sided the result, because five discordant pairs all falling one way is
-p = 0.0625. Contoso's sixteen carried the finding alone. Roughly 40 L3
-questions per use case gets to ±10 points rather than ±30, and gives the
-schema-only nulls enough power to mean "no effect" rather than "no effect we
-could see".
+**Sample.** Done. **Support went from 9 L3 questions to 39, contoso from 16 to
+40**, which was the binding constraint: support's nine could not reach p < 0.05
+however one-sided the result, because five discordant pairs all falling one way
+is p = 0.0625. Forty questions make a clean sweep resolvable to p well under
+0.001, and give the schema-only nulls enough power to mean "no effect" rather
+than "no effect we could see".
 
-A discipline worth imposing on new questions: write them from the **business**,
-not from the schema. Ours were authored alongside their gold SQL, which risks
-phrasing the question in the vocabulary the catalog happens to use.
+Each new question was authored from a **glossary term or registered metric**
+rather than from a column, and each one's `why` names the mistake it catches.
+They cover the definitional levers systematically: for support, Resolution Time
+against elapsed time, the per-priority Service Level Target held in the `sla`
+table, the Open Ticket exclusion, and waiting time as a subject in its own
+right; for contoso, the April fiscal year, net against gross against cancelled,
+the two segment rollups, the conformed Party, and the carried FX rate.
+
+One of them deliberately inverts the trap. `L3-breach-if-waiting-counted` asks
+what our target performance would look like *if* we counted customer waiting
+time — so `elapsed_minutes` is the CORRECT answer, and an agent that has
+learned "never use elapsed_minutes" as a rule rather than as a definition gets
+it wrong. A question set that only ever rewards one column teaches the wrong
+lesson.
+
+Validated end to end rather than by inspection: `--agent gold` runs every
+question's reference SQL through the real gateway, executor, guard and scorer,
+and scores **48/48 on support and 50/50 on contoso**.
 
 **A second model.** Every number here is one model's loop over our MCP servers.
 The finding that catalog prose does not change answers is plausibly a statement
@@ -669,6 +683,39 @@ they disagree:
 | full vs schema-only — execution | +0 / -1, p = 1.0 | +0 / -1, p = 1.0 |
 | full vs schema-only — grounding | *no question differed* | *no question differed* |
 | full vs schema-only — semantics | *no question differed* | +0 / -1, p = 1.0 |
+
+### Two places the seed contradicts its own catalog
+
+`L3-unsegmented` was not a hard question, it was an impossible one: the glossary
+says web-only shoppers are reported as `Unsegmented`, and the seed gave every
+party its customer's segment regardless, so the term named nothing in the data.
+**Fixed** — a party the stores have never seen now carries `Unsegmented`, which
+is what the glossary always said. The fix adds no calls to the random generator,
+so every other figure is byte-identical: product-segment revenue is still
+`2018919.3969 / 870683.7978 / 903636.6466` after reseeding.
+
+**A second contradiction is still open, and is not mine to resolve.** The
+glossary states *"Only the web system cancels; POS has no such concept."* The
+data disagrees:
+
+| Selling system | Cancelled revenue |
+|---|---|
+| WEB | 266,344.71 |
+| POS | **643,043.24** |
+
+POS cancels more than web. This is the contradiction a run found on its own —
+*"the warehouse says POS cancels slightly more than web, but the catalog says
+POS cannot cancel at all, so I would not report this comparison onward until a
+steward resolves it"* — which is model behaviour worth keeping, but it rests on
+a defect rather than on a designed test. `L3-cancellation-by-system`'s `why`
+expects a zero for POS, so the question cannot currently be answered as
+intended.
+
+It is left open because the two fixes are not equivalent and the choice is a
+data-owner's: making only WEB cancel would change net and cancelled revenue
+across the whole warehouse — unlike the `Unsegmented` fix, this one moves the
+headline figures — whereas amending the glossary keeps every number and gives
+up the cleanest example of a catalog fact that contradicts naive reading.
 
 **Still not fixed, and recorded rather than endorsed.** The numeric tolerance is
 `rel_tol=0.02` — two percent of a revenue figure is thousands of dollars, so an

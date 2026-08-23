@@ -147,8 +147,16 @@ def generate(
         in_pos, in_web = rnd.random() < 0.8, rnd.random() < 0.6
         if not (in_pos or in_web):
             in_pos = True
+        # The marketing segment is assigned BY THE POS SYSTEM, so a shopper the
+        # stores have never seen does not have one -- the glossary says such a
+        # party is reported as 'Unsegmented', not as NULL and not as a guess.
+        # Inheriting the customer's segment regardless made the glossary term
+        # unfindable in the data: `customer_segment` held only the five real
+        # segments, so the question that asks for unsegmented revenue had no
+        # right answer and the agent was marked wrong for saying so.
+        segment = c[4] if in_pos else "Unsegmented"
         parties.append(
-            (f"PK-{c[0]}", c[2], c[0] if in_pos else None, in_pos, in_web, c[3], c[4], c[5])
+            (f"PK-{c[0]}", c[2], c[0] if in_pos else None, in_pos, in_web, c[3], segment, c[5])
         )
     out["dim_party"] = parties
     party_by_customer = {c[0]: p for c, p in zip(customers, parties, strict=False)}
