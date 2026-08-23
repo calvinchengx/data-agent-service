@@ -369,6 +369,13 @@ ignored, because a scorecard is evidence for a particular commit on a
 particular day rather than a source file. They are named so a run on this
 machine can be traced to the numbers here; reproduce with the command above.
 
+> **These tables were produced by the pre-correction scorer.** Item 6 found it
+> marking down correct-but-exploratory answers, and
+> [3.5](#35-the-instrument-corrected) reports the corrected figures — which are
+> materially higher. The numbers here are kept because the correction has to be
+> auditable against what it replaced; **quote the corrected table, not this
+> one.**
+
 **support** — `evals/reports/support-claude-code-1787398205.json`
 
 | Arm | Pass | Execution | Grounding | Semantics | Attribution |
@@ -429,10 +436,12 @@ effect too small to detect.
 
 ### What this establishes, and what it does not
 
-**The catalog is load-bearing.** Removing the server does not degrade the
-agent, it collapses it: contoso goes to 0% on every metric, and grounding to
-0.0%. The failure mode is visible in the log — *answered without running a
-query*. Without a catalog the agent stops looking and starts assuming.
+**The catalog is load-bearing.** On contoso, removing the server does not
+degrade the agent, it collapses it: 0% on every metric. The failure mode is
+visible in the log — *answered without running a query*. Without a catalog the
+agent stops looking and starts assuming. On support the corrected instrument
+shows a degradation rather than a collapse — 77.8% to 25.9% — so "collapses" is
+contoso's word, not both.
 
 **The prose in it does not change the answers.** Emptying every description,
 glossary definition, metric expression, unit and synonym — while keeping every
@@ -480,6 +489,9 @@ ends rather than against nothing.
 > definitions did not change what the agent did once it got there; they made it
 > get there in fewer steps, and they are the sole reason its citations are
 > true.
+
+That summary is unchanged by the scoring correction, which strengthened its
+first clause and left the second and third untouched.
 
 **What would still overturn this.** Sixteen L3 questions on contoso and nine on
 support give thin discordant counts. The schema-only nulls support "no
@@ -577,6 +589,93 @@ require a **superset** of the gold tables rather than equality, since reading
 extra tables is corroboration and reading fewer is the actual defect. Each
 should be made, re-run, and reported as a changed instrument — with the old
 numbers kept beside the new ones.
+
+### 3.5 The instrument, corrected
+
+Item 6 found the scorer marking down correct-but-exploratory answers. Those
+three defects are now fixed, and this section reports what changed. The rule
+throughout: **the model's answers were not re-run.** `evals/rescore.py` replays
+the stored SQL — every agent statement and every gold statement — against the
+same warehouse and recomputes the metrics, so the only difference between the
+old numbers and the new ones is the rule. Re-running the model would have
+confounded a scoring change with a different day's answers, and cost hours for
+answers already on disk.
+
+| Fix | Before | After |
+|---|---|---|
+| Extra rows | row counts had to match, so `GROUP BY` failed where gold filtered | gold rows must each be carried by a distinct returned row |
+| Proportions | `4.4991` and `0.044991` were different answers | a ratio and its percentage are the same answer |
+| Grounding | the table set had to **equal** the gold set | it must **contain** it; exactness moves to `grounding_exact` |
+
+Two guards keep the relaxations from becoming a free pass, and both have tests:
+
+- The extra-rows rule is ANDed with `answer_states_a_gold_number`, so returning
+  a table that happens to contain the figure is not enough — the agent has to
+  have said it.
+- The proportion rule applies only when one side is a **proper fraction**.
+  Without that, 4.5 million read as 450 million would score as correct.
+
+A related fix underneath: cells were rounded to two decimal places before
+comparison, which destroyed a share like `0.044991` outright. They now keep six,
+and closeness is decided by the tolerance as it always was.
+
+**What moved:**
+
+| | contoso | | support | |
+|---|---|---|---|---|
+| Arm | old | new | old | new |
+| with catalog | 56.2% | **72.9%** | 37.0% | **77.8%** |
+| schema only | 58.3% | **77.1%** | 40.7% | **88.9%** |
+| without catalog | 0.0% | 0.0% | 0.0% | **25.9%** |
+| naive floor | 0.0% | 0.0% | 0.0% | 0.0% |
+
+**The conclusions survive, and the main one strengthens.** Contoso's catalog
+comparison goes from +9/-0 (p = 0.0039) to **+12/-0 (p = 0.0005)**, and support's
+execution reaches significance for the first time (+6/-0, p = 0.0312). The
+schema-only nulls stay null and in fact tilt very slightly *toward* the stripped
+arm. A looser instrument did not rescue the finding it might have been suspected
+of protecting.
+
+**One claim genuinely weakens, and it should be stated plainly.** Support's
+without-catalog arm is no longer a collapse to zero: **25.9%, not 0.0%**. Six of
+its answers were right all along and were marked wrong for shape. The sentence
+"without the catalog the agent collapses" holds for contoso, where every arm
+metric is still exactly 0.0%, but for support the honest word is *degrades* —
+77.8% to 25.9%. The floor arm still scores zero on both.
+
+**Corrected metrics for the whole run**, replacing the tables above wherever
+they disagree:
+
+| Use case / arm | Pass | 95% CI | Execution | Grounding | Grounding (exact) | Semantics |
+|---|---|---|---|---|---|---|
+| contoso / with catalog | 72.9% | 59.0–83.4 | 79.2% | 93.8% | 79.2% | 85.4% |
+| contoso / schema only | 77.1% | 63.5–86.7 | 83.3% | 93.8% | 83.3% | 85.4% |
+| contoso / without catalog | 0.0% | 0.0–7.4 | 0.0% | 0.0% | 0.0% | 0.0% |
+| contoso / naive floor | 0.0% | 0.0–7.4 | 0.0% | 0.0% | 0.0% | 0.0% |
+| support / with catalog | 77.8% | 59.2–89.4 | 88.9% | 100% | 100% | 88.9% |
+| support / schema only | 88.9% | 71.9–96.1 | 92.6% | 100% | 100% | 96.3% |
+| support / without catalog | 25.9% | 13.2–44.7 | 29.6% | 59.3% | 59.3% | 33.3% |
+| support / naive floor | 0.0% | 0.0–12.5 | 7.4% | 29.6% | 14.8% | 0.0% |
+
+**Paired tests under the corrected instrument:**
+
+| Comparison | contoso | support |
+|---|---|---|
+| catalog vs none — pass | +12 / -0, **p = 0.0005** | +5 / -0, p = 0.0625 |
+| catalog vs none — execution | +13 / -0, **p = 0.0002** | +6 / -0, **p = 0.0312** |
+| catalog vs none — grounding | +15 / -0, **p = 0.0001** | +4 / -0, p = 0.125 |
+| catalog vs none — semantics | +14 / -0, **p = 0.0001** | +5 / -0, p = 0.0625 |
+| full vs schema-only — pass | +0 / -1, p = 1.0 | +0 / -2, p = 0.5 |
+| full vs schema-only — execution | +0 / -1, p = 1.0 | +0 / -1, p = 1.0 |
+| full vs schema-only — grounding | *no question differed* | *no question differed* |
+| full vs schema-only — semantics | *no question differed* | +0 / -1, p = 1.0 |
+
+**Still not fixed, and recorded rather than endorsed.** The numeric tolerance is
+`rel_tol=0.02` — two percent of a revenue figure is thousands of dollars, so an
+answer a reader would call wrong can pass. It is pinned by a test so that
+tightening it is a deliberate change. And `L3-unsegmented` remains a question
+whose premise the seed never implemented; it should be fixed in the seed or
+withdrawn, not scored.
 
 ### An operational note this run paid for
 

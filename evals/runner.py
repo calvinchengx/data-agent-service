@@ -322,6 +322,9 @@ def evaluate(
         answer.text, catalog_had_definitions=catalog_had_definitions
     )
     s.grounding = scoring.grounding(set(answer.tables), question.get("gold_tables", []))
+    s.grounding_exact = scoring.grounding_exact(
+        set(answer.tables), question.get("gold_tables", [])
+    )
     if question.get("required_semantics") or question.get("forbidden_semantics"):
         s.semantics = scoring.semantics(
             answer.sql,
@@ -451,6 +454,7 @@ def summarise(results: list[Result]) -> dict:
         "semantic_fidelity": rate("semantics"),
         "behaviour": rate("behaviour"),
         "result_set_exact": rate("result_set"),
+        "grounding_exact": rate("grounding_exact"),
         "by_tier": by_tier,
         "tool_calls_median": statistics.median([r.tool_calls for r in results]) if results else 0,
         "tokens_out_total": sum(r.tokens_out for r in results),

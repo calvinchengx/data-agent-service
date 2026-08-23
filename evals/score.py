@@ -30,6 +30,10 @@ class Score:
     # queries can differ in their SELECT list and agree on the answer, and
     # `execution` is the question of whether the answer was right.
     result_set: bool | None = None
+    # Strict counterpart to `grounding`: the tables read are exactly the gold
+    # set. Reported, not gating -- reading an extra table to corroborate is
+    # good practice, and `grounding` tolerates it.
+    grounding_exact: bool | None = None
     # Not a pass and not a failure: the client refused to attempt the question,
     # so nothing was returned AND nothing was refused. Kept out of the
     # pass/fail denominator rather than folded into either, because both
@@ -57,7 +61,11 @@ def _num(value):
 def _cell(value) -> str:
     n = _num(value)
     if n is not None:
-        return f"~{round(n, 2)}"
+        # Six places, not two. Closeness is decided by `_same_cell`'s tolerance,
+        # so rounding here is only meant to make a stable key -- and rounding a
+        # SHARE to two places destroys it: 0.044991 becomes 0.04, and no
+        # tolerance can then recognise it as the same figure as 4.4991%.
+        return f"~{round(n, 6)}"
     return str(value).strip().lower()
 
 
@@ -84,8 +92,30 @@ def rows_match(actual: list[list], gold: list[list], *, ordered: bool, tol=0.02)
 
 def _same_cell(x: str, y: str, tol: float) -> bool:
     if x.startswith("~") and y.startswith("~"):
-        return math.isclose(float(x[1:]), float(y[1:]), rel_tol=tol, abs_tol=tol)
+        a, b = float(x[1:]), float(y[1:])
+        if math.isclose(a, b, rel_tol=tol, abs_tol=tol):
+            return True
+        return _same_proportion(a, b, tol)
     return x == y
+
+
+def _same_proportion(a: float, b: float, tol: float) -> bool:
+    """Is one of these the other expressed as a percentage?
+
+    `SUM(x)/SUM(y)` and `100.0 * SUM(x)/SUM(y)` answer the same question, and
+    a run was marked wrong for reporting 4.50% where the reference produced
+    0.044991. The prose check already tolerates this rescaling; the result
+    comparison did not.
+
+    Deliberately narrow: the allowance applies only when one side is a PROPER
+    FRACTION. Without that guard a hundredfold error in a revenue figure --
+    4.5 million read as 450 million -- would silently score as correct, which
+    is precisely the kind of mistake this suite exists to catch.
+    """
+    for ratio, percent in ((a, b), (b, a)):
+        if 0 < abs(ratio) < 1 and math.isclose(ratio * 100, percent, rel_tol=tol, abs_tol=tol):
+            return True
+    return False
 
 
 def _row_carries(row_a: tuple, row_g: tuple, tol: float) -> bool:
@@ -115,17 +145,28 @@ def rows_contain(actual: list[list], gold: list[list], *, ordered: bool, tol=0.0
     Judged strictly, seven demonstrably correct answers in the first live model
     run scored zero.
 
-    So: the same number of ROWS, and every value of each gold row present in
-    the row it corresponds to. Extra columns are tolerated. A missing value, a
-    wrong value, or a different number of rows is not -- those are the ways an
-    answer is actually wrong.
+    So: every value of each gold row present in the row it corresponds to,
+    with extra columns tolerated. A missing value or a wrong value is not --
+    those are the ways an answer is actually wrong.
+
+    Extra ROWS are tolerated too, and that is the second relaxation. An analyst
+    asked for one segment's revenue routinely writes `GROUP BY segment` and
+    reads the figure off the breakdown; demanding a filtered single row asks
+    how the query was written rather than whether the answer was right. A run
+    answering $903,636.65 against a gold of 903636.6466 -- the same number --
+    was scored wrong for exactly this.
+
+    What stops that from accepting a table dump: the caller pairs this with
+    `answer_states_a_gold_number`, so the agent must also SAY the figure.
+    Returning a thousand rows that happen to contain the answer is not enough;
+    it has to have found it.
 
     Strict equality is still measured, as `result_set`. This is the looser of
     two named properties rather than a relaxation of one.
     """
     if actual is None or gold is None:
         return False
-    if len(actual) != len(gold):
+    if len(actual) < len(gold):
         return False
 
     def normalise(rows):
@@ -133,7 +174,18 @@ def rows_contain(actual: list[list], gold: list[list], *, ordered: bool, tol=0.0
 
     a, g = normalise(actual), normalise(gold)
     if ordered:
-        return all(_row_carries(ra, rg, tol) for ra, rg in zip(a, g, strict=False))
+        # Position matters, so the gold rows must appear in order -- but not
+        # necessarily flush against the top: a ranked answer preceded by a
+        # header-ish row, or followed by the rest of the ranking, still ranks
+        # correctly. Each gold row claims the next actual row that carries it.
+        i = 0
+        for row_g in g:
+            while i < len(a) and not _row_carries(a[i], row_g, tol):
+                i += 1
+            if i == len(a):
+                return False
+            i += 1
+        return True
     # Unordered: the two sides cannot simply be sorted and zipped, because rows
     # of different widths do not sort comparably. Each gold row claims an
     # actual row, and a claimed row cannot be reused.
@@ -179,12 +231,39 @@ def answer_states_a_gold_number(text: str, gold_rows: list[list], tol=0.02) -> b
 
 
 def grounding(used: set[str], gold: list[str]) -> bool:
-    """Every gold table was read, and nothing outside them was."""
+    """Every gold table was read. Reading more is allowed.
+
+    Equality was the original rule and it punished the wrong thing. Asked how
+    cancellations compare between two selling systems, a run read the summary
+    table AND the underlying sales table, found they disagreed, and reported
+    that the catalog says one system cannot cancel at all -- which is what the
+    question was written to elicit. It scored zero for grounding, because it
+    had read one table too many. Seven of ten grounding failures in that run
+    were supersets of the gold set.
+
+    Reading FEWER tables than the answer requires is the real defect: it means
+    the figure came from somewhere it could not have come from. That is what
+    this now measures.
+
+    Exact agreement is still measured, as `grounding_exact` -- the same
+    loose/strict pairing as `execution` and `result_set`.
+    """
     if not gold:
         return not used
     gold_set = {t.lower() for t in gold}
     used_set = {t.lower() for t in used}
-    return gold_set <= used_set and not (used_set - gold_set)
+    return gold_set <= used_set
+
+
+def grounding_exact(used: set[str], gold: list[str]) -> bool:
+    """The tables read are exactly the gold set.
+
+    Reported rather than gating. It is the check that notices an agent
+    wandering across the warehouse, which `grounding` deliberately tolerates.
+    """
+    if not gold:
+        return not used
+    return {t.lower() for t in gold} == {t.lower() for t in used}
 
 
 # An answer ASSERTING that the catalog says something, as distinct from one
