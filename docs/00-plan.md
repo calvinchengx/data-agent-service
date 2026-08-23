@@ -104,6 +104,8 @@ Agent workflow (prompt encodes the *workflow*, never a table name): find glossar
 | C16 | `promoter/` | Py (sqlglot) | generic | Canonicalise audited SQL into literal-free templates; pseudonymous user counts; k-threshold + DP on release; catalog-derived titles; `list_dashboard_candidates`; OM write-back incl. catalog gaps; **no natural language stored** (§17) |
 | C17 | `publisher/` | Py | generic | Deterministic TMDL/TMSL + PBIR generators from a template; publish `SemanticModel` + `Report` via Fabric REST under OBO; OM `Dashboard` lineage; DAX-vs-SQL verification |
 | C18 | `services/warehouse-query-{py,go}` access layer | + OM tags | generic | Rules may deny by TAG as well as by column; tag vocabulary is the catalog's, not ours; refresh interval and unreachable-catalog behaviour are config (§19) |
+| C19 | `.github/workflows/{release,security,codeql}.yml`, `scripts/badges.py` | GitHub Actions | generic | A tag publishes both executor images to GHCR with provenance and an SBOM; gitleaks over tree AND history; govulncheck; CodeQL over every first-party language; badge endpoints the README reads back — see `docs/18-releases.md` and `docs/11-ci.md`
+| C20 | `website/`, `site/index.html` | Astro + Starlight (TypeScript) | generic | `docs/` rendered and published, generated from the Markdown rather than duplicating it; the sync script fails the build when a document is absent from the sidebar, because a page nothing links to is a page nobody reads
 
 ---
 
@@ -209,13 +211,16 @@ Emulator numbers are relative (laptop SQL Server sidecar), not Fabric capacity �
 | 10 Client-agnostic | OAuth discovery + `e2e/clients/` | Claude/Cursor/VS Code/SDK clients connect with no custom code | 5 |
 | 11 Production | C12 + `docs/10-production.md` | `make test eval load ENV=prod` green; parity column filled | 7, 8, 10 |
 | 13 Sources | `SourceBackend` adapters `databricks`, `snowflake`, `postgres` (witnessed on sibling emulators / container); `docs/09-adding-a-source.md`; REST-variant eval metrics | each adapter passes conformance + its use-case evals | 11 |
-| 14 Skills | C15 | evals re-run with skill hashes pinned; no scorecard regression vs Phase 7 | 7 |
+| 14 Skills ✅ | C15 | evals re-run with skill hashes pinned; no scorecard regression vs Phase 7 | 7 |
 | 15 Promotion ✅ | C16 + 15b catalog gaps + persona-replay eval | promoter fires on seeded recurring template, not on one-offs; no prose in store; title "Resolution Time by Team"; candidates visible only to `DAS_PROMOTE_ROLES` | 8, 14 |
 | 16 Dashboard publish ✅ | C17 | `SemanticModel` + `Report` items created in Fabric via OBO (emulator: definition persisted; rendering prod-only); OM `Dashboard` lineage present; DAX measure == SQL answer | 15 |
 | 18 Catalog-carried rules | C18 | a column tagged in OpenMetadata is refused by BOTH executors without a settings change; an unresolvable tag fails at startup | 6, 13 |
-| 12 Stretch | LLM via APIM (`llm-token-limit`); `DAS_OM_CONTEXT_MODE=native` | 429 after quota; native passes same evals | 11 |
+| 12 Stretch ✅ | LLM via APIM (`llm-token-limit`); `DAS_OM_CONTEXT_MODE=native` | 429 after quota; native passes same evals | 11 |
 
 MVP = phases 0–7 + 10. Then 8, 9, 11, 12.
+
+**All phases above are landed and witnessed** — 115 witnesses, green in CI on every push. Anything further is new scope rather than remaining scope, and
+`docs/parity.md` remains the honest record of what has been proved against the emulators versus against real Azure: nothing in this table is a claim about production until that ledger says so.
 
 ---
 

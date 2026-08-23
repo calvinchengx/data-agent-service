@@ -58,6 +58,7 @@ export default defineConfig({
           label: 'Operating it',
           items: [
             { slug: '10-production' },
+            { slug: '18-releases' },
             { slug: '09-llm-governance' },
             { slug: '12-promotion' },
             { slug: '14-publishing' },
