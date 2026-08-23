@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -121,7 +122,7 @@ func TestForwardReplacesAuthorizationAndDropsOtherHeaders(t *testing.T) {
 	in.Set("Accept", "application/json, text/event-stream")
 	in.Set("X-Forwarded-User", "alice")
 	in.Set("Cookie", "session=1")
-	status, headers, body, err := forwardCatalog(om.URL, "BOT", []byte("{}"), in)
+	status, headers, body, err := forwardCatalog(context.Background(), om.URL, "BOT", []byte("{}"), in)
 	if err != nil || status != http.StatusOK || !strings.Contains(string(body), "result") {
 		t.Fatalf("%d %s %v", status, body, err)
 	}
@@ -139,7 +140,7 @@ func TestForwardReplacesAuthorizationAndDropsOtherHeaders(t *testing.T) {
 
 func TestForwardReturnsTheCatalogsErrorStatusAsAnAnswer(t *testing.T) {
 	om, _ := farSide(t, http.StatusForbidden)
-	status, _, _, err := forwardCatalog(om.URL, "BOT", []byte("{}"), http.Header{})
+	status, _, _, err := forwardCatalog(context.Background(), om.URL, "BOT", []byte("{}"), http.Header{})
 	if err != nil || status != http.StatusForbidden {
 		t.Fatalf("%d %v", status, err)
 	}

@@ -520,7 +520,7 @@ second implementation with nothing to disagree about.
 
 | | Deliverable | Exit test |
 |---|---|---|
-| 19a | `DashboardTarget`, `Plan`, `PowerBITarget` extracted; `DAS_DASHBOARD_TARGETS`; `plan.schema.json`; Go generator + golden conformance | phase-125/125 witnesses pass unchanged; a `postgres` candidate reports *why* no target accepts it; Go and Python goldens byte-equal |
+| 19a | `DashboardTarget`, `Plan`, `PowerBITarget` extracted; `DAS_DASHBOARD_TARGETS`; `plan.schema.json`; Go generator + golden conformance | phase-16 witnesses pass unchanged; a `postgres` candidate reports *why* no target accepts it; Go and Python goldens byte-equal |
 | 19b | `superset` in compose; service credential as a `keyvault:` reference; `SupersetTarget` against `postgres` | a candidate the witness itself creates → dataset, chart, dashboard exist; `chart/data` agrees with the executor; OM dashboard with lineage to the postgres table, owner = asking user |
 | 19c | Superset against the Fabric warehouse (derived image with the ODBC driver) | same witness, warehouse source |
 | 19d | Cube spike | a go/no-go note here: the schema channel (job and service share no disk) and the catalog entity type |

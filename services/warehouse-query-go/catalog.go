@@ -14,6 +14,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -121,8 +122,13 @@ func (rb *RoleBots) credential(ref string) (string, error) {
 // forwardCatalog sends one MCP request to the catalog as the chosen bot and
 // returns the reply as-is. Whole-body, not streamed: OpenMetadata answers
 // each POST with a complete reply and closes.
-func forwardCatalog(upstream, credential string, body []byte, in http.Header) (int, http.Header, []byte, error) {
-	req, err := http.NewRequest(http.MethodPost, upstream, bytes.NewReader(body))
+func forwardCatalog(
+	ctx context.Context, upstream, credential string, body []byte, in http.Header,
+) (int, http.Header, []byte, error) {
+	// The caller's context, so a client that hangs up stops the work it
+	// started: without it this request outlives the request it serves, and a
+	// slow catalog holds a connection nobody is waiting on any more.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstream, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -192,7 +198,7 @@ func handleCatalogMCP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "could not read the request")
 		return
 	}
-	status, headers, payload, err := forwardCatalog(catalogUpstream, credential, body, r.Header)
+	status, headers, payload, err := forwardCatalog(r.Context(), catalogUpstream, credential, body, r.Header)
 	if err != nil {
 		audit("op", "catalog", "user", p.Name, "oid", p.OID, "role", role, "verdict", "error", "reason", err.Error())
 		writeError(w, http.StatusBadGateway, "the catalog did not answer")
