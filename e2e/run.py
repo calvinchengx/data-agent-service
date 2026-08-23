@@ -2486,6 +2486,18 @@ def phase17() -> None:
         bool(operations) and collections <= allowed,
         f"{len(operations)} operations in {sorted(collections)}",
     )
+    if not operations:
+        # Same shape as the `if not http` return above, and for a sharper
+        # reason: everything below reaches operations[0], and it does so as
+        # the DEFAULT argument of a next() call --
+        #     next((o for o in operations if ...), operations[0])
+        # -- which Python evaluates eagerly, so an empty list raises IndexError
+        # there whether or not the generator would have matched. That crash
+        # took the remaining witnesses of the run with it, turning one absent
+        # surface into no information about anything after it. The failure is
+        # already reported by the check above; one red witness is a finding, a
+        # crashed suite is not.
+        return
 
     # 3. The catalog knows the same API, joined by om_service_fqn.
     service = src.get("om_service_fqn", "")
