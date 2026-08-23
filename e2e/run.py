@@ -1932,6 +1932,7 @@ def quality() -> None:
             "-q",
             "--cov=agent",
             "--cov=promoter",
+            "--cov=publisher",
             "--cov=services/warehouse-query-py",
             "--cov-report=",
             "--cov-fail-under=90",
