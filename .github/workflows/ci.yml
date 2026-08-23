@@ -37,6 +37,11 @@ jobs:
         run: uv run ruff check . && uv run ruff format --check .
       - name: ty
         run: uv run ty check
+      # ty reports a signature/body contradiction only where a CALLER violates
+      # it, so one can sit in the tree for weeks and then fail the build as
+      # soon as somebody writes the obvious test. This checks the definition.
+      - name: annotations agree with their bodies
+        run: uv run python -m scripts.check_annotations
       - name: python tests, with the coverage floor
         # Same targets and floor as `make coverage-python`; run directly rather
         # than through the tools container, because this job has no stack and
