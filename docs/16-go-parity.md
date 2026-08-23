@@ -112,9 +112,34 @@ wider than the other's, which is exactly the thing to find.
 
 In the order that buys the most parity per line:
 
-1. **DuckDB** — ~150 lines in Go (`marcboeker/go-duckdb` needs cgo; use
-   the pure-Go `duckdb-go` bindings or shell to the CLI — decide when starting,
-   and record the trade-off). The guard already handles the dialect.
+1. **DuckDB** — ~150 lines in Go. The guard already handles the dialect.
+
+   **Decided: [`calvinchengx/go-pduckdb`](https://github.com/calvinchengx/go-pduckdb)**,
+   a fork of [`fpt/go-pduckdb`](https://github.com/fpt/go-pduckdb) (MIT). It
+   drives DuckDB's C API through purego, so `CGO_ENABLED=0` holds and
+   cross-compilation stays trivial — `marcboeker/go-duckdb` would have cost
+   both, and shelling to the CLI would have put a process boundary and a text
+   format between the executor and its results.
+
+   **The trade-off, stated plainly: "pure Go" here means no cgo, not no native
+   library.** purego `dlopen`s `libduckdb` at run time, so the executor image
+   must ship it. DuckDB publishes a musl build, so a distroless static base
+   still works — but that image must also carry `libstdc++`, which
+   `libduckdb.so` links against and a musl base does not include. That is not a
+   guess: the fork's CI builds and runs the integration suite on Alpine, and
+   the missing `libstdc++` is exactly how it failed before the fix.
+
+   The fork exists because upstream covered Windows amd64 but not arm64, and
+   its Windows struct-by-value workaround rested on an unchecked ABI
+   assumption. The fork adds arm64, a compile-time check on that assumption,
+   and CI across Linux amd64/arm64, macOS amd64/arm64 and Windows amd64/arm64.
+   The changes are offered back as
+   [fpt/go-pduckdb#37](https://github.com/fpt/go-pduckdb/pull/37); if they land,
+   the fork should be retired rather than maintained.
+
+   Note this is the **executor's** dependency, not the parser's.
+   [`sqlglot-go`](https://github.com/calvinchengx/sqlglot-go) keeps zero
+   non-stdlib dependencies — it parses text and never opens a database.
 2. **HTTP surface + REST adapter** — the three operations, an `httpguard.go`
    mirroring `httpguard.py`, and a `RestBackend`. Roughly 600 lines including
    the guard corpus, which should also move to a shared data file (Phase B
