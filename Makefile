@@ -87,11 +87,11 @@ LINT_MODE ?= container
 ifeq ($(LINT_MODE),host)
   RUFF = uv run ruff
   TY   = uv run ty
-  GOLINT = golangci-lint run ./...
+  GOLINT = golangci-lint run --build-tags duckdb ./...
 else
   RUFF = $(TOOLS) ruff
   TY   = $(TOOLS) ty
-  GOLINT = docker run --rm -v "$(PWD):/src" -w /src/services/warehouse-query-go $(GOLANGCI) golangci-lint run ./...
+  GOLINT = docker run --rm -v "$(PWD):/src" -w /src/services/warehouse-query-go $(GOLANGCI) golangci-lint run --build-tags duckdb ./...
 endif
 
 lint: ## Lint and type-check everything (never edits; use `make format` for that)
@@ -112,7 +112,9 @@ format: ## Apply formatting and safe fixes — the only target that edits files
 	$(TERRAFORM) fmt -recursive
 	$(RUFF) check . --fix
 	$(RUFF) format .
-	docker run --rm -v "$(PWD):/src" -w /src/services/warehouse-query-go $(GOLANGCI) golangci-lint fmt ./...
+	# --build-tags duckdb: without it the formatter cannot SEE the tagged files,
+	# so they drift unformatted while `make format` reports success.
+	docker run --rm -v "$(PWD):/src" -w /src/services/warehouse-query-go $(GOLANGCI) golangci-lint fmt --build-tags duckdb ./...
 
 guard-corpus: ## Re-record the Python guard's verdict on every contract statement
 	uv run python services/contract/gen_guard_corpus.py
