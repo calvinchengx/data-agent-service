@@ -63,7 +63,6 @@ export default defineConfig({
             { slug: '09-llm-governance' },
             { slug: '12-promotion' },
             { slug: '14-publishing' },
-            { slug: '15-adding-a-dashboard-target' },
           ],
         },
         {

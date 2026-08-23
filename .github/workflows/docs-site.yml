@@ -40,6 +40,11 @@ jobs:
           node-version: '22'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Before anything is built: a sidebar entry whose page was never
+      # committed fails the Astro build outright, and only here -- the author's
+      # working tree has the file. Seconds, and it names the cause.
+      - name: The sidebar and docs/ agree, on what is committed
+        run: python3 scripts/check_docs_nav.py
       # The sync script is type-checked before it runs: it rewrites every link
       # on the site, and a silent failure there publishes 404s.
       - run: pnpm --filter data-agent-service-docs typecheck

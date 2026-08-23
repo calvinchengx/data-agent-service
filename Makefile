@@ -101,6 +101,7 @@ lint: ## Lint and type-check everything (never edits; use `make format` for that
 	@$(TERRAFORM) init -backend=false -input=false >/dev/null && $(TERRAFORM) validate
 	@echo "== ty (python types)";       $(TY) check
 	@echo "== annotations vs bodies";   $(TOOLS) python -m scripts.check_annotations
+	@echo "== docs nav vs docs/";       python3 scripts/check_docs_nav.py
 	@echo "== witness totals in prose"; $(TOOLS) python -m scripts.check_counts
 	@echo "== golangci-lint (go)";      $(GOLINT)
 
@@ -140,7 +141,7 @@ unit: ## Python unit tests alone (no stack required)
 	$(TOOLS) pytest -q $(ARGS)
 
 coverage-python: ## Python unit coverage, failing under the floor
-	$(TOOLS) pytest -q --cov=agent --cov=promoter --cov=services/warehouse-query-py \
+	$(TOOLS) pytest -q --cov=agent --cov=promoter --cov=publisher --cov=services/warehouse-query-py \
 		--cov-report=term-missing --cov-fail-under=$(COVERAGE_FLOOR) $(ARGS)
 
 coverage-go: ## Go unit coverage, failing under the floor
@@ -150,6 +151,13 @@ coverage-go: ## Go unit coverage, failing under the floor
 		awk -v floor=$(COVERAGE_FLOOR) "{gsub(/%/,\"\",\$$NF); \
 		printf \"go coverage: %s%%\\n\", \$$NF; \
 		if (\$$NF+0 < floor) { printf \"below the %s%% floor\\n\", floor; exit 1 }}"'
+
+publisher-contract: ## The Plan contract: regenerate, diff, and hold Go to the bytes
+	$(TOOLS) python publisher/contract/gen_cases.py
+	@git diff --quiet -- publisher/contract/cases.json \
+		&& echo "the recorded artefacts are the Python generator's" \
+		|| { echo "publisher/contract/cases.json is stale — commit the regenerated file"; exit 1; }
+	docker run --rm -v "$(PWD):/src" -w /src/publisher-go $(GO_IMAGE) go test ./...
 
 coverage: coverage-python coverage-go ## Both suites, both floors
 
