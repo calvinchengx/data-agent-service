@@ -403,3 +403,77 @@ def test_catalognames_delegates_to_the_promoter(monkeypatch):
 
     monkeypatch.setattr(catalognames, "column_names", lambda *_a, **_k: {"c": "C"})
     assert catalognames.for_columns() == {"c": "C"}
+
+
+# ---------------------------------------------------------------- lineage --
+def test_lineage_names_the_tables_the_dashboard_reads(monkeypatch):
+    """A dashboard nobody can trace to its tables is the thing this project
+    exists to avoid: a number on a screen with no way to ask where it came
+    from."""
+    calls = []
+
+    def fake_om(method, path, body=None, **_kw):
+        calls.append((method, path, body))
+        if path.startswith("/tables/name/"):
+            return {"id": "table-id"}
+        return {"id": "dashboard-id", "fullyQualifiedName": "das_dashboards.T"}
+
+    monkeypatch.setattr("seed.govern.om", fake_om)
+    monkeypatch.setattr(
+        publish.c, "load_state", lambda: {"om_schema_fqn": "svc.db.dbo", "workspace": "ws"}
+    )
+    done = publish.Published(
+        title="Net Revenue by Country",
+        semantic_model_id="m",
+        report_id="r",
+        dax="EVALUATE X",
+        sql="SELECT 1",
+        rows_dax=[],
+        rows_sql=[],
+        agrees=True,
+        note="ok",
+    )
+    fqn = publish.record_lineage(done, {"tables": ["dbo.fct_sales"]})
+
+    assert fqn.startswith("das_dashboards.")
+    paths = [p for _m, p, _b in calls]
+    assert "/services/dashboardServices" in paths, "the dashboard service was not ensured"
+    assert "/dashboards" in paths
+    assert "/lineage" in paths, "no edge was recorded"
+    edge = next(b for m, p, b in calls if p == "/lineage")["edge"]
+    assert edge["fromEntity"]["type"] == "table"
+    assert edge["toEntity"]["type"] == "dashboard"
+
+
+def test_a_table_the_catalog_does_not_know_is_skipped_not_fatal(monkeypatch):
+    """A source outside the catalog should cost you the edge, not the
+    publish."""
+    calls = []
+
+    def fake_om(method, path, body=None, **_kw):
+        calls.append(path)
+        if path.startswith("/tables/name/"):
+            return {}  # 404-shaped: no id
+        return {"id": "dashboard-id"}
+
+    monkeypatch.setattr("seed.govern.om", fake_om)
+    monkeypatch.setattr(publish.c, "load_state", lambda: {"om_schema_fqn": "svc.db.dbo"})
+    done = publish.Published(
+        title="T",
+        semantic_model_id="m",
+        report_id="r",
+        dax="d",
+        sql="s",
+        rows_dax=[],
+        rows_sql=[],
+        agrees=True,
+    )
+    publish.record_lineage(done, {"tables": ["nowhere.unknown"]})
+    assert "/lineage" not in calls, "an edge was recorded for a table with no id"
+
+
+def test_the_table_fqn_is_built_from_the_seeded_schema(monkeypatch):
+    monkeypatch.setattr(publish.c, "load_state", lambda: {"om_schema_fqn": "svc.db.dbo"})
+    assert publish._table_fqn("dbo.fct_sales") == "svc.db.dbo.fct_sales"
+    # An unqualified name still resolves rather than producing "svc.db.dbo."
+    assert publish._table_fqn("fct_sales") == "svc.db.dbo.fct_sales"
