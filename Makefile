@@ -102,6 +102,7 @@ lint: ## Lint and type-check everything (never edits; use `make format` for that
 	@echo "== ty (python types)";       $(TY) check
 	@echo "== annotations vs bodies";   $(TOOLS) python -m scripts.check_annotations
 	@echo "== docs nav vs docs/";       python3 scripts/check_docs_nav.py
+	@echo "== pull cmds vs newest tag"; python3 -m scripts.check_version
 	@echo "== witness totals in prose"; $(TOOLS) python -m scripts.check_counts
 	@echo "== golangci-lint (go)";      $(GOLINT)
 

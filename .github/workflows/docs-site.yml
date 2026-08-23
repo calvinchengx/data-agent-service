@@ -34,6 +34,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The version guard compares the published pull commands against the
+          # newest v* tag. A tagless clone would make every claim pass.
+          fetch-tags: true
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -45,6 +50,8 @@ jobs:
       # working tree has the file. Seconds, and it names the cause.
       - name: The sidebar and docs/ agree, on what is committed
         run: python3 scripts/check_docs_nav.py
+      - name: Pull commands name the released version
+        run: python3 -m scripts.check_version
       # The sync script is type-checked before it runs: it rewrites every link
       # on the site, and a silent failure there publishes 404s.
       - run: pnpm --filter data-agent-service-docs typecheck

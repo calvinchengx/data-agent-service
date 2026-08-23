@@ -5,8 +5,8 @@ published, because both are real: they answer the same contract, and choosing
 between them is a deployment decision rather than a fork.
 
 ```sh
-docker pull ghcr.io/calvinchengx/data-agent-service/executor-go:0.1.0
-docker pull ghcr.io/calvinchengx/data-agent-service/executor-py:0.1.0
+docker pull ghcr.io/calvinchengx/data-agent-service/executor-go:0.1.1
+docker pull ghcr.io/calvinchengx/data-agent-service/executor-py:0.1.1
 ```
 
 Both are `linux/amd64` and `linux/arm64`, and both carry build provenance and
@@ -38,9 +38,21 @@ rather than mis-routing it.
 ## Cutting a release
 
 ```sh
-git tag -a v0.1.0 -m "…"
-git push origin v0.1.0
+git tag -a vX.Y.Z -m "…"
+git push origin vX.Y.Z
 ```
+
+A placeholder deliberately: naming a real version here reads as the one to
+cut next, and it is always the one already cut. `scripts/check_version.py`
+checks the pull commands above against the newest tag for the same reason,
+and leaves this example and every historical mention alone.
+
+The tag is the only place a release version is written. `pyproject.toml`
+still says `0.0.1` and should: nothing reads it, this is an application
+rather than a published package, and coupling it would add a file to bump
+to a release process that is otherwise one command. The same goes for the
+`version` in `services/contract/openapi.json` — that one moves when the API
+changes, which is a different event.
 
 `.github/workflows/release.yml` then runs the full gate again — ruff, ty,
 pytest, the discipline checks, `go vet` and `go test` — before building

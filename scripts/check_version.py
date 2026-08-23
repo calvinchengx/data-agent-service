@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""A version a reader is told to PULL must be the one that exists.
+
+`.github/workflows/release.yml` fires on `v*` and tags the images
+`type=semver,pattern={{version}}`, so the git tag is not a record of the
+release -- it IS the release. This checks the copies against it.
+
+Only PULL COMMANDS are checked, because only they tell a reader what to run
+today. Four other kinds of version mention exist in this repository and each
+is correct as written:
+
+    docker pull ...executor-go:0.1.0        what to run now  -- CHECKED
+    the bypass shipped in executor-go:0.1.0 history          -- not checked
+    git tag -a vX.Y.Z                       an example       -- not checked
+    openapi.json  "version": "0.1.0"        the CONTRACT     -- not checked
+    pyproject.toml version = "0.0.1"        not a release    -- not checked
+
+The contract's version is the one that most invites being swept along, and
+must not be: it changes when the API changes, which is a different event from
+cutting a release. A checker that bumped it would turn a compatibility
+statement into a release number.
+
+Same reasoning as scripts/check_counts.py -- a checker that flags a correct
+line gets switched off, and then the wrong lines stop being checked too.
+"""
+
+from __future__ import annotations
+
+import argparse
+import pathlib
+import re
+import subprocess
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+# Anything a reader could copy and run. Both surfaces publish these.
+TARGETS = ("docs/18-releases.md", "site/index.html", "README.md")
+PULL = re.compile(
+    r"(docker pull ghcr\.io/calvinchengx/data-agent-service/executor-(?:go|py):)(\d+\.\d+\.\d+)"
+)
+
+
+def released() -> str | None:
+    """The newest published tag, or None if this checkout has no tags.
+
+    None is not "no version to check" -- a shallow clone without tags would
+    make every claim vacuously correct, which is the failure this exists to
+    prevent. The caller refuses instead.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "tag", "-l", "v*", "--sort=-v:refname"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    for tag in out:
+        if re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+            return tag[1:]
+    return None
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--fix", action="store_true", help="rewrite the pull commands in place")
+    args = ap.parse_args()
+
+    version = released()
+    if version is None:
+        print(
+            "FAIL: no v*.*.* tag is visible in this checkout, so the published version\n"
+            "is unknown and every pull command would pass unchecked. Fetch tags\n"
+            "(`git fetch --tags`, or `fetch-tags: true` on actions/checkout)."
+        )
+        return 1
+
+    stale: list[str] = []
+    for name in TARGETS:
+        path = ROOT / name
+        if not path.exists():
+            continue
+        text = path.read_text()
+        found = PULL.findall(text)
+        wrong = [v for _, v in found if v != version]
+        if not wrong:
+            continue
+        if args.fix:
+            path.write_text(PULL.sub(rf"\g<1>{version}", text))
+            print(f"fixed {name}: {', '.join(sorted(set(wrong)))} -> {version}")
+        else:
+            stale.extend(f"  {name}: tells the reader to pull {v}" for v in sorted(set(wrong)))
+
+    if stale:
+        print(f"pull commands naming a version that is not the released one ({version}):")
+        print("\n".join(stale))
+        print("\nRun `python -m scripts.check_version --fix`.")
+        return 1
+    print(f"every pull command names the released version ({version})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
