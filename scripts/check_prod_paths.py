@@ -61,6 +61,10 @@ FORBIDDEN = {
 # `path::finding`; the reason is printed in the report so the exception is
 # read as often as the rule.
 ALLOWED = {
+    "tests/test_ask_authn.py::emulator hostname": "the unit suite's fixture issuer, for the ask service's verifier. "
+    "Nothing here reaches a network -- the key set is a generated RSA key and "
+    "urlopen is replaced -- and a test that signs tokens must name the issuer "
+    "it signs them for, exactly as tests/conftest.py does",
     "seed/apps.py::emulator admin surface": "one-time TENANT SETUP, guarded by a Graph postcondition: a tenant whose "
     "Graph honours the write never reaches it (docs/upstream-issues.md #5)",
     "seed/authz.py::emulator admin surface": "same postcondition-guarded setup fallback, for app-role declaration",
