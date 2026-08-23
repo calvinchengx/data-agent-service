@@ -67,6 +67,41 @@ func toolDefinitions() []map[string]any {
 				"additionalProperties": false},
 		},
 		{
+			"name": "list_operations",
+			"description": "List the operations of an HTTP source — the equivalent of " +
+				"list_tables for a source whose surface is an API rather than SQL. Only " +
+				"sources reported with surface 'http' by list_sources have operations.",
+			"inputSchema": map[string]any{"type": "object",
+				"properties":           map[string]any{"source": sourceProp},
+				"additionalProperties": false},
+		},
+		{
+			"name": "describe_operation",
+			"description": "Parameters and response fields of one operation of an HTTP " +
+				"source. ALWAYS describe an operation before calling it — never guess a " +
+				"parameter name, and note that fields your role may not read are not listed.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+				"operation": map[string]any{"type": "string",
+					"description": "The operationId, as reported by list_operations."},
+				"source": sourceProp,
+			}, "required": []string{"operation"}, "additionalProperties": false},
+		},
+		{
+			"name": "call_operation",
+			"description": "Call one read-only operation of an HTTP source and return its " +
+				"items. Only operations the source's OpenAPI document describes can be " +
+				"called, only parameters it declares are accepted, and the number of items " +
+				"is capped.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+				"operation": map[string]any{"type": "string",
+					"description": "The operationId to call."},
+				"arguments": map[string]any{"type": "object",
+					"description":          "Parameters for the operation, as describe_operation lists them.",
+					"additionalProperties": true},
+				"source": sourceProp,
+			}, "required": []string{"operation"}, "additionalProperties": false},
+		},
+		{
 			"name": "list_tables",
 			"description": "List the tables of a source, as the asking user is permitted to see " +
 				"them. Use this to find candidate tables before writing SQL.",
@@ -248,6 +283,12 @@ func callTool(r *http.Request, p *Principal, name string, raw json.RawMessage) m
 		Table   string `json:"table"`
 		SQL     string `json:"sql"`
 		MaxRows int    `json:"maxRows"`
+		// The HTTP surface's arguments. `arguments` is deliberately free-form:
+		// what may go in it is decided by the operation's OpenAPI document,
+		// not by this schema, and anything the document does not declare is
+		// refused by the guard rather than dropped here.
+		Operation string         `json:"operation"`
+		Arguments map[string]any `json:"arguments"`
 	}
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &args)
@@ -269,6 +310,37 @@ func callTool(r *http.Request, p *Principal, name string, raw json.RawMessage) m
 		payload["yourRoles"] = p.Roles
 		return textContent(payload, false)
 	}
+	// The HTTP surface resolves its own source, because httpSourceFor refuses
+	// a SQL source by NAME -- an agent that calls list_operations on a
+	// warehouse is told to use SQL rather than handed an empty list.
+	switch name {
+	case "list_operations":
+		payload, _, err := listOperations(r.Context(), args.Source, p)
+		if err != nil {
+			return textContent(err.Error(), true)
+		}
+		return textContent(payload, false)
+	case "describe_operation":
+		payload, status, err := describeOperation(r.Context(), args.Operation, args.Source, p)
+		if err != nil {
+			if status == http.StatusForbidden {
+				return textContent(refusedPrefix(err), true)
+			}
+			return textContent(err.Error(), true)
+		}
+		return textContent(payload, false)
+	case "call_operation":
+		payload, status, err := callOperation(r.Context(), args.Source, args.Operation,
+			args.Arguments, p)
+		if err != nil {
+			if status == http.StatusForbidden {
+				return textContent(refusedPrefix(err), true)
+			}
+			return textContent(err.Error(), true)
+		}
+		return textContent(payload, false)
+	}
+
 	src, err := sourceFor(args.Source)
 	if err != nil {
 		return textContent(err.Error(), true)

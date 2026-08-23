@@ -102,6 +102,11 @@ func routes() *http.ServeMux {
 	mux.HandleFunc("GET /tables", handleTables)
 	mux.HandleFunc("GET /tables/{name}", handleDescribe)
 	mux.HandleFunc("POST /query", handleQuery)
+	// The HTTP surface, published whole or not at all: a client that can list
+	// operations and not call them has been shown a surface that is not there.
+	mux.HandleFunc("GET /operations", handleListOperations)
+	mux.HandleFunc("GET /operations/{operation}", handleDescribeOperation)
+	mux.HandleFunc("POST /operations/call", handleCallOperation)
 	mux.HandleFunc("POST /mcp", handleMCP)
 	mux.HandleFunc("GET /mcp", handleMCPStream)
 	mux.HandleFunc("POST /om/mcp", handleCatalogMCP)

@@ -197,3 +197,71 @@ func mustJSON(t *testing.T, v any) []byte {
 	}
 	return b
 }
+
+// A body carries JSON types, and each kind converts differently. Checked
+// directly because the corpus reaches only the ones its spec declares.
+func TestNativeValuesTakeTheirDeclaredType(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		kind string
+		want any
+	}{
+		{"5", "integer", int64(5)},
+		{"5.7", "integer", int64(5)}, // int(float(x)), as the reference does
+		{"1.5", "number", 1.5},
+		{"true", "boolean", true},
+		{"false", "boolean", false},
+		{"x", "string", "x"},
+		{"x", "", "x"},
+	} {
+		if got := nativeValue(tc.text, HTTPParameter{Kind: tc.kind}); got != tc.want {
+			t.Errorf("nativeValue(%q, %q) = %#v, want %#v", tc.text, tc.kind, got, tc.want)
+		}
+	}
+}
+
+// A $ref that goes nowhere resolves to nothing rather than to something
+// plausible: the guard can only vouch for what it can read.
+func TestAnUnresolvableRefFailsClosed(t *testing.T) {
+	spec := map[string]any{"components": map[string]any{"schemas": map[string]any{
+		"Real": map[string]any{"type": "object"},
+	}}}
+	for _, ref := range []string{
+		"http://elsewhere/schema", // not local
+		"#/components/schemas/Absent",
+		"#/components/schemas/Real/properties/none",
+	} {
+		if got := specRef(ref, spec); len(got) != 0 {
+			t.Errorf("specRef(%q) resolved to %v, want nothing", ref, got)
+		}
+	}
+	if got := specRef("#/components/schemas/Real", spec); stringAt(got, "type") != "object" {
+		t.Errorf("a real ref should resolve: %v", got)
+	}
+}
+
+// Values arrive from JSON, so a caller can supply any type for any parameter.
+func TestTypedValuesAcceptWhatTheSpecDeclares(t *testing.T) {
+	for _, tc := range []struct {
+		value any
+		kind  string
+		want  string
+		ok    bool
+	}{
+		{float64(500), "integer", "500", true},
+		{float64(1.5), "number", "1.5", true},
+		{true, "boolean", "true", true},
+		{"open", "string", "open", true},
+		{float64(1.5), "integer", "1.5", true}, // the reference checks float(), not int()
+		{"many", "integer", "", false},
+	} {
+		got, err := typedValue(tc.value, HTTPParameter{Name: "p", Kind: tc.kind})
+		if (err == nil) != tc.ok {
+			t.Errorf("typedValue(%#v, %s): err = %v", tc.value, tc.kind, err)
+			continue
+		}
+		if tc.ok && got != tc.want {
+			t.Errorf("typedValue(%#v, %s) = %q, want %q", tc.value, tc.kind, got, tc.want)
+		}
+	}
+}
