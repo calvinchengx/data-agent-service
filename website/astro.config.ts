@@ -72,6 +72,7 @@ export default defineConfig({
             { slug: '00-plan' },
             { slug: '15-http-sources' },
             { slug: '16-go-parity' },
+            { slug: '17-sqlglot-go' },
             { slug: 'parity' },
             { slug: 'upstream-issues' },
             { slug: 'adr/0001-two-executors' },

@@ -47,6 +47,12 @@ is its *shape*.
 
 ## Phase A — make the Go guard genuinely fail closed
 
+> **Superseded by `docs/17-sqlglot-go.md`.** The positive FROM grammar below
+> was a patch for one clause; the decision is to port sqlglot's parser to Go
+> so the whole statement is a tree. Kept for the record of what the patch
+> would have been.
+
+
 Model the `FROM` clause as a region with a **positive grammar**, and refuse any
 token sequence that does not fit it:
 
