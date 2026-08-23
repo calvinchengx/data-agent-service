@@ -12,11 +12,11 @@ drifted without anyone noticing for two phases.
 | SQL surface (`list_tables`, `describe_table`, `run_query`) | ✅ | ✅ | — |
 | Fabric / Azure SQL / Synapse (TDS) | ✅ | ✅ | — |
 | PostgreSQL | ✅ | ✅ | — |
-| DuckDB | ✅ | ❌ | adapter |
+| DuckDB | ✅ | ✅ | — |
 | Databricks | ✅ unwitnessed | ❌ | adapter |
 | HTTP surface (`list_operations`, `describe_operation`, `call_operation`) | ✅ | ❌ | three operations + `httpguard` |
 | REST adapter | ✅ | ❌ | adapter |
-| SQL guard | parser-backed | hand-rolled recogniser | **structural** — see below |
+| SQL guard | parser-backed | parser-backed | — |
 
 The last row is the one that matters. Everything above it is work; the guard
 is a design difference, and it is the reason the only authorization bypass this
@@ -163,46 +163,46 @@ Twelve million executions have found nothing since.
 
 ## Phase D — the missing adapters and surface
 
-In the order that buys the most parity per line:
+**D1 (DuckDB) is done.** `services/warehouse-query-go/sources_duckdb.go`, over
+[`calvinchengx/go-pduckdb`](https://github.com/calvinchengx/go-pduckdb) — the
+decision and its cost are recorded under Phase D1 below.
 
-1. **DuckDB** — ~150 lines in Go. The guard already handles the dialect.
+The guard needed no changes, which is the dialect parameterisation earning its
+keep: sqlglot-go reads `duckdb`, the ceiling is applied by rewriting the parse
+tree, and it comes out as `LIMIT` here and `TOP` in T-SQL from the same edit to
+the same node.
 
-   **Decided: [`calvinchengx/go-pduckdb`](https://github.com/calvinchengx/go-pduckdb)**,
-   a fork of [`fpt/go-pduckdb`](https://github.com/fpt/go-pduckdb) (MIT). It
-   drives DuckDB's C API through purego, so `CGO_ENABLED=0` holds and
-   cross-compilation stays trivial — `marcboeker/go-duckdb` would have cost
-   both, and shelling to the CLI would have put a process boundary and a text
-   format between the executor and its results.
+**The database is opened READ-ONLY, and that is the part worth guarding.** The
+Python adapter has done it since it existed (`duckdb.connect(path,
+read_only=True)`), and nothing in this document said so — a plausible reading of
+the plan produced a working adapter that passes the guard corpus, the
+conformance suite and the dialect tests and opens the file **writable**. Every
+behavioural check would be green; the divergence would surface the first time
+something wrote. It is a security property, not a behavioural one, so no
+behavioural test can find it.
 
-   **The trade-off, stated plainly: "pure Go" here means no cgo, not no native
-   library.** purego `dlopen`s `libduckdb` at run time, so the executor image
-   must ship it. DuckDB publishes a musl build, so a distroless static base
-   still works — but that image must also carry `libstdc++`, which
-   `libduckdb.so` links against and a musl base does not include. That is not a
-   guess: the fork's CI builds and runs the integration suite on Alpine, and
-   the missing `libstdc++` is exactly how it failed before the fix.
+`go-pduckdb` could not do it: `duckdb_open` takes no configuration at all. The
+fork now passes options through `duckdb_open_ext`, and both suites assert the
+property directly — write to a database, reopen it through the adapter, watch
+the write refused. Offered upstream as
+[fpt/go-pduckdb#39](https://github.com/fpt/go-pduckdb/pull/39).
 
-   The fork exists because upstream covered Windows amd64 but not arm64, and
-   its Windows struct-by-value workaround rested on an unchecked ABI
-   assumption. The fork adds arm64, a compile-time check on that assumption,
-   and CI across Linux amd64/arm64, macOS amd64/arm64 and Windows amd64/arm64.
-   The changes are offered back as
-   [fpt/go-pduckdb#37](https://github.com/fpt/go-pduckdb/pull/37); if they land,
-   the fork should be retired rather than maintained.
+The start-up refusals are the Python ones, word for word: a DuckDB source
+claiming `authz_tier=user` is refused, because there is no per-user identity
+behind the claim and every audit line would carry a guarantee nothing is
+making; a DuckDB source with no `path` is refused too.
 
-   Note this is the **executor's** dependency, not the parser's.
-   [`sqlglot-go`](https://github.com/calvinchengx/sqlglot-go) keeps zero
-   non-stdlib dependencies — it parses text and never opens a database.
-2. **HTTP surface + REST adapter** — the three operations, an `httpguard.go`
-   mirroring `httpguard.py`, and a `RestBackend`. Roughly 600 lines including
-   the guard corpus, which should also move to a shared data file (Phase B
-   again, for HTTP).
-3. **Databricks** — last, because the Python one has never met a real
-   workspace either. Parity with something unwitnessed is not worth much; do
-   it when a workspace exists to witness both against.
+**What the image costs.** "Pure Go" means no C toolchain, not no C library.
+`libduckdb.so` is 73 MB and links against `libstdc++`, which a distroless
+static base does not carry, so the Go executor image goes from roughly 20 MB to
+**98 MB**. The DuckDB musl build is the correct one for this base; the glibc
+build loads and then fails on a symbol. All of that is in the Dockerfile with
+the reasoning beside it.
 
-After each, the parity ledger row flips and the contract gains that surface's
-section against **both** executors.
+**Still to do: D2 (HTTP surface and REST adapter) and D3 (Databricks).**
+Neither is started. D2 is the larger — three operations, an `httpguard.go`
+mirroring `httpguard.py`, and a `RestBackend`, roughly 600 lines including its
+share of the guard corpus.
 
 ## Phase E — the contract runs against both, always
 

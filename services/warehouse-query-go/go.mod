@@ -10,6 +10,12 @@ require (
 )
 
 require (
+	github.com/calvinchengx/go-pduckdb v0.2.1-calvinchengx.1 // indirect
+	github.com/ebitengine/purego v0.10.1 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
+)
+
+require (
 	github.com/calvinchengx/sqlglot-go v0.1.2
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
 	github.com/golang-sql/sqlexp v0.1.0 // indirect

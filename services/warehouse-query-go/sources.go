@@ -35,7 +35,15 @@ type Source struct {
 	Schemas   []string `json:"schemas"`
 	// postgres
 	DSN string `json:"dsn"`
+	// duckdb and any other embedded engine: the database file
+	Path string `json:"path"`
 }
+
+// embeddedKinds are engines that are a library reading a file rather than a
+// server with sessions. They have no per-user identity, so they cannot be
+// authz_tier=user, and saying otherwise would put a guarantee in every audit
+// line that nothing behind it is making.
+var embeddedKinds = map[string]bool{"duckdb": true}
 
 func (s Source) policy(maxRows int) Policy {
 	database := s.Database
@@ -75,6 +83,20 @@ func LoadSources() (map[string]Source, error) {
 		}
 		if len(s.Schemas) == 0 {
 			s.Schemas = defaults
+		}
+		// Refused at start-up rather than at the first query: a source that
+		// claims a per-user identity its engine cannot provide would put a
+		// guarantee in every audit line that nothing behind it is making.
+		// The Python executor refuses the same two, in the same words.
+		if embeddedKinds[strings.ToLower(s.Kind)] {
+			if s.AuthzTier == "user" {
+				return nil, fmt.Errorf(
+					"source %s is %s, which has no per-user identity; "+
+						"it must be authz_tier=service (docs/03-architecture.md)", s.Name, s.Kind)
+			}
+			if s.Path == "" {
+				return nil, fmt.Errorf("source %s is %s but names no `path`", s.Name, s.Kind)
+			}
 		}
 		out[s.Name] = s
 	}
@@ -322,12 +344,23 @@ func (b *TdsBackend) Run(ctx context.Context, src Source, v *Verdict, token stri
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
+	return readRows(rows, v.RowLimit)
+}
+
+// readRows turns a result set into the shape the contract describes, stopping
+// at the ceiling.
+//
+// Shared by every adapter on purpose. How many rows come back, how a value is
+// rendered as JSON, and when a result counts as truncated are contract
+// behaviour, not engine behaviour -- a caller must not be able to tell which
+// engine answered from the shape of the answer.
+func readRows(rows *sql.Rows, limit int) (*QueryResult, error) {
 	names, err := rows.Columns()
 	if err != nil {
 		return nil, err
 	}
 	out := &QueryResult{Columns: names, Rows: [][]any{}}
-	for rows.Next() && len(out.Rows) < v.RowLimit {
+	for rows.Next() && len(out.Rows) < limit {
 		holders := make([]any, len(names))
 		pointers := make([]any, len(names))
 		for i := range holders {
@@ -346,7 +379,7 @@ func (b *TdsBackend) Run(ctx context.Context, src Source, v *Verdict, token stri
 		return nil, err
 	}
 	out.RowCount = len(out.Rows)
-	out.Truncated = out.RowCount >= v.RowLimit
+	out.Truncated = out.RowCount >= limit
 	return out, nil
 }
 

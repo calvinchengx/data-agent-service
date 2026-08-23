@@ -17,12 +17,13 @@ import (
 type router struct {
 	tds      Backend
 	postgres Backend
+	duckdb   Backend
 }
 
 var _ Backend = (*router)(nil)
 
 func newRouter() *router {
-	return &router{tds: NewTdsBackend(), postgres: NewPostgresBackend()}
+	return &router{tds: NewTdsBackend(), postgres: NewPostgresBackend(), duckdb: NewDuckDBBackend()}
 }
 
 func (r *router) backendFor(src Source) (Backend, error) {
@@ -33,6 +34,8 @@ func (r *router) backendFor(src Source) (Backend, error) {
 		return r.tds, nil
 	case "postgres", "postgresql":
 		return r.postgres, nil
+	case "duckdb":
+		return r.duckdb, nil
 	default:
 		return nil, fmt.Errorf("source %s has kind %q, which this executor has no adapter for", src.Name, src.Kind)
 	}
