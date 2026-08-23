@@ -69,6 +69,13 @@ jobs:
       # job re-verifies -- so a stale badge fails CI rather than lying here.
       - name: Badge endpoints
         run: python3 scripts/badges.py --out _site --landing site/index.html
+      # After assembly, because the assembled tree is what is served: the
+      # landing page sits above the docs and would read as broken from dist
+      # alone. Catches a link the build cannot -- a sidebar `link:` silently
+      # gains the base prefix, which shipped a 404 in the sidebar and in the
+      # pagination footer generated from it.
+      - name: Every internal link resolves
+        run: python3 scripts/check_links.py --site _site
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site

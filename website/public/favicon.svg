@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Data Agent Service">
+  <!-- The same ◈ the landing page carries as an inline data: URI, and the
+       same accent (#0f6f6b), so the two surfaces are one site in a tab strip.
+       Drawn as paths rather than a <text>◈</text> glyph: a glyph renders only
+       where the font has it, and a favicon is exactly where that silently
+       degrades to a blank square. -->
+  <rect width="100" height="100" rx="18" fill="#0f6f6b"/>
+  <path d="M50 17 83 50 50 83 17 50Z" fill="none" stroke="#ffffff" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M50 35 65 50 50 65 35 50Z" fill="#ffffff"/>
+</svg>
