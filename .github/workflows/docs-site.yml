@@ -10,6 +10,8 @@ on:
     paths:
       - 'site/**'
       - 'docs/**'
+      # check_counts reads README.md, so a change to it must run this workflow.
+      - 'README.md'
       - 'scripts/badges.py'
       - 'website/**'
       - 'package.json'
@@ -52,6 +54,11 @@ jobs:
         run: python3 scripts/check_docs_nav.py
       - name: Pull commands name the released version
         run: python3 -m scripts.check_version
+      # Moved here from ci.yml when prose-only commits stopped running it.
+      # Its targets are README.md, site/index.html and docs/*.md -- all of them
+      # paths that trigger this workflow, and none that trigger CI any more.
+      - name: Witness totals in prose match the manifest
+        run: python3 -m scripts.check_counts
       # The sync script is type-checked before it runs: it rewrites every link
       # on the site, and a silent failure there publishes 404s.
       - run: pnpm --filter data-agent-service-docs typecheck

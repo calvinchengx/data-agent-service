@@ -6,7 +6,51 @@ name: CI
 on:
   push:
     branches: [main]
+    # Prose-only commits do not run this workflow. `paths-ignore` skips a run
+    # only when EVERY changed file matches, so a commit touching a document and
+    # a source file still runs in full -- and any path not listed here runs it,
+    # which is the fail-safe direction: adding a new source directory cannot
+    # silently opt out of CI.
+    #
+    # docs/*.json is deliberately absent. docs/witnesses.json and
+    # docs/coverage.json are manifests the guards READ, and a wrong number in
+    # one of them is exactly what this suite exists to catch.
+    #
+    # The prose guards do not stop running. `check_counts`, `check_docs_nav`
+    # and `check_version` run in BOTH workflows, and the two trigger sets are
+    # complementary: a prose commit runs them in docs-site.yml, a commit
+    # touching a guard script or any source runs them here. Neither kind of
+    # change can reach main without the guards that read it having run.
+    paths-ignore:
+      - 'docs/*.md'
+      - 'docs/**/*.md'
+      - 'README.md'
+      - 'SECURITY.md'
+      - 'site/**'
+      - 'website/**'
   pull_request:
+    # Prose-only commits do not run this workflow. `paths-ignore` skips a run
+    # only when EVERY changed file matches, so a commit touching a document and
+    # a source file still runs in full -- and any path not listed here runs it,
+    # which is the fail-safe direction: adding a new source directory cannot
+    # silently opt out of CI.
+    #
+    # docs/*.json is deliberately absent. docs/witnesses.json and
+    # docs/coverage.json are manifests the guards READ, and a wrong number in
+    # one of them is exactly what this suite exists to catch.
+    #
+    # The prose guards do not stop running. `check_counts`, `check_docs_nav`
+    # and `check_version` run in BOTH workflows, and the two trigger sets are
+    # complementary: a prose commit runs them in docs-site.yml, a commit
+    # touching a guard script or any source runs them here. Neither kind of
+    # change can reach main without the guards that read it having run.
+    paths-ignore:
+      - 'docs/*.md'
+      - 'docs/**/*.md'
+      - 'README.md'
+      - 'SECURITY.md'
+      - 'site/**'
+      - 'website/**'
 
 # Supersede PR runs, never main runs: a main commit's run is the record of what
 # main was, while only a PR's newest commit is under review.

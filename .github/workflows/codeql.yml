@@ -16,8 +16,26 @@ name: CodeQL
 on:
   push:
     branches: [main]
+    # Nothing here analyses prose. Same fail-safe shape as ci.yml: a run is
+    # skipped only when every changed file is one of these.
+    paths-ignore:
+      - 'docs/*.md'
+      - 'docs/**/*.md'
+      - 'README.md'
+      - 'SECURITY.md'
+      - 'site/**'
+      - 'website/**'
   pull_request:
     branches: [main]
+    # Nothing here analyses prose. Same fail-safe shape as ci.yml: a run is
+    # skipped only when every changed file is one of these.
+    paths-ignore:
+      - 'docs/*.md'
+      - 'docs/**/*.md'
+      - 'README.md'
+      - 'SECURITY.md'
+      - 'site/**'
+      - 'website/**'
   schedule:
     - cron: '17 6 * * 1' # weekly, Monday 06:17 UTC
 
