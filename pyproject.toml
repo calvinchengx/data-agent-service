@@ -81,7 +81,10 @@ known-first-party = ["agent", "evals", "e2e", "load", "seed", "scripts"]
 # `sources`, `sqlguard`, `access` and friends live beside the executor rather
 # than in a package, so the checker needs to be told where to look — otherwise
 # every import of them reads as unresolved and the real diagnostics are buried.
-extra-paths = ["services/warehouse-query-py"]
+# services/contract too: the corpus generator sits beside the adjudicator
+# and is imported by it. Python puts a script's own directory on sys.path;
+# a checker does not, so the import read as unresolved and failed CI.
+extra-paths = ["services/warehouse-query-py", "services/contract"]
 python-version = "3.12"
 
 [tool.pytest.ini_options]
