@@ -23,7 +23,7 @@ endif
 
 PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
-.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance conformance-one client-config ask docs coverage coverage-python coverage-go coverage-manifest release-version witnesses-manifest witnesses-check unit guard-corpus
+.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance conformance-one conformance-ask ask-serve client-config ask docs coverage coverage-python coverage-go coverage-manifest release-version witnesses-manifest witnesses-check unit guard-corpus
 
 help: ## Show the available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -134,6 +134,15 @@ conformance-one: ## The contract against one implementation (DAS_EXECUTOR=py|go)
 	# unconditionally, so the gate refused every run and named the wrong cause.
 	$(PY) -m load.run --assert-executor $(DAS_EXECUTOR)
 	$(TOOLS) python -m services.conformance.run --name "$(DAS_EXECUTOR) executor"
+
+ask-serve: ## The ask service, behind the gateway at /ask (docs/20-ask-service.md)
+	docker compose --profile ask up -d --build --wait ask
+
+conformance-ask: ## The ask contract (agent/contract/) against the running service; --behaviour needs a model key
+	# Transport checks run against the llm-stub, so CI proves the plumbing
+	# without paying for a model; behaviour checks need ANTHROPIC_API_KEY.
+	$(MAKE) --no-print-directory ask-serve
+	$(TOOLS) python -m agent.conformance.run --name "ask service" $(ARGS)
 
 typecheck: ## Python types only
 	$(TY) check

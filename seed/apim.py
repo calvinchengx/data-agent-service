@@ -48,6 +48,7 @@ EXECUTOR_MCP = c.CFG.get("DAS_EXECUTOR_MCP_URL", EXECUTOR.rstrip("/") + "/mcp")
 # caller's resolved role and forwards to OpenMetadata (DAS_OM_MCP_URL is the
 # executor's setting, not this one's).
 EXECUTOR_OM_MCP = c.CFG.get("DAS_EXECUTOR_OM_MCP_URL", EXECUTOR.rstrip("/") + "/om/mcp")
+ASK = c.CFG.get("DAS_ASK_URL", "http://ask:8091")
 AUDIENCE = c.CFG["DAS_AGENT_AUDIENCE"]
 SCOPE = c.CFG.get("DAS_REQUIRED_SCOPE", "access_as_user")
 RATE_CALLS = c.CFG.get("DAS_RATE_CALLS", "60")
@@ -453,6 +454,52 @@ def main() -> dict:
     put_policy("apis/om", jwt_policy())
     c.log("om: passthrough to the executor, bot chosen there by role")
 
+    # 3. the ask service: the agent behind a ticket and a stream, one more
+    # REST API on the same gateway with the same bearer. Published whether or
+    # not the service is up -- the route is configuration, the service is a
+    # profile -- so a client that reaches /ask before `make ask-serve` gets
+    # the gateway's 502 rather than a missing API.
+    put_api("ask", "Ask the data agent", "ask", ASK, mcp_mode=None)
+    for op_id, display, method, tmpl, desc in (
+        (
+            "open_conversation",
+            "Open conversation",
+            "POST",
+            "/v1/conversations",
+            "Open a conversation to ask within.",
+        ),
+        (
+            "ask",
+            "Ask",
+            "POST",
+            "/v1/conversations/{conversation_id}/asks",
+            "Ask a question; a ticket is returned before any tool call runs.",
+        ),
+        (
+            "events",
+            "Events",
+            "GET",
+            "/v1/asks/{ticket}/events",
+            "The ticket's events as Server-Sent Events; Last-Event-ID resumes.",
+        ),
+        (
+            "ask_state",
+            "State",
+            "GET",
+            "/v1/asks/{ticket}",
+            "Terminal state, for clients without SSE.",
+        ),
+        ("cancel", "Cancel", "POST", "/v1/asks/{ticket}/cancel", "Stop the run."),
+    ):
+        params = [
+            {"name": n, "type": "string", "required": True}
+            for n in ("conversation_id", "ticket")
+            if "{" + n + "}" in tmpl
+        ]
+        put_operation("ask", op_id, display, method, tmpl, desc, template_params=params)
+    put_policy("apis/ask", jwt_policy())
+    c.log("ask: 5 REST operations published, caller identity forwarded")
+
     publish_discovery()
     publish_llm()
 
@@ -462,6 +509,7 @@ def main() -> dict:
         "discovery": "/.well-known/oauth-protected-resource",
         "warehouse_rest": "/warehouse-rest",
         "om_mcp": "/om/mcp",
+        "ask": "/ask",
         "llm": "/llm",
         "gateway_validates_jwt": VALIDATE_JWT,
         "om_subscription_required": not VALIDATE_JWT,

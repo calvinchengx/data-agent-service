@@ -357,6 +357,42 @@ services:
     # shell, no python). Each Dockerfile declares its own HEALTHCHECK, so the
     # probe always matches the thing being probed.
 
+  # ------------------------------------------------------------------ ask
+  # The agent as a service: a ticket now, events as they happen, the answer
+  # when there is one (agent/contract/, docs/20-ask-service.md). One more
+  # client of the gateway, reaching the warehouse and the catalog with the
+  # CALLER's token exactly as the CLI does; it holds no authority and no
+  # secret of its own. Same image as the harnesses because it is the same
+  # code, started differently.
+  ask:
+    profiles: [ask]
+    build:
+      context: .
+      dockerfile: docker/tools/Dockerfile
+    command: ["python", "-m", "agent.server"]
+    depends_on:
+      apim-emulator:
+        condition: service_healthy
+      warehouse-query:
+        condition: service_started
+    ports:
+      - "${ASK_PORT:-8091}:8091"
+    env_file: ${ENVFILE:-.env}
+    environment:
+      IDENTITY_ENDPOINT: "https://entra-emulator:8443/msi/token"
+      IDENTITY_HEADER: "${DAS_MI_HEADER:-managed-identity-secret}"
+      DAS_ASK_PORT: "8091"
+    volumes:
+      - ./:/app:ro
+      - tools-venv:/app/.venv
+    working_dir: /app
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8091/health',timeout=5).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
 volumes:
   tools-venv:
   postgres-data:

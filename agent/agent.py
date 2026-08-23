@@ -49,6 +49,9 @@ class Answer:
     output_tokens: int = 0
     ms: int = 0
     stop_reason: str = ""
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    hops: int = 0
 
     @property
     def sql(self) -> list[str]:
@@ -87,6 +90,59 @@ class Answer:
         return not self.sql and not self.refused
 
     @property
+    def sources(self) -> list[str]:
+        """Every source a statement or call ran against, in first-use order."""
+        seen: list[str] = []
+        for call in self.tool_calls:
+            if call.is_error or not (
+                call.name.endswith("run_query") or call.name.endswith("call_operation")
+            ):
+                continue
+            src = ""
+            with contextlib.suppress(json.JSONDecodeError, AttributeError):
+                src = json.loads(call.result).get("source", "")
+            src = src or str(call.arguments.get("source") or "")
+            if src and src not in seen:
+                seen.append(src)
+        return seen
+
+    @property
+    def path(self) -> str:
+        """What answered: the catalog alone, one source, or more than one.
+
+        Mechanical, like `abstained`: the contract (agent/contract/events.schema.json)
+        lets a client build latency policy on this, so it must be derived from
+        what ran and never from what the prose says.
+        """
+        n = len(self.sources)
+        return "catalog" if n == 0 else "warehouse" if n == 1 else "multi"
+
+    @property
+    def definitions_applied(self) -> list[dict]:
+        """Catalog definitions the run read, as {term, definition, source_fqn}.
+
+        Derived from catalog tool RESULTS that carry a description alongside a
+        name, which is the shape OpenMetadata's entity tools return. Best
+        effort and possibly empty even when the catalog was present: a result
+        this cannot parse is not a definition the answer is known to rest on,
+        and claiming one would be the attribution failure docs/07 scores.
+        """
+        out: list[dict] = []
+        seen: set[str] = set()
+        for call in self.tool_calls:
+            if not call.name.startswith("catalog") or call.is_error:
+                continue
+            with contextlib.suppress(json.JSONDecodeError, AttributeError, TypeError):
+                for ent in _entities(json.loads(call.result)):
+                    term = str(ent.get("displayName") or ent.get("name") or "").strip()
+                    definition = str(ent.get("description") or "").strip()
+                    fqn = str(ent.get("fullyQualifiedName") or "").strip()
+                    if term and definition and fqn and fqn not in seen:
+                        seen.add(fqn)
+                        out.append({"term": term, "definition": definition, "source_fqn": fqn})
+        return out
+
+    @property
     def searched_terms(self) -> list[str]:
         """The catalog vocabulary the agent tried, in order, deduplicated.
 
@@ -102,6 +158,43 @@ class Answer:
             if term and term not in seen:
                 seen.append(term)
         return seen
+
+
+def _entities(payload: Any) -> list[dict]:
+    """Catalog entities in a tool result, however the result nests them."""
+    if isinstance(payload, dict):
+        if "fullyQualifiedName" in payload:
+            return [payload]
+        return [e for v in payload.values() for e in _entities(v)]
+    if isinstance(payload, list):
+        return [e for v in payload for e in _entities(v)]
+    return []
+
+
+def milestone_for(call: ToolCall) -> dict | None:
+    """What a person could be told about this call, as structure.
+
+    Phases come from the contract (agent/contract/events.schema.json) and the
+    subject is the catalog's vocabulary or a table's name -- never the
+    question, and never prose: the client renders it in its own words.
+    """
+    tool = call.name.partition(Toolbox.SEP)[2] or call.name
+    if call.name.startswith("catalog"):
+        phase = "grounding"
+        subject = call.arguments.get("query") or call.arguments.get("fqn")
+    elif tool in ("list_tables", "describe_table", "list_operations", "describe_operation"):
+        phase = "discovering"
+        subject = call.arguments.get("table") or call.arguments.get("qualified_name")
+    elif tool in ("run_query", "call_operation"):
+        phase = "querying"
+        subject = call.arguments.get("operation")
+    else:
+        return None
+    return {
+        "phase": phase,
+        "subject": str(subject) if subject else None,
+        "source": str(call.arguments.get("source") or "") or None,
+    }
 
 
 def system_prompt(loaded: list[skills_mod.Skill] | None = None) -> str:
@@ -176,18 +269,49 @@ def ask(
     effort: str = DEFAULT_EFFORT,
     on_step: Callable[[str], None] | None = None,
     client: Any = None,
+    history: list[dict] | None = None,
+    on_event: Callable[[dict], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> Answer:
+    """Answer one question.
+
+    `history` is the conversation so far -- prior user/assistant turns, as the
+    caller kept them -- so a follow-up can say "that team". `on_event` receives
+    structured `step` and `milestone` dicts as they happen (the ask contract's
+    shape); `on_step` is the older text trace and still works. `cancelled` is
+    polled between hops: a run that is no longer wanted makes no further model
+    call, though a tool call already in flight completes.
+    """
     toolbox = build_toolbox(token, om=om)
     tools = toolbox.connect()
-    system = system_prompt()
+    # The prefix is byte-stable for every hop of every question: the method
+    # prompt, the skills, and the tool schemas. One breakpoint after it, and
+    # one on the newest tool result so the transcript is read incrementally
+    # rather than from the top on each hop.
+    system = [{"type": "text", "text": system_prompt(), "cache_control": {"type": "ephemeral"}}]
     client = client or model_client()
-    messages: list[dict] = [{"role": "user", "content": question}]
+    messages: list[dict] = [*(history or []), {"role": "user", "content": question}]
     calls: list[ToolCall] = []
     started = time.time()
-    tokens_in = tokens_out = 0
+    tokens_in = tokens_out = cache_read = cache_write = hops = 0
     stop_reason = ""
 
+    def finish(text: str, reason: str) -> Answer:
+        return Answer(
+            text,
+            calls,
+            tokens_in,
+            tokens_out,
+            int((time.time() - started) * 1000),
+            reason,
+            cache_read,
+            cache_write,
+            hops,
+        )
+
     for _ in range(MAX_STEPS):
+        if cancelled and cancelled():
+            return finish("(cancelled)", "cancelled")
         response = client.beta.messages.create(
             model=model,
             max_tokens=16000,
@@ -200,19 +324,15 @@ def ask(
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",
         )
+        hops += 1
         tokens_in += response.usage.input_tokens
         tokens_out += response.usage.output_tokens
+        cache_read += getattr(response.usage, "cache_read_input_tokens", 0) or 0
+        cache_write += getattr(response.usage, "cache_creation_input_tokens", 0) or 0
         stop_reason = response.stop_reason or ""
 
         if stop_reason == "refusal":
-            return Answer(
-                "(the model declined to answer this question)",
-                calls,
-                tokens_in,
-                tokens_out,
-                int((time.time() - started) * 1000),
-                stop_reason,
-            )
+            return finish("(the model declined to answer this question)", stop_reason)
         if stop_reason == "pause_turn":
             messages.append({"role": "assistant", "content": response.content})
             continue
@@ -220,14 +340,7 @@ def ask(
         uses = [b for b in response.content if b.type == "tool_use"]
         if not uses:
             text = "".join(b.text for b in response.content if b.type == "text")
-            return Answer(
-                text.strip(),
-                calls,
-                tokens_in,
-                tokens_out,
-                int((time.time() - started) * 1000),
-                stop_reason,
-            )
+            return finish(text.strip(), stop_reason)
 
         messages.append({"role": "assistant", "content": response.content})
         results = []
@@ -240,6 +353,19 @@ def ask(
             calls.append(call)
             if on_step:
                 on_step(_describe(call))
+            if on_event:
+                on_event(
+                    {
+                        "type": "step",
+                        "tool": call.name,
+                        "args": call.arguments,
+                        "ms": call.ms,
+                        "is_error": call.is_error,
+                    }
+                )
+                milestone = milestone_for(call)
+                if milestone:
+                    on_event({"type": "milestone", **milestone})
             results.append(
                 {
                     "type": "tool_result",
@@ -250,16 +376,18 @@ def ask(
                     "is_error": is_error,
                 }
             )
+        # The newest result carries the rolling breakpoint; the one before it
+        # is now inside the cached prefix and loses its marker, because the
+        # API allows four and a transcript would otherwise spend them all by
+        # the third hop.
+        for m in messages:
+            if m["role"] == "user" and isinstance(m["content"], list):
+                for block in m["content"]:
+                    block.pop("cache_control", None)
+        results[-1]["cache_control"] = {"type": "ephemeral"}
         messages.append({"role": "user", "content": results})
 
-    return Answer(
-        "(gave up: too many steps without an answer)",
-        calls,
-        tokens_in,
-        tokens_out,
-        int((time.time() - started) * 1000),
-        "max_steps",
-    )
+    return finish("(gave up: too many steps without an answer)", "max_steps")
 
 
 def record_gap(answer: Answer, subject: str) -> None:

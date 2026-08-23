@@ -1,10 +1,12 @@
 # The ask service
 
-> **Status: contract only.** `agent/contract/ask.openapi.json` and
-> `agent/contract/events.schema.json` are written; `agent/server.py`, the
-> conformance suite and the witness are not. A client can be built against a
-> stub today. Nothing in this page is claimed as working until the
-> conformance row in `parity.md` says so.
+> **Status: written, not yet witnessed against the stack.** The contract
+> (`agent/contract/`), the service (`agent/server.py`), the conformance suite
+> (`agent/conformance/run.py`) and the gateway route (`seed/apim.py`) exist.
+> `tests/test_ask_server.py` proves the transport semantics in-process with
+> the verifier and the model stubbed. `make conformance-ask` against the
+> running stack, and the e2e witness, have not been run; until they have, the
+> row in `parity.md` reads *not yet* and nothing here is claimed as working.
 
 Ask a question, get a ticket back before anything runs, watch the work as a
 stream of events, and receive the answer when there is one — or the abstention,
