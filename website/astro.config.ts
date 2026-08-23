@@ -42,6 +42,7 @@ export default defineConfig({
           items: [
             { slug: '09-mcp-clients' },
             { slug: '05-authorization' },
+            { slug: '19-classification' },
             { slug: '09-adding-a-source' },
           ],
         },
@@ -62,6 +63,7 @@ export default defineConfig({
             { slug: '09-llm-governance' },
             { slug: '12-promotion' },
             { slug: '14-publishing' },
+            { slug: '15-adding-a-dashboard-target' },
           ],
         },
         {

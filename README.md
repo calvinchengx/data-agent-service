@@ -65,7 +65,7 @@ or `make stack` to do the whole bring-up from nothing, which is what CI runs.
 | `docker-compose.yml` | Pinned, published images only — dependencies are used as-is |
 | `.env.example` | Every `DAS_*` setting; copy to `.env` (local) or `.env.prod` (real Azure) |
 | `docs/00-plan.md` | Architecture, decisions, phases, evaluation, load, authz, extension |
-| `docs/` | Quickstart, architecture, authorization, evaluation, load, MCP clients, adding a source, production, CI |
+| `docs/` | Quickstart, architecture, authorization, classification, evaluation, load, MCP clients, adding a source, production, CI |
 | `services/` | The warehouse-query executor (Python and Go), and the contract both answer to |
 | `agent/`, `evals/`, `e2e/` | The agent, the accuracy suite, and the witnesses |
 | `seed/` | Datasets, warehouse provisioning, OpenMetadata semantics, identity setup |

@@ -143,6 +143,11 @@ jobs:
           df -h /
       - name: bring up, seed, verify
         run: make stack
+      # `make conformance` now recreates the executor for each implementation
+      # and refuses to run unless the container it is talking to is the one it
+      # asked for. The step was labelled "both implementations" while running
+      # against whichever happened to be up, which is how a PostgreSQL gap
+      # survived two phases behind a green contract.
       - name: executor contract, both implementations
         run: make conformance
       # The witnesses badge is generated from docs/witnesses.json by the docs

@@ -23,7 +23,7 @@ endif
 
 PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
-.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance client-config ask docs coverage coverage-python coverage-go coverage-manifest witnesses-manifest witnesses-check unit guard-corpus
+.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance conformance-one client-config ask docs coverage coverage-python coverage-go coverage-manifest witnesses-manifest witnesses-check unit guard-corpus
 
 help: ## Show the available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -113,8 +113,17 @@ format: ## Apply formatting and safe fixes — the only target that edits files
 guard-corpus: ## Re-record the Python guard's verdict on every contract statement
 	uv run python services/contract/gen_guard_corpus.py
 
-conformance: ## The executor contract, against whichever implementation is running
-	$(TOOLS) python -m services.conformance.run
+conformance: ## The executor contract, against BOTH implementations in turn
+	@$(MAKE) --no-print-directory conformance-one DAS_EXECUTOR=py
+	@$(MAKE) --no-print-directory conformance-one DAS_EXECUTOR=go
+
+conformance-one: ## The contract against one implementation (DAS_EXECUTOR=py|go)
+	# --force-recreate because `up -d --build` leaves the OLD container running
+	# when only the build arg changed, and the contract would then be measured
+	# against the implementation that was already up.
+	DAS_EXECUTOR=$(DAS_EXECUTOR) docker compose up -d --build --force-recreate --wait warehouse-query
+	$(TOOLS) python -m services.conformance.run \
+		--name "$(DAS_EXECUTOR) executor" --expect-executor $(DAS_EXECUTOR)
 
 typecheck: ## Python types only
 	$(TY) check

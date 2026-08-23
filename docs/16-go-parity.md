@@ -174,6 +174,22 @@ section against **both** executors.
 
 ## Phase E — the contract runs against both, always
 
+**Done.** `make conformance` now recreates the executor for each
+implementation in turn and runs the contract against each, and
+`services/conformance/run.py --expect-executor py|go` **refuses to run** unless
+the container answering is the one it asked for. The CI step was already
+labelled "both implementations" while running against whichever happened to be
+up; it now is what it says.
+
+The refusal is the part that matters. Recreating the container and hoping is
+what produced "27/27, both implementations" from one implementation measured
+twice — nothing in the HTTP surface says which one answered, by design, so the
+check reads the image the container was built from, the same way the load
+comparison already does.
+
+Original plan below.
+
+
 `make conformance` runs against whichever executor is up. That is how
 "27/27, both implementations" was one implementation measured twice, and how
 the PostgreSQL gap survived two phases. Change `make conformance` and the
