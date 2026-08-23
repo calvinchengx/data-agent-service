@@ -1884,15 +1884,34 @@ def phase16() -> None:
     # ---- configuration is refused, not silently ignored ----
     from publisher import targets as _t
 
+    # The unbuilt name is DERIVED, not chosen. This witness used to say
+    # "tableau", which was true until 55fcc8f built it -- and then the witness
+    # reported an unknown target being accepted while `configured()` was
+    # behaving exactly as designed. A test that names a specific instance of
+    # "the thing that does not exist" stops testing the moment somebody
+    # creates that thing. We were lucky it failed loudly; the same staleness
+    # could as easily have left it passing vacuously.
+    #
+    # So the name is asserted ABSENT from the registry first. If anyone ever
+    # builds a target by this name, the first check fails by name rather than
+    # the second one quietly meaning nothing.
+    unbuilt = "no-such-target"
+    built = sorted(_t.registry())
+    check(
+        "phase16",
+        "the name this witness uses as `unbuilt` is still unbuilt",
+        unbuilt not in built,
+        f"{unbuilt!r} vs built {built}",
+    )
     refused_target = ""
     try:
-        _t.configured({"DAS_DASHBOARD_TARGETS": "powerbi,tableau"}, state)
+        _t.configured({"DAS_DASHBOARD_TARGETS": f"powerbi,{unbuilt}"}, state)
     except LookupError as e:
         refused_target = str(e)
     check(
         "phase16",
         "a target nobody built is refused at startup, not silently skipped",
-        "tableau" in refused_target and "no target is built" in refused_target,
+        unbuilt in refused_target and "no target is built" in refused_target,
         refused_target[:110] or "an unknown target was accepted",
     )
 

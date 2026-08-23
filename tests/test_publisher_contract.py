@@ -92,12 +92,24 @@ def test_the_default_target_set_is_power_bi_alone():
     assert only.kind == "powerbi" and only.authz_tier == "user"
 
 
+UNBUILT = "no-such-target"
+
+
+def test_the_name_used_as_unbuilt_is_actually_unbuilt():
+    """Asserted separately, and first. A test that names a specific instance
+    of "the thing that does not exist" stops testing the moment somebody
+    creates that thing -- this one said `tableau` until TableauTarget existed,
+    and renaming it to `quicksight` only moved the expiry date. If anyone ever
+    builds a target by this name, THIS fails by name rather than the next test
+    quietly meaning nothing."""
+    from publisher.targets import registry
+
+    assert UNBUILT not in registry(), f"{UNBUILT!r} is built now; the next test is vacuous"
+
+
 def test_a_target_nobody_built_is_refused_at_startup():
-    """The name must be one nothing is built for. This test used to say
-    `tableau`, and started failing the moment TableauTarget existed -- which
-    is the check working, not breaking."""
     with pytest.raises(LookupError, match="no target is built"):
-        configured({"DAS_DASHBOARD_TARGETS": "powerbi, quicksight"}, {})
+        configured({"DAS_DASHBOARD_TARGETS": f"powerbi, {UNBUILT}"}, {})
 
 
 def test_every_built_target_can_be_named_in_the_setting():
