@@ -17,7 +17,19 @@
 # loader at /lib/ld-musl-*.so.1) is the coherent pairing; see
 # docs/16-go-parity.md. The adapter and its tests are unchanged and still run
 # under the tag in CI.
-FROM golang:1.26-alpine AS build
+# Base images come from a pull-through mirror, not Docker Hub directly.
+#
+# Docker Hub rate-limits anonymous pulls, and a release runner is anonymous.
+# That is not hypothetical here: cutting v0.2.0 failed on
+# `python:3.12-slim: failed to resolve source metadata` while nothing in the
+# repository had changed -- the kind of failure that wastes an afternoon
+# because it looks like a code problem and is a quota.
+#
+# mirror.gcr.io is a cache, not a fork: the manifests it serves for these tags
+# are byte-identical to Docker Hub's, checked before switching. Override
+# BASE_REGISTRY to pull from anywhere else, including Docker Hub itself.
+ARG BASE_REGISTRY=mirror.gcr.io/library
+FROM ${BASE_REGISTRY}/golang:1.26-alpine AS build
 WORKDIR /src
 COPY services/warehouse-query-go/go.mod services/warehouse-query-go/go.sum ./
 RUN go mod download

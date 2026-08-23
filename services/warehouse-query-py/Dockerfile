@@ -1,6 +1,18 @@
 # The executor. Python implementation; services/warehouse-query-go/ implements
 # the same OpenAPI contract (services/contract/openapi.json).
-FROM python:3.12-slim
+# Base images come from a pull-through mirror, not Docker Hub directly.
+#
+# Docker Hub rate-limits anonymous pulls, and a release runner is anonymous.
+# That is not hypothetical here: cutting v0.2.0 failed on
+# `python:3.12-slim: failed to resolve source metadata` while nothing in the
+# repository had changed -- the kind of failure that wastes an afternoon
+# because it looks like a code problem and is a quota.
+#
+# mirror.gcr.io is a cache, not a fork: the manifests it serves for these tags
+# are byte-identical to Docker Hub's, checked before switching. Override
+# BASE_REGISTRY to pull from anywhere else, including Docker Hub itself.
+ARG BASE_REGISTRY=mirror.gcr.io/library
+FROM ${BASE_REGISTRY}/python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.11.32 /uv /uvx /bin/
 # mssql-python bundles Microsoft's ODBC driver; these are what it needs to load.
 RUN apt-get update && apt-get install -y --no-install-recommends \

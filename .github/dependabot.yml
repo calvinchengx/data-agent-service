@@ -41,6 +41,21 @@ updates:
       go:
         patterns: ['*']
 
+  # Base images. Not watched at all until now, which is how python:3.12-slim
+  # and golang:1.26-alpine sat unexamined while every other ecosystem here got
+  # weekly updates. The directories are listed individually because Dependabot
+  # matches Dockerfiles by directory, not by glob.
+  - package-ecosystem: docker
+    directories:
+      - /services/warehouse-query-py
+      - /services/warehouse-query-go
+      - /docker/tools
+    schedule:
+      interval: weekly
+    groups:
+      base-images:
+        patterns: ['*']
+
   # The workflows themselves: a pinned action is a dependency like any other,
   # and CI, the docs site and the release all run on them.
   - package-ecosystem: github-actions
