@@ -169,10 +169,44 @@ In this order:
    no lineage is the thing this project exists to avoid.
 2. **Can its engine be queried back headlessly?** If not, `evaluate` cannot be
    written and you would be publishing blind.
-3. **Is there a container?** If not, nothing can be witnessed in CI, and the
-   target belongs in `parity.md` as a hosted row rather than in the suite.
+3. **Is there a container?** If not, the *live hop* belongs in `parity.md` as
+   a hosted row — but see below, because this filter decides less than it
+   looks like it does.
 
 Tableau passes the first two and fails the third: it publishes open-source
 *clients* (`tableauserverclient`, `document-api-python`), but a client is the
 wrong half of a witness. A witness needs something on the other side that can
 say no.
+
+## Split at the tenant line, do not defer past it
+
+The third filter is a reason to split a target, not to postpone one. Most of a
+target is a **pure function of the `Plan`** — the artefact it emits, the query
+it will ask, the token it will present — and none of that needs a tenant:
+
+| Above the line — witnessed in CI | Below — needs a tenant |
+|---|---|
+| the artefact (`.twb`, TMSL, a dataset body) | creating it on the server |
+| the query the tool will be asked | running it |
+| the token, and whose name is in it | presenting it |
+| `accepts()`, including the refusal when unconfigured | — |
+
+`TableauTarget` is built this way: `workbook()`, `vds_query()` and `claims()`
+are pure and recorded in `publisher/contract/cases.json`, `publish()` refuses
+by name, and `docs/parity.md` carries the live hop as 🔴 with the reason.
+
+Two rules make the split honest rather than a way of claiming credit:
+
+- **The refusal must name the ledger.** `accepts()` returns "…the generator is
+  witnessed in CI, the live hop needs a tenant — see docs/parity.md". A reader
+  who hits it should land on the honest record, not conclude the candidate is
+  at fault.
+- **The witness must say what it does not prove.** phase20 asserts the
+  generator *and* asserts that `parity.md` still says "not yet". A green
+  witness beside a ledger claiming the hop was proved is exactly the failure
+  this repo keeps finding.
+
+Deferring Tableau because it had no container was the wrong call once already,
+and it was propped up by a second error: §20 recorded it as `service` tier when
+Connected Apps with direct trust make it `user`. Check the tier against the
+tool's documentation before you rank a target by it.

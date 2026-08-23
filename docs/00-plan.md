@@ -472,7 +472,7 @@ entity with its own lineage.
 | Power BI | — | `PowerBI` | fabric-emulator | `user` (OBO) | §18, extracted unchanged |
 | Apache Superset | Apache-2.0 | `Superset` | `apache/superset` container ✅ | `service` | **19b landed** (postgres); 19c against the warehouse (ODBC) |
 | Cube | Apache-2.0 core | **none** | container | `service` | 19d spike, then go/no-go |
-| Tableau | commercial | `Tableau` | **none** — hosted developer sandbox only | `service` | 19e; a `parity.md` hosted row, never CI |
+| Tableau | commercial | `Tableau` | **none** — hosted developer sandbox only | `user` (connected app) | 19c; generator witnessed in CI, live hop on a `parity.md` hosted row |
 
 Filters, in the order they bind: is it in OpenMetadata's `dashboardService`
 enum (no entity, no lineage, and a promoted number with no lineage is the
@@ -564,9 +564,9 @@ a digest-pinned base, which is the layer a hosted Superset needs too.
 |---|---|---|
 | 19a | `DashboardTarget`, `Plan`, `PowerBITarget` extracted; `DAS_DASHBOARD_TARGETS`; `plan.schema.json`; Go generator + golden conformance | phase-16 witnesses pass unchanged; a `postgres` candidate reports *why* no target accepts it; Go and Python goldens byte-equal |
 | 19b ✅ | `superset` in compose; service credential as a `keyvault:` reference; personas provisioned as OM users so `owners` can reference them; `SupersetTarget` against `postgres` | a candidate the witness itself creates → dataset, chart, dashboard exist; `chart/data` agrees with the executor; OM dashboard with lineage to the postgres table, owner = asking user |
-| 19c | Superset against the Fabric warehouse (derived image with the ODBC driver) | same witness, warehouse source |
-| 19d | Cube spike | a go/no-go note here: the schema channel (job and service share no disk) and the catalog entity type |
-| 19e | `TableauTarget` — `.twb` with a live connection, VizQL Data Service to evaluate | `parity.md` hosted row; nothing in CI |
+| 19c | `TableauTarget` **above the tenant line** — `.twb` from the Plan, the connected-app JWT, the VDS query body — recorded in the contract and witnessed in CI | the `.twb` carries the guarded template as a custom-SQL relation; the JWT names the asking user; `publish` refuses clearly with no site configured |
+| 19d | Tableau's live hop, on a developer sandbox: publish the `.twb`, evaluate through VDS | a `docs/parity.md` hosted row; nothing in CI |
+| 19e | Superset against the Fabric warehouse (ODBC in the derived image); then the Cube spike | same witness, warehouse source; a go/no-go note on Cube's schema channel and catalog entity type |
 
 Docs: `14-publishing.md` loses its Power BI-only framing;
 `15-adding-a-dashboard-target.md` mirrors `09-adding-a-source.md`;

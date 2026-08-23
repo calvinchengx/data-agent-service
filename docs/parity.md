@@ -35,6 +35,9 @@ same check has been watched passing against a real tenant.
 | The executor refuses to serve when tags are configured and the catalog has never been read | 🟢 | `tests/test_access_tags.py`, `tagindex_test.go` | not yet — and a real tenant is where a slow or throttled catalog would actually be met |
 | A denial can be traced to the rule or the tag that caused it | 🟢 | `list_sources` → `yourRestrictions` | not yet |
 | A promoted dashboard is published under the asker's identity, and a viewer cannot | 🟢 | `e2e.run` phase16 | not yet |
+| A promoted dashboard reaches a SECOND tool with no per-user identity, bounded by the template | 🟢 | `e2e.run` phase19 (Superset) | not yet |
+| The Tableau **workbook generator** — `.twb`, the VDS query, the connected-app token | 🟢 | `e2e.run` phase20, `publisher/contract/cases.json` | not yet |
+| A Tableau workbook actually **publishes and answers** on a real site | 🔴 **no tenant** — no container exists and none has been created | needs a [Tableau Developer sandbox](https://www.tableau.com/developer/get-site); `TableauTarget.publish` refuses by name until then | not yet |
 | The DAX measure answers what the SQL it was promoted from answers | 🟢 | `e2e.run` phase16 | not yet |
 | The published report **renders** | ⬜ | none, and there cannot be one here — the emulator persists a report definition and does not interpret it, deliberately | not yet |
 | On-behalf-of carries the **user** to the data plane | 🟢 | `e2e.run` phase3 | not yet |

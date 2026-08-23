@@ -93,8 +93,21 @@ def test_the_default_target_set_is_power_bi_alone():
 
 
 def test_a_target_nobody_built_is_refused_at_startup():
+    """The name must be one nothing is built for. This test used to say
+    `tableau`, and started failing the moment TableauTarget existed -- which
+    is the check working, not breaking."""
     with pytest.raises(LookupError, match="no target is built"):
-        configured({"DAS_DASHBOARD_TARGETS": "powerbi, tableau"}, {})
+        configured({"DAS_DASHBOARD_TARGETS": "powerbi, quicksight"}, {})
+
+
+def test_every_built_target_can_be_named_in_the_setting():
+    """The other direction: a target in the registry that `configured` cannot
+    build is one nobody can turn on, and nothing else would say so."""
+    from publisher.targets import registry
+
+    built = sorted(registry())
+    assert built == ["powerbi", "superset", "tableau"]
+    assert [t.kind for t in configured({"DAS_DASHBOARD_TARGETS": ",".join(built)}, {})] == built
 
 
 def test_a_blank_list_entry_is_ignored_not_refused():

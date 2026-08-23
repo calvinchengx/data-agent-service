@@ -67,11 +67,12 @@ class DashboardTarget(Protocol):
 def registry() -> dict[str, Any]:
     # Imported here so the package can be read without every target's
     # dependencies being importable.
-    from publisher.targets import powerbi, superset
+    from publisher.targets import powerbi, superset, tableau
 
     return {
         powerbi.PowerBITarget.kind: powerbi.PowerBITarget,
         superset.SupersetTarget.kind: superset.SupersetTarget,
+        tableau.TableauTarget.kind: tableau.TableauTarget,
     }
 
 

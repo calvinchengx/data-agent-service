@@ -26,7 +26,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from publisher import plan as _plan  # noqa: E402
-from publisher.targets import powerbi  # noqa: E402
+from publisher.targets import powerbi, superset, tableau  # noqa: E402
 
 OUT = pathlib.Path(__file__).resolve().parent / "cases.json"
 
@@ -34,6 +34,18 @@ OUT = pathlib.Path(__file__).resolve().parent / "cases.json"
 # Fixed here so the cases say the same thing on every machine.
 WORKSPACE = "00000000-0000-4000-8000-0000000000ws"
 WAREHOUSE = "00000000-0000-4000-8000-0000000000wh"
+DSN = "postgresql://das@postgres:5432/support"
+DATASET_ID = 42
+DATASOURCE_LUID = "00000000-0000-4000-8000-00000000luid"
+# The token's bytes depend on the clock and the secret, so both are fixed
+# here. A recorded artefact that changed every run would make the diff CI
+# performs meaningless, and a token nobody can compare is a token no second
+# generator can be held to.
+EXPIRES_AT = 1_800_000_000
+JTI = "00000000-0000-4000-8000-0000000000jt"
+TABLEAU_SECRET = "not-a-real-connected-app-secret"
+CLIENT_ID = "00000000-0000-4000-8000-000000client"
+SECRET_ID = "00000000-0000-4000-8000-000000secret"
 
 CASES: list[dict[str, Any]] = [
     {
@@ -193,6 +205,29 @@ def bindings() -> list[dict]:
     return out
 
 
+def _tableau_token(plan: _plan.Plan) -> dict:
+    """The token's claims AND the signature over them.
+
+    Both, because a header and payload that are right while the signing is
+    wrong is a token Tableau refuses for a reason neither says. `sub` is the
+    asking person -- the property that makes this target `user` tier -- so a
+    change that dropped it must fail a byte comparison rather than only a
+    reading.
+    """
+    header, payload = tableau.claims(
+        client_id=CLIENT_ID,
+        secret_id=SECRET_ID,
+        username="erin@entraemulator.dev",
+        expires_at=EXPIRES_AT,
+        jti=JTI,
+    )
+    return {
+        "header": header,
+        "payload": payload,
+        "signed": tableau.token(secret=TABLEAU_SECRET, header=header, payload=payload),
+    }
+
+
 def canonical(obj) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
@@ -213,7 +248,23 @@ def record() -> dict:
                     "powerbi": {
                         path: canonical(payload)
                         for path, payload in powerbi.artefacts(plan, WORKSPACE, WAREHOUSE).items()
-                    }
+                    },
+                    # Superset renders the Plan as a query rather than a model,
+                    # so what is worth recording is the query it will ask --
+                    # the chart and dataset bodies are that plus ids the server
+                    # assigns.
+                    "superset": {
+                        "chart_data.json": canonical(superset.query_context(plan, DATASET_ID))
+                    },
+                    # Tableau has no container, so NOTHING here has been opened
+                    # by a real Tableau. Recording the bytes is what makes the
+                    # generator reviewable in a diff and stable across changes;
+                    # docs/parity.md is where it says what has not been proved.
+                    "tableau": {
+                        "workbook.twb": canonical(tableau.workbook(plan, DSN)),
+                        "vds_query.json": canonical(tableau.vds_query(plan, DATASOURCE_LUID)),
+                        "connected_app.jwt": canonical(_tableau_token(plan)),
+                    },
                 },
             }
         )

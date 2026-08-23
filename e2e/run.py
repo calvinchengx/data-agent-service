@@ -2096,6 +2096,160 @@ def phase19() -> None:
     )
 
 
+def phase20() -> None:
+    """Tableau, above the tenant line.
+
+    There is no Tableau container and this witness does not pretend there is.
+    What it asserts is everything that is a pure function of the Plan -- the
+    workbook, the query VizQL Data Service will be asked, and the token that
+    names the asking person -- plus the one behaviour that matters while there
+    is no site: that the target REFUSES with a reason a person can read,
+    pointing at the ledger that records what has not been proved.
+
+    A green run here means "the generator produces what we say it produces".
+    It does not mean Tableau works. `docs/parity.md` is where that distinction
+    is written down, and this witness checks that the row exists and still
+    says `not yet`.
+    """
+    import xml.etree.ElementTree as ET
+
+    from promoter.canonical import canonicalise
+    from promoter.title import derive as derive_title
+    from publisher import plan as _plan
+    from publisher.targets import tableau as _tableau
+
+    state = c.load_state()
+    target = _tableau.TableauTarget.from_state(state)
+
+    # The candidate is built here, by the promoter's own canonicaliser, for
+    # the same reason every other phase builds its own: nothing in CI runs the
+    # promoter, and a witness that reads what a manual run left behind reports
+    # the state of someone's laptop.
+    template = canonicalise(
+        "SELECT a.team, AVG(t.resolution_minutes) AS c1 "
+        "FROM support.tickets t JOIN support.agents a ON a.agent_id = t.agent_id "
+        "WHERE t.status = 'open' GROUP BY a.team",
+        "postgres",
+    )
+    candidate = {
+        "title": derive_title(template, {}).text,
+        "source": "contoso_support",
+        "template_sql": template.sql,
+        "dialect": "postgres",
+        "tables": list(template.tables),
+        "measures": list(template.measures),
+        "dimensions": list(template.dimensions),
+        "slot_columns": [s_.column for s_ in template.slots],
+    }
+    columns = {
+        "support.tickets": [
+            {"name": "resolution_minutes", "dataType": "double"},
+            {"name": "status", "dataType": "string"},
+            {"name": "agent_id", "dataType": "int64"},
+        ],
+        "support.agents": [
+            {"name": "team", "dataType": "string"},
+            {"name": "agent_id", "dataType": "int64"},
+        ],
+    }
+    plan = _plan.build(candidate, columns, {"resolution_minutes": "Resolution Time"})
+
+    # No site is configured, and that is the state every CI run is in. It has
+    # to read as "no tenant yet, here is the ledger" -- not as a defect in the
+    # candidate and not as a crash.
+    reason = target.accepts(candidate, state) or ""
+    check(
+        "phase20",
+        "with no Tableau site, the target says so and names the ledger",
+        not target.configured and "no Tableau site configured" in reason and "parity" in reason,
+        reason[:110] or "a target with no site accepted a candidate",
+    )
+
+    # The generator needs none of it. This is the whole reason the phase
+    # splits here rather than waiting for a tenant.
+    twb = target.artefacts(plan)["workbook.twb"]
+    root = ET.fromstring(twb)
+    check(
+        "phase20",
+        "the workbook generates with no tenant at all, and is well-formed XML",
+        root.tag == "workbook" and root.get("version") == _tableau.VERSION,
+        f"{len(twb)} bytes, version {root.get('version')}",
+    )
+
+    # The same security property Superset's virtual dataset has, in a third
+    # spelling: Tableau receives the guarded template as custom SQL, never the
+    # tables behind it.
+    relation = root.find(".//relation")
+    check(
+        "phase20",
+        "the workbook carries the guarded template as custom SQL, not a table",
+        relation is not None
+        and relation.get("type") == "text"
+        and relation.text == plan.comparison_sql,
+        f"relation type={relation.get('type') if relation is not None else 'missing'}",
+    )
+    connection = root.find(".//named-connection/connection")
+    check(
+        "phase20",
+        "the workbook is a live connection carrying no password",
+        connection is not None
+        and connection.get("authentication") == "auth-user"
+        and "password" not in twb.lower(),
+        f"class={connection.get('class') if connection is not None else 'missing'}, live",
+    )
+
+    # `user` tier is a claim about the token, so it is asserted on the token.
+    header, payload = _tableau.claims(
+        client_id="witness-client",
+        secret_id="witness-secret",
+        username="erin@entraemulator.dev",
+        expires_at=1_800_000_000,
+        jti="witness",
+    )
+    signed = _tableau.token(secret="witness-only", header=header, payload=payload)
+    check(
+        "phase20",
+        "the connected-app token names the asking person, which is what makes this user tier",
+        payload["sub"] == "erin@entraemulator.dev"
+        and payload["aud"] == "tableau"
+        and header["kid"] == "witness-secret"
+        and len(signed.split(".")) == 3,
+        f"sub={payload['sub']} scopes={len(payload['scp'])}",
+    )
+
+    # Recorded, so a change to any of it fails a byte diff rather than a
+    # reading. The contract is the only place these artefacts are checked
+    # against anything, because no Tableau can look at them.
+    recorded = json.loads(
+        (
+            pathlib.Path(__file__).resolve().parent.parent / "publisher/contract/cases.json"
+        ).read_text()
+    )
+    tableau_cases = [case for case in recorded["cases"] if "tableau" in case.get("targets", {})]
+    check(
+        "phase20",
+        "every recorded case carries the Tableau artefacts a diff can catch",
+        len(tableau_cases) == len(recorded["cases"])
+        and all(
+            {"workbook.twb", "vds_query.json", "connected_app.jwt"}
+            <= set(case["targets"]["tableau"])
+            for case in tableau_cases
+        ),
+        f"{len(tableau_cases)}/{len(recorded['cases'])} cases",
+    )
+
+    # The honest record. A witness that passed while the ledger claimed
+    # Tableau was proved would be the exact failure this repo keeps finding.
+    parity = (pathlib.Path(__file__).resolve().parent.parent / "docs/parity.md").read_text()
+    row = next((line for line in parity.splitlines() if "Tableau" in line), "")
+    check(
+        "phase20",
+        "docs/parity.md carries a Tableau row and it does NOT claim the live hop",
+        bool(row) and ("not yet" in row.lower() or "no tenant" in row.lower()),
+        row.strip()[:110] or "no Tableau row in the parity ledger",
+    )
+
+
 # ---------------------------------------------------------------- quality --
 def lint_stages(makefile: str) -> tuple[list[str], list[str]]:
     """The stages of `make lint`, and any recipe line this cannot classify.
@@ -2797,6 +2951,7 @@ PHASES = {
     "phase16": phase16,
     "phase17": phase17,
     "phase19": phase19,
+    "phase20": phase20,
 }
 
 MANIFEST = pathlib.Path(__file__).resolve().parents[1] / "docs" / "witnesses.json"
