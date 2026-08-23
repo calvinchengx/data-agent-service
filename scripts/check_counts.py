@@ -37,6 +37,14 @@ TARGETS = ("README.md", "site/index.html", "docs/*.md")
 TOTAL_PATTERNS = (
     re.compile(r"(\d{2,4})/(\d{2,4})\s+witnesses"),
     re.compile(r"(\d{2,4})\s+end-to-end\s+witnesses"),
+    # The landing page states its total as markup, not prose:
+    # `<b>129</b><span>end-to-end witnesses`. The pattern above requires
+    # whitespace between the number and the words, so it matched nothing on
+    # site/index.html -- a file this checker has listed as a TARGET all along.
+    # scripts/badges.py caught the drift instead, but only in the docs
+    # workflow and only after the site built, so it surfaced as a failed
+    # deploy rather than a failed lint.
+    re.compile(r"<b>(\d{2,4})</b><span>\s*end-to-end\s+witnesses"),
     re.compile(r"\*\*(\d{2,4})\s+witnesses\*\*"),
 )
 
