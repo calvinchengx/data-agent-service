@@ -322,10 +322,13 @@ func TestTheGuardRefusesAQueryThatReadsNoTable(t *testing.T) {
 	if _, err := Guard("SELECT 1", p); err == nil {
 		t.Fatal("a query reading no table was accepted")
 	}
-	// A qualified name with no FROM is a mangled clause, and says so.
+	// A qualified name with no FROM reads no table either. The token scan
+	// this guard used to run called that "expected FROM"; the Python guard
+	// has always called it "the query reads no table", and now both do. The
+	// two were only ever different because no shared case covered it.
 	_, err := Guard("SELECT dbo.fct_sales", p)
-	if err == nil || !strings.Contains(err.Error(), "FROM") {
-		t.Fatalf("expected an 'expected FROM' refusal, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "reads no table") {
+		t.Fatalf("expected a 'reads no table' refusal, got %v", err)
 	}
 }
 
