@@ -55,9 +55,29 @@ type Verdict struct {
 	RowLimit int
 }
 
-type DeniedError struct{ msg string }
+type DeniedError struct {
+	msg string
+	// Unsupported names the SQL construct the port could not read, when that
+	// is why this statement was refused, and is empty for every other reason.
+	//
+	// It exists so the refusals can be COUNTED. Which parts of SQL to port
+	// next is a question about the statements callers actually write, and the
+	// alternative to measuring is guessing from a fixture corpus that nobody
+	// sends. See docs/17-sqlglot-go.md.
+	Unsupported string
+}
 
 func (e *DeniedError) Error() string { return e.msg }
+
+// unsupportedConstruct is the label to count this refusal under, or "" when
+// the statement was refused for something other than the parser's reach.
+func unsupportedConstruct(err error) string {
+	var denial *DeniedError
+	if errors.As(err, &denial) {
+		return denial.Unsupported
+	}
+	return ""
+}
 
 func denied(format string, args ...any) error {
 	return &DeniedError{msg: fmt.Sprintf(format, args...)}
@@ -172,7 +192,20 @@ func parseRefusal(err error, p Policy) error {
 	if errors.Is(err, sqlglot.ErrMultipleStatements) {
 		return denied("exactly one statement is allowed")
 	}
-	return denied("could not parse as %s: %v", p.Dialect, err)
+	// The construct rides along on the refusal so the caller can record it.
+	// Its LABEL, not its message: the label is a bounded vocabulary that
+	// counts, where the message carries the offending token and would make
+	// every refusal its own category.
+	refusal := &DeniedError{msg: fmt.Sprintf("could not parse as %s: %v", p.Dialect, err)}
+	var unsupported *sqlglot.UnsupportedError
+	if errors.As(err, &unsupported) {
+		refusal.Unsupported = unsupported.Label()
+	} else {
+		// A tokenizer error, or anything else the port could not read. Still
+		// worth counting, under a name that says it was not the grammar.
+		refusal.Unsupported = "unreadable statement"
+	}
+	return refusal
 }
 
 // statementClass names a statement the way the Python guard names it: after

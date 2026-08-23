@@ -507,8 +507,17 @@ func runQuery(ctx context.Context, src Source, sqlText string, requested int,
 	started := time.Now()
 	verdict, err := Guard(sqlText, src.policy(limit))
 	if err != nil {
-		audit("op", "run_query", "user", p.Name, "source", src.Name, "verdict", "blocked",
-			"reason", err.Error(), "sql", truncate(sqlText, 500))
+		fields := []any{"op", "run_query", "user", p.Name, "source", src.Name,
+			"verdict", "blocked", "reason", err.Error(), "sql", truncate(sqlText, 500)}
+		// What the port could not read, when that is why. A refusal for a
+		// construct is not a bad request from the caller -- it is SQL this
+		// service would answer if the port went further -- and counting these
+		// is how the port's next tier gets decided by the statements people
+		// write rather than by a fixture corpus nobody sends.
+		if construct := unsupportedConstruct(err); construct != "" {
+			fields = append(fields, "unsupported", construct, "dialect", src.policy(limit).Dialect)
+		}
+		audit(fields...)
 		return nil, nil, http.StatusBadRequest, fmt.Errorf("query refused: %w", err)
 	}
 	if err := rules.Check(p.Roles, verdict.Tables, verdict.Columns); err != nil {

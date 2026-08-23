@@ -108,6 +108,36 @@ C (differential fuzzing), Phase D (the Go DuckDB, HTTP and Databricks
 adapters), and Phase E (running the contract against both executors on every
 build), none of which is port work.
 
+### What Tier 2 gets built from
+
+Not from this list. The guard records the construct it could not read, so the
+statements callers actually send decide the order:
+
+```
+audit op=run_query verdict=blocked unsupported="trailing tokens at OVER" dialect=tsql
+audit op=run_query verdict=blocked unsupported="GROUP BY ROLLUP"         dialect=tsql
+```
+
+`unsupported` is present only when the port could not READ the statement --
+SQL this service would answer if the port went further. A write, a second
+statement, a denied function or a table outside the allow-list is refused for
+what it IS, carries no `unsupported` field, and must never be counted as a
+gap: those are the guard working, and mixing them in would make the backlog
+look like abuse. There are tests for both directions.
+
+The label is a bounded vocabulary, safe to group by. It names the construct
+and, where the construct alone would not distinguish two very different jobs,
+the keyword that stopped the parser -- a window function and a `PIVOT` both
+halt at "trailing tokens", and they need entirely different work. It appends
+the token only when the token came out of the dialect's keyword trie, never
+when the caller wrote it, so a refusal on `WHERE email = '...'` cannot put
+that in the aggregation key. `sqlglot-go`'s `UnsupportedError.Label()` owns
+that rule and has a test asserting the leak does not happen.
+
+So the ordering question -- windows before `PIVOT`, or the type grammar before
+either -- is answered by counting, once there is traffic. The fixture corpus
+says what sqlglot can parse; it does not say what anyone asks this service.
+
 ### Tier 2 — everything a SELECT can contain
 
 Window functions, `GROUP BY` extensions, `QUALIFY`, `PIVOT`/`UNPIVOT`,
