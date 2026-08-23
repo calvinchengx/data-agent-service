@@ -33,6 +33,7 @@ import tempfile
 import time
 
 from agent import agent as agent_mod
+from agent import grounding
 from seed import common as c
 
 # Claude Code names an MCP tool `mcp__<server>__<tool>`; the eval scores on
@@ -240,6 +241,27 @@ def _tool_calls(events: list[dict]) -> list[agent_mod.ToolCall]:
     return calls
 
 
+def _system_prompt(token: str, *, om: bool, prefetch: bool) -> str:
+    """The prompt this arm hands the CLI.
+
+    §21 unit 2's prefetch is assembled in `agent.ask`, which this path does not
+    go through -- it drives the CLI's own loop over our MCP servers. So the
+    schema is fetched the same way, through the same gateway under the same
+    caller, and appended here. Without this the prefetch arm would run the
+    baseline prompt and report a delta of ZERO, which is indistinguishable
+    from "the prefetch does not help" and is the more flattering reading of
+    the two.
+    """
+    base = agent_mod.system_prompt()
+    if not prefetch:
+        return base
+    grounding.clear()
+    text = grounding.schema_text(
+        agent_mod.build_toolbox(token, om=om), subject=agent_mod.identity_of(token)
+    )
+    return f"{base}\n\n{text}" if text else base
+
+
 def ask(
     question: str,
     token: str,
@@ -247,6 +269,7 @@ def ask(
     om: bool = True,
     catalog: str = "full",
     naive: bool = False,
+    prefetch: bool = False,
     model: str = "",
     effort: str = "",
     timeout: int = 300,
@@ -272,6 +295,7 @@ def ask(
                 om=om,
                 catalog=catalog,
                 naive=naive,
+                prefetch=prefetch,
                 model=model,
                 effort=effort,
                 timeout=timeout,
@@ -297,6 +321,7 @@ def _ask_once(
     om: bool = True,
     catalog: str = "full",
     naive: bool = False,
+    prefetch: bool = False,
     model: str = "",
     effort: str = "",
     timeout: int = 300,
@@ -326,7 +351,7 @@ def _ask_once(
             "--allowedTools",
             " ".join(allowed),
             "--system-prompt",
-            NAIVE_PROMPT if naive else agent_mod.system_prompt(),
+            NAIVE_PROMPT if naive else _system_prompt(token, om=om, prefetch=prefetch),
         ]
         if model:
             cmd += ["--model", model]

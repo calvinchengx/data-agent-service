@@ -30,7 +30,7 @@ import time
 from typing import Any
 
 from agent import agent as agent_mod
-from agent import identity
+from agent import grounding, identity
 from agent import skills as skills_mod
 from evals import claude_code_agent, stats
 from evals import score as scoring
@@ -345,6 +345,7 @@ def run(
     om: bool,
     catalog: str = "full",
     naive: bool = False,
+    prefetch: bool = False,
     repeats: int,
     tier: str | None,
     user: str,
@@ -352,6 +353,11 @@ def run(
     effort: str,
 ) -> list[Result]:
     questions = load_questions(usecase, tier)
+    # Arms must not inherit each other's prefetched schema. Two arms differing
+    # only in this switch would otherwise share one cache entry and the second
+    # would measure the first -- a delta of zero that reads as "no effect".
+    grounding.clear()
+    os.environ["DAS_GROUNDING_PREFETCH"] = "true" if prefetch else "false"
     connections = GoldConnections()
     results: list[Result] = []
     for question in questions:
@@ -371,6 +377,7 @@ def run(
                     om=om,
                     catalog=catalog,
                     naive=naive,
+                    prefetch=prefetch,
                     model=model,
                     effort=effort,
                 )
@@ -484,7 +491,9 @@ def _phase_totals(results: list[Result]) -> dict[str, int]:
     return dict(sorted(out.items(), key=lambda kv: -kv[1]))
 
 
-def fingerprint(usecase: str, model: str, effort: str, om: bool, agent_kind: str) -> dict:
+def fingerprint(
+    usecase: str, model: str, effort: str, om: bool, agent_kind: str, prefetch: bool = False
+) -> dict:
     prompt = (pathlib.Path(agent_mod.HERE) / "prompt.md").read_bytes()
     # What THIS run read, not what the file says now.
     questions_sha, questions_n = _QUESTIONS_READ.get(usecase, ("unread", 0))
@@ -499,6 +508,11 @@ def fingerprint(usecase: str, model: str, effort: str, om: bool, agent_kind: str
         "model": model,
         "effort": effort,
         "catalog": om,
+        # §21 unit 2. Recorded because the prefetch arm and the baseline arm
+        # differ in nothing else a fingerprint captures -- same prompt file,
+        # same skills, same questions -- so without this a report cannot say
+        # which arm it is describing.
+        "grounding_prefetch": prefetch,
         "prompt_sha256": hashlib.sha256(prompt).hexdigest()[:12],
         "questions_sha256": questions_sha,
         # The count too: two different sets can only be told apart by a hash if
@@ -506,6 +520,50 @@ def fingerprint(usecase: str, model: str, effort: str, om: bool, agent_kind: str
         "questions_n": questions_n,
         "skills": skills_mod.fingerprint(loaded),
     }
+
+
+Arm = tuple[str, bool, str, bool, bool]
+
+
+def arms(a: Any) -> list[Arm]:
+    """The arms this invocation will run, in the order they are compared.
+
+    Extracted from `main` so it can be asserted without running an eval: an
+    arm placed in the wrong position is compared against the wrong baseline,
+    and the number that comes out is wrong rather than missing.
+    """
+    # (label, catalog server present, catalog content, naive prompt, prefetch)
+    runs: list[tuple[str, bool, str, bool, bool]] = []
+    if a.ablation:
+        runs = [
+            ("with catalog", True, "full", False, False),
+            ("without catalog", False, "full", False, False),
+        ]
+        if a.schema_arm:
+            # Inserted between the two, because that is where it sits
+            # conceptually: same tools as the full arm, same absence of meaning
+            # as the empty one.
+            runs.insert(1, ("schema only", True, "schema", False, False))
+        if a.floor:
+            runs.append(("naive floor", False, "full", True, False))
+    else:
+        runs = [
+            (
+                "without catalog" if a.no_context else "with catalog",
+                not a.no_context,
+                "full",
+                a.naive,
+                False,
+            )
+        ]
+
+    # The prefetch arm differs from the baseline in ONE switch, and is placed
+    # immediately after it so the paired comparison below reads
+    # prefetch-against-baseline rather than prefetch-against-an-ablation.
+    if a.prefetch_arm:
+        base = runs[0]
+        runs.insert(1, ("prefetched schema", base[1], base[2], base[3], True))
+    return runs
 
 
 def main() -> int:
@@ -537,6 +595,13 @@ def main() -> int:
         help="add a naive-prompt arm, to bound the bottom of the scale",
     )
     ap.add_argument("--naive", action="store_true", help="use the naive prompt for a single run")
+    ap.add_argument(
+        "--prefetch-arm",
+        action="store_true",
+        help="add an arm identical to the first except that the schema is read up "
+        "front (DAS_GROUNDING_PREFETCH), so the delta isolates §21 unit 2: same "
+        "catalog, same questions, same prompt file -- one fewer model turn per table",
+    )
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--tier", default=None)
     ap.add_argument("--user", default=DEFAULT_USER)
@@ -545,26 +610,7 @@ def main() -> int:
     ap.add_argument("--env", default=os.environ.get("DAS_ENV", "local"))
     a = ap.parse_args()
 
-    # (label, catalog server present, catalog content, naive prompt)
-    runs: list[tuple[str, bool, str, bool]] = []
-    if a.ablation:
-        runs = [("with catalog", True, "full", False), ("without catalog", False, "full", False)]
-        if a.schema_arm:
-            # Inserted between the two, because that is where it sits
-            # conceptually: same tools as the full arm, same absence of meaning
-            # as the empty one.
-            runs.insert(1, ("schema only", True, "schema", False))
-        if a.floor:
-            runs.append(("naive floor", False, "full", True))
-    else:
-        runs = [
-            (
-                "without catalog" if a.no_context else "with catalog",
-                not a.no_context,
-                "full",
-                a.naive,
-            )
-        ]
+    runs = arms(a)
 
     report: dict[str, Any] = {"usecase": a.usecase, "agent": a.agent, "runs": {}}
 
@@ -585,7 +631,7 @@ def main() -> int:
         _report_path(args).write_text(json.dumps(report, indent=1) + "\n")
 
     started_at = int(time.time())
-    for label, om, catalog, naive in runs:
+    for label, om, catalog, naive, prefetch in runs:
         print(f"\n{label}")
         results = run(
             a.usecase,
@@ -593,6 +639,7 @@ def main() -> int:
             om=om,
             catalog=catalog,
             naive=naive,
+            prefetch=prefetch,
             repeats=a.repeats,
             tier=a.tier,
             user=a.user,
@@ -601,7 +648,7 @@ def main() -> int:
         )
         summary = summarise(results)
         report["runs"][label] = {
-            "fingerprint": fingerprint(a.usecase, a.model, a.effort, om, a.agent),
+            "fingerprint": fingerprint(a.usecase, a.model, a.effort, om, a.agent, prefetch),
             "summary": summary,
             "results": [
                 {
@@ -636,8 +683,8 @@ def main() -> int:
         )
 
     if a.ablation and len(report["runs"]) >= 2:
-        arms = list(report["runs"])
-        base = arms[0]
+        ordered = list(report["runs"])
+        base = ordered[0]
 
         def votes(arm: str, metric: str | None = None) -> dict[str, bool]:
             """One verdict per QUESTION, by majority across repeats.
@@ -659,7 +706,7 @@ def main() -> int:
             return {q: sum(v) > len(v) / 2 for q, v in tally.items()}
 
         comparisons = {}
-        for other in arms[1:]:
+        for other in ordered[1:]:
             summary_first = report["runs"][base]["summary"]
             summary_other = report["runs"][other]["summary"]
             delta = {}

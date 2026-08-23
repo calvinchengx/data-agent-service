@@ -350,14 +350,42 @@ was always this weak. What makes the catalog's importance credible today is not
 the ablation but the **flip itself** (item 2): a property of the data, verified
 across ten seeds, that needs no model to demonstrate.
 
-### The four arms, and what each one isolates
+### The arms, and what each one isolates
 
 | Arm | Catalog server | Descriptions | Prompt | Isolates |
 |---|---|---|---|---|
 | with catalog | yes | yes | ours | the deployed system |
+| **prefetched schema** | yes | yes | ours **+ the schema** | §21 unit 2: what a model TURN per table costs |
 | schema only | yes | **emptied** | ours | what the PROSE is worth |
 | without catalog | no | — | ours | what the catalog as a whole is worth |
 | naive floor | no | — | minimal | what the score is when nothing helps |
+
+The first four measure ACCURACY and differ in what the agent knows. The
+prefetch arm is the odd one: it measures LATENCY and the agent knows exactly
+the same things, because the schema it is handed is the schema
+`list_tables` and `describe_table` would have returned anyway. The number to
+read there is `hops_median` and `phase_ms_total`, not the pass rate — and the
+pass rate not moving is part of the claim, since a speed-up that cost
+accuracy is not a speed-up.
+
+```sh
+make eval ARGS="--prefetch-arm"              # baseline, then the same with it on
+make eval-cli ARGS="--prefetch-arm"          # the same, no API key needed
+```
+
+`--prefetch-arm` is placed immediately after the first arm on purpose: every
+later arm is paired against `runs[0]`, so this reads
+prefetch-against-baseline rather than prefetch-against-an-ablation. The two
+differ in one switch, and `fingerprint.grounding_prefetch` records which is
+which — without it the report would hold two identical fingerprints for two
+different runs.
+
+**It applies to both agents.** `agent/agent.py` assembles the schema as a
+second cached system block; the `claude-code` arm has no such loop, so
+`evals/claude_code_agent.py` fetches the same text and appends it to the
+`--system-prompt` it hands the CLI. Skipping that would have run the baseline
+prompt twice and reported a delta of zero — indistinguishable from "the
+prefetch does not help", and the more flattering of the two readings.
 
 The middle arm is the one that took building. The original ablation removes the
 catalog *server*, which removes knowledge and tool surface together — so its

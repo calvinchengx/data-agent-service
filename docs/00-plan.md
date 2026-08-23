@@ -655,6 +655,19 @@ stale copy it does not say is stale.
 **2 needs Step 0 first.** `DAS_EFFORT=high` runs on all seven hops including
 "read this result and say it in a sentence".
 
+**Lever 1 is built and measurable, and not yet measured.**
+`DAS_GROUNDING_PREFETCH` is off by default, and `--prefetch-arm` adds an arm
+identical to the baseline in that one switch, on either agent:
+
+```sh
+make eval ARGS="--prefetch-arm"       # needs a key
+make eval-cli ARGS="--prefetch-arm"   # does not
+```
+
+Read `hops_median` and `phase_ms_total` — and the pass rate holding, because
+a speed-up bought with accuracy is not one. Nothing here claims a number
+until that has run.
+
 ### The fast path, and the seam it needs
 
 The promoter already reduces a recurring question to a literal-free template
