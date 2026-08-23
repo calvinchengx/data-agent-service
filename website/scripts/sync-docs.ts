@@ -115,6 +115,7 @@ function writeIndex(): void {
     `- [Architecture](03-architecture.md) — what each component is for\n` +
     `- [MCP clients](09-mcp-clients.md) — connect Claude, Cursor or VS Code with no custom code\n` +
     `- [Authorization](05-authorization.md) — how one user sees different rows than another\n` +
+    `- [Classification](19-classification.md) — how a sensitivity label in OpenMetadata becomes a withheld column\n` +
     `- [Running against real Azure](10-production.md) — what changes, and what does not\n\n` +
     `## How claims are checked\n\n` +
     `- [Evaluation](07-evaluation.md) — does the catalog change the answer?\n` +
