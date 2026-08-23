@@ -167,6 +167,52 @@ jobs:
           go test -run=XXX -fuzz=FuzzCanonicalIsAFixedPoint -fuzztime=40s .
           go test -run=XXX -fuzz=FuzzTableOfNeverGuesses -fuzztime=40s .
 
+  # The DuckDB adapter is behind `-tags duckdb`, so the job above never
+  # compiles it. Without this one the adapter would be written, asserted, and
+  # exercised by nothing -- and its read-only test would run only where someone
+  # happens to have libduckdb installed, which is the state of a laptop rather
+  # than of the code.
+  go-duckdb:
+    name: Go executor (DuckDB adapter)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/warehouse-query-go
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: services/warehouse-query-go/go.mod
+          cache-dependency-path: services/warehouse-query-go/go.sum
+      - name: libduckdb
+        working-directory: .
+        env:
+          DUCKDB_VERSION: v1.5.4
+        run: |
+          curl -sSfL "https://github.com/duckdb/duckdb/releases/download/${DUCKDB_VERSION}/libduckdb-linux-amd64.zip" -o /tmp/libduckdb.zip
+          sudo unzip -j -o /tmp/libduckdb.zip libduckdb.so -d /usr/local/lib
+          sudo ldconfig
+      - run: go vet -tags duckdb ./...
+      # The tests skip themselves when libduckdb cannot be loaded, which is the
+      # right behaviour locally and useless here: a job that lets them skip
+      # would report success having proved nothing. So a skip is a failure.
+      - name: the DuckDB tests run rather than skip
+        run: |
+          set -o pipefail
+          go test -tags duckdb -run DuckDB -v ./... 2>&1 | tee /tmp/duckdb.log
+          if grep -q '^--- SKIP' /tmp/duckdb.log; then
+            echo "::error::a DuckDB test skipped — libduckdb was not loaded, so this job proved nothing"
+            exit 1
+          fi
+          grep -c '^--- PASS' /tmp/duckdb.log
+      - run: go test -tags duckdb ./...
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.1
+          working-directory: services/warehouse-query-go
+          args: --build-tags duckdb
+
   infra:
     name: Infrastructure compiles
     runs-on: ubuntu-latest
