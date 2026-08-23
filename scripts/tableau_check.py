@@ -115,7 +115,14 @@ def main() -> int:
         )
 
     print(f"  site      {target.site}  (site id {target.site_id or '<Default>'})")
-    print(f"  app       client {target.client_id}  secret {target.secret_id}")
+    # "secret id" is Tableau's own label for it, and it is an IDENTIFIER: it
+    # travels in the clear as the JWT `kid` header on every token we sign
+    # (publisher/targets/tableau.py). The signing key is `secret_ref`,
+    # which this command refuses to accept unless it is a vault reference.
+    print(
+        f"  app       client {target.client_id}  secret id {target.secret_id}"
+        "  (an identifier, not the key)"
+    )
 
     try:
         jwt = target.bearer(

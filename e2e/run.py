@@ -1974,16 +1974,28 @@ def phase19() -> None:
     resolved = ""
     if sup is not None:
         resolved = sup.secret(sup.password_ref)
+    # A `keyvault:` reference is a NAME and safe to print. A literal is the
+    # password itself -- and `vaultref.resolve` returns a literal unchanged, so
+    # `resolved` is truthy for one too. Printing `password_ref` therefore
+    # printed the password, to stdout and into the CI log, in exactly the
+    # misconfiguration this witness exists to catch. The detail reports the
+    # SHAPE of the value and never the value.
+    is_ref = sup is not None and sup.password_ref.startswith("keyvault:")
+    if sup is None:
+        detail = "no superset target is configured"
+    elif not is_ref:
+        detail = "DAS_SUPERSET_PASSWORD is a literal, not a `keyvault:` reference (value withheld)"
+    elif not resolved:
+        detail = f"{sup.password_ref} did not resolve"
+    elif resolved == sup.password_ref:
+        detail = f"{sup.password_ref} resolved to itself -- the vault did not answer"
+    else:
+        detail = f"{sup.password_ref} -> {len(resolved)} chars from the vault"
     check(
         "phase19",
         "the superset credential is a vault reference that resolves",
-        sup is not None
-        and sup.password_ref.startswith("keyvault:")
-        and bool(resolved)
-        and resolved != sup.password_ref,
-        f"{sup.password_ref} -> {len(resolved)} chars from the vault"
-        if sup and resolved
-        else "not configured, or the reference did not resolve",
+        is_ref and bool(resolved) and resolved != sup.password_ref,
+        detail,
     )
     if sup is None:
         return
