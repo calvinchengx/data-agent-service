@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -183,5 +184,66 @@ func TestTheRouterReachesDuckDB(t *testing.T) {
 func TestReadOnlyDSN(t *testing.T) {
 	if got := readOnlyDSN("/data/w.duckdb"); got != "/data/w.duckdb?access_mode=READ_ONLY" {
 		t.Errorf("readOnlyDSN = %q", got)
+	}
+}
+
+func TestDuckDBWithNoAllowedSchemasListsNothing(t *testing.T) {
+	src, ok := duckdbSource(t)
+	if !ok {
+		t.Skip("no DuckDB library available")
+	}
+	src.Schemas = nil
+	tables, err := NewDuckDBBackend().ListTables(context.Background(), src, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tables) != 0 {
+		t.Errorf("a source with no allowed schema listed %d tables", len(tables))
+	}
+	// And describe falls back to a sensible schema name rather than an empty one.
+	if _, err := NewDuckDBBackend().Describe(context.Background(), src, "tickets", ""); err == nil {
+		t.Error("described a table with no schema allowed")
+	}
+}
+
+// Every path out of the adapter that is not the happy one. A source pointing
+// at a file that is not a database, and a statement the engine refuses: both
+// must come back as errors rather than as an empty result that reads like
+// "no rows".
+func TestDuckDBReportsFailuresRatherThanEmptyResults(t *testing.T) {
+	if _, ok := duckdbSource(t); !ok {
+		t.Skip("no DuckDB library available")
+	}
+	backend := NewDuckDBBackend()
+	junk := filepath.Join(t.TempDir(), "not-a-database.duckdb")
+	if err := os.WriteFile(junk, []byte("this is not a duckdb file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	broken := Source{Name: "junk", Kind: "duckdb", Schemas: []string{"main"}, Path: junk}
+
+	ctx := context.Background()
+	if _, err := backend.ListTables(ctx, broken, ""); err == nil {
+		t.Error("listed tables from a file that is not a database")
+	}
+	if _, err := backend.Describe(ctx, broken, "main.tickets", ""); err == nil {
+		t.Error("described a table in a file that is not a database")
+	}
+	if _, err := backend.Run(ctx, broken, &Verdict{SQL: "SELECT 1", RowLimit: 1}, ""); err == nil {
+		t.Error("ran a statement against a file that is not a database")
+	}
+
+	// A statement the engine rejects, against a database that is fine.
+	src, _ := duckdbSource(t)
+	if _, err := backend.Run(ctx, src, &Verdict{SQL: "SELECT * FROM main.absent", RowLimit: 1}, ""); err == nil {
+		t.Error("a statement naming a table that does not exist returned no error")
+	}
+}
+
+func TestFirstOr(t *testing.T) {
+	if got := firstOr([]string{"main", "other"}, "fallback"); got != "main" {
+		t.Errorf("firstOr = %q", got)
+	}
+	if got := firstOr(nil, "fallback"); got != "fallback" {
+		t.Errorf("firstOr on an empty list = %q", got)
 	}
 }
