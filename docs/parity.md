@@ -34,6 +34,8 @@ same check has been watched passing against a real tenant.
 | An organisation's own classification is not a second-class vocabulary | 🟢 | `e2e.run` phase18 | not yet |
 | The executor refuses to serve when tags are configured and the catalog has never been read | 🟢 | `tests/test_access_tags.py`, `tagindex_test.go` | not yet — and a real tenant is where a slow or throttled catalog would actually be met |
 | A denial can be traced to the rule or the tag that caused it | 🟢 | `list_sources` → `yourRestrictions` | not yet |
+| The ask contract holds — a ticket before any tool call, a lossless event stream, three distinct terminal outcomes, and a cancel | 🟢 transport only, model stubbed | `make conformance-ask` — 24/24 direct **and** 24/24 through the gateway | not yet — and there is no terraform module for the service, so this one is further from a tenant than the rows around it |
+| The ask service's behaviour — a refusal is never an answer, an abstention carries search terms and no question, a catalog-only answer runs no SQL, a follow-up resolves against the conversation | 🔴 **not run** — needs a model key | `make conformance-ask ASK_LLM=real ARGS=--behaviour` | not yet |
 | A promoted dashboard is published under the asker's identity, and a viewer cannot | 🟢 | `e2e.run` phase16 | not yet |
 | A promoted dashboard reaches a SECOND tool with no per-user identity, bounded by the template | 🟢 | `e2e.run` phase19 (Superset) | not yet |
 | The Tableau **workbook generator** — `.twb`, the VDS query, the connected-app token | 🟢 | `e2e.run` phase20, `publisher/contract/cases.json` | not yet |
