@@ -84,7 +84,16 @@ or `make stack` to do the whole bring-up from nothing, which is what CI runs.
 
 ## Emulator family
 
-Built on [entra-emulator](https://github.com/calvinchengx/entra-emulator), [azure-keyvault-emulator](https://github.com/calvinchengx/azure-keyvault-emulator), [arm-emulator](https://github.com/calvinchengx/arm-emulator), [fabric-emulator](https://github.com/calvinchengx/fabric-emulator), [azure-apim-emulator](https://github.com/calvinchengx/azure-apim-emulator); composed per [azure-emulators](https://github.com/calvinchengx/azure-emulators). Tier: leaf.
+Built on [entra-emulator](https://github.com/calvinchengx/entra-emulator), [azure-keyvault-emulator](https://github.com/calvinchengx/azure-keyvault-emulator), [arm-emulator](https://github.com/calvinchengx/arm-emulator), [fabric-emulator](https://github.com/calvinchengx/fabric-emulator), [azure-apim-emulator](https://github.com/calvinchengx/azure-apim-emulator); composed per [azure-emulators](https://github.com/calvinchengx/azure-emulators).
+
+[data-agent-voice](https://github.com/calvinchengx/data-agent-voice) is the voice
+front end over this service: it consumes this MCP surface, and every question
+still runs as the asking user. Its
+[ledger](https://calvinchengx.github.io/data-agent-voice/docs/parity/) and this
+one answer adjacent questions, so a claim about the whole path is only as strong
+as the weaker of the two.
+
+Tier: intermediate — emulates nothing, and is consumed by `data-agent-voice`.
 
 ## License
 
