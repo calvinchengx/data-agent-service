@@ -110,6 +110,63 @@ this the only way to reach them was to write the secret into `DAS_SOURCES`.
 `e2e.run` quality asserts that no source's password appears in any file in
 this repository.
 
+## Consuming a published data product
+
+The emulator family publishes Contoso as a data product from several
+platforms — Fabric, Databricks, Snowflake. Consuming one is a `DAS_SOURCES`
+entry plus a credential, and this is the configuration that was tried against
+a running `databricks-platform-jobs` with the `contoso-data-product-databricks-jobs`
+product built into it:
+
+```json
+{"name": "contoso_gold", "kind": "databricks", "dialect": "databricks",
+ "authz_tier": "service", "om_service_fqn": "contoso-databricks",
+ "host": "http://host.docker.internal:18470", "warehouse_id": "wh-1",
+ "catalog": "contoso", "database": "gold", "schemas": ["gold"],
+ "credential": "keyvault:contoso-databricks-pat"}
+```
+
+`host.docker.internal` because the product's stack is a different compose
+project on the same host; in Azure it is the workspace URL.
+
+**What that run proved.** The product's PAT, put in *our* Key Vault, was
+resolved by the executor's own managed identity, reached the product's
+workspace, and authenticated: statements executed and returned `SUCCEEDED`.
+The source appeared in `list_sources` alongside the Fabric warehouse and the
+support database. `authz_tier: service` is the honest tier — the workspace
+has no Entra trust with our tenant and cannot tell our callers apart, so
+per-user authorization rests on the gateway's roles and `DAS_ACCESS_RULES`,
+and every audit line says `authz_tier=service credential=stored`.
+
+**What it did not prove, and why not.** No rows came back. The emulator
+returns a successful statement's rows as a JSON string at `result.text` with
+no `manifest.schema`, where the documented Statement Execution API returns
+`result.data_array` and `manifest.schema.columns` — so the adapter, which is
+written against the documented API, reads zero columns and zero rows from a
+response that contains `[[119]]`. Two smaller gaps sit behind it:
+`information_schema.tables` is a stub that returns no rows, and a two-part
+`schema.table` name is not resolved against the request's catalog.
+`docs/upstream-issues.md` 12–14 carry the repros.
+
+**The catalog half is blocked separately.** The product registers its domain,
+its databaseService and its six metrics in its own OpenMetadata, and records
+`contoso-databricks.contoso.gold.fct_revenue_summary` in `catalog.json` — but
+creates no database, schema or table entity, so nothing resolves at that FQN
+and `GET /api/v1/tables` is empty (`docs/upstream-issues.md` 15). A consumer
+grounding on that catalog would find the service and nothing under it. Note
+that this is independent of the one-catalog question: `om_service_fqn` on a
+source already points at whichever service holds a product's tables, so
+several products in one catalog need no code — they need the tables to be
+there.
+
+Parsing `result.text` would make this work locally and would be a shape real
+Databricks never emits — the emulator-only path
+`scripts/check_prod_paths.py --strict` exists to forbid. So Databricks stays
+**unwitnessed** for the data path: the credential half is proved, the reading
+half waits on the emulator or on a real workspace. No witness was added to
+`e2e.run` for it, because a witness needing a second stack cannot run in CI,
+and a witness that cannot run witnesses nothing.
+
 ## What the second source found, within minutes
 
 Both of these were live defects that one engine could never have surfaced:
