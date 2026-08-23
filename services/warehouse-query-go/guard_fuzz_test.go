@@ -79,6 +79,26 @@ func FuzzGuardedStatementsKeepTheirPromises(f *testing.F) {
 			}
 		}
 
+		// 3b. And nothing may be reported that the engine will NOT read. The
+		// converse of the rule above, and a different bug: a permissive guard
+		// is an inconvenience, an audit line claiming a read that never
+		// happened is a false record in a compliance trail. `SELECT 1 JOIN
+		// dbo.a` violated this one while satisfying the other.
+		actuallyRead := map[string]bool{}
+		for _, table := range tree.FindAll("Table") {
+			if ctes[strings.ToLower(table.This().Name())] {
+				continue
+			}
+			_, schema, bare := tableName(table)
+			actuallyRead[strings.ToLower(schema+"."+bare)] = true
+		}
+		for _, name := range verdict.Tables {
+			if !actuallyRead[strings.ToLower(name)] {
+				t.Fatalf("permitted %q and reported reading %s, which the statement does not read\n  %q\n  the audit line would record a read that never happened",
+					sql, name, verdict.SQL)
+			}
+		}
+
 		// 4. Every reported table is somewhere the policy allows.
 		for _, name := range verdict.Tables {
 			schema, _, found := strings.Cut(name, ".")
