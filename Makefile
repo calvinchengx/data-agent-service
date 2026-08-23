@@ -122,6 +122,14 @@ guard-corpus: ## Re-record the Python guard's verdict on every contract statemen
 conformance: ## The executor contract, against BOTH implementations in turn
 	@$(MAKE) --no-print-directory conformance-one DAS_EXECUTOR=py
 	@$(MAKE) --no-print-directory conformance-one DAS_EXECUTOR=go
+	# Put the stack back, the way `load-compare` already does. Leaving it on go
+	# broke the witnesses that run AFTER this in CI: the Go executor has no HTTP
+	# surface (D2 is not built), so phase17 saw surface=None on every source and
+	# no operations at all. Nothing was wrong with the witnesses -- they were
+	# pointed at the wrong binary by whatever ran before them.
+	@echo "== restoring the python executor"
+	$(COMPOSE) up -d --build --force-recreate --wait warehouse-query
+	$(PY) -m load.run --assert-executor py
 
 conformance-one: ## The contract against one implementation (DAS_EXECUTOR=py|go)
 	# --force-recreate because `up -d --build` leaves the OLD container running
@@ -211,6 +219,12 @@ witnesses-manifest: ## Record this run's witness counts into docs/witnesses.json
 	$(TOOLS) python -m e2e.run --write-manifest $(ARGS)
 
 witnesses-check: ## Fail if docs/witnesses.json disagrees with a real run
+	# Say which executor this needs rather than inheriting whatever the last
+	# target left running. phase17 exercises the HTTP surface, which only the
+	# Python executor has, and the dependency used to be POSITIONAL -- true
+	# only while nobody reordered the steps above it. Someone did, and the
+	# witnesses reported a missing surface as their own failure.
+	$(PY) -m load.run --assert-executor py
 	$(TOOLS) python -m e2e.run --check-manifest $(ARGS)
 
 # The docs site is the one toolchain with two entry points, and the reason is
