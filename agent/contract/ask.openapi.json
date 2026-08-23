@@ -1,0 +1,182 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ask",
+    "description": "Asynchronous questions over governed data: a ticket now, a stream of structured events, an answer when there is one. The contract the agent serves; the executor contract is services/contract/openapi.json and is a different thing with a different implementer. Reached through the gateway with the USER's bearer, like every other surface.",
+    "version": "1"
+  },
+  "servers": [
+    { "url": "https://{gateway}/ask", "variables": { "gateway": { "default": "localhost:8446" } } }
+  ],
+  "security": [{ "bearer": [] }],
+  "paths": {
+    "/v1/conversations": {
+      "post": {
+        "operationId": "open_conversation",
+        "summary": "Open a conversation to ask within",
+        "description": "A conversation holds the turns so a later ask can say \"that team\". History lives in memory for DAS_ASK_TTL_S after the last ask and is never persisted; the question text exists nowhere else in the service. A conversation with a single ask is the one-shot case and costs nothing extra.",
+        "responses": {
+          "201": {
+            "description": "Opened",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Conversation" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" }
+        }
+      }
+    },
+    "/v1/conversations/{conversation_id}/asks": {
+      "parameters": [{ "$ref": "#/components/parameters/conversation_id" }],
+      "post": {
+        "operationId": "ask",
+        "summary": "Ask a question; get a ticket before any tool call runs",
+        "description": "Returns as soon as the ticket exists. The run starts after the response is sent, so a client that opens the event stream immediately sees `accepted` as seq 1 and misses nothing. One ask at a time per conversation: a second while one is running is 409.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AskRequest" },
+              "examples": {
+                "one": { "value": { "question": "Which support team resolves tickets fastest?" } },
+                "ablation": { "value": { "question": "Which support team resolves tickets fastest?", "context": false } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted; the run has not started",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Ticket" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotYours" },
+          "409": { "description": "An ask is already running in this conversation" },
+          "422": { "description": "No question" }
+        }
+      }
+    },
+    "/v1/asks/{ticket}/events": {
+      "parameters": [
+        { "$ref": "#/components/parameters/ticket" },
+        {
+          "name": "Last-Event-ID",
+          "in": "header",
+          "required": false,
+          "schema": { "type": "integer", "minimum": 0 },
+          "description": "The last `seq` received. The stream resumes at seq+1 with no gap; 0 or absent replays from the start. The stream is lossless within DAS_ASK_TTL_S of the terminal event, except that `step` events may be dropped when the retained buffer exceeds DAS_ASK_MAX_EVENTS."
+        }
+      ],
+      "get": {
+        "operationId": "events",
+        "summary": "The ticket's events, as Server-Sent Events",
+        "description": "Each frame is `id: <seq>` and `event: <type>` with one JSON object in `data:` conforming to events.schema.json. The stream closes after `done`. A reconnect after `done` replays and closes again until the ticket expires. Keep-alive comments are sent every 15s while a run is quiet.",
+        "responses": {
+          "200": {
+            "description": "The stream",
+            "content": { "text/event-stream": { "schema": { "type": "string" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotYours" },
+          "410": { "description": "The ticket has expired; its events are gone" }
+        }
+      }
+    },
+    "/v1/asks/{ticket}": {
+      "parameters": [{ "$ref": "#/components/parameters/ticket" }],
+      "get": {
+        "operationId": "ask_state",
+        "summary": "The ticket's terminal state, for clients without SSE",
+        "responses": {
+          "200": {
+            "description": "Running or finished",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AskState" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotYours" },
+          "410": { "description": "Expired" }
+        }
+      }
+    },
+    "/v1/asks/{ticket}/cancel": {
+      "parameters": [{ "$ref": "#/components/parameters/ticket" }],
+      "post": {
+        "operationId": "cancel",
+        "summary": "Stop the run",
+        "description": "Guarantees: no event but `error{kind: cancelled}` and `done` follows, and no further model call is made. Does NOT guarantee that no further tool call completes: one already in flight to the executor finishes, and its audit line exists. That is acceptable because every tool is read-only and nothing needs compensating; the contract states it rather than implies it. Idempotent; cancelling a finished ticket is 202 and changes nothing.",
+        "responses": {
+          "202": { "description": "Cancel requested, or already finished" },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "404": { "$ref": "#/components/responses/NotYours" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "The USER's token for api://data-agent-service, validated against the tenant's JWKS exactly as the executor validates it. Every tool call the run makes carries this same token, so the sources apply this user's permissions, and a token that expires mid-run fails the next tool call rather than anything here. A ticket and a conversation belong to the `oid` that created them."
+      }
+    },
+    "parameters": {
+      "conversation_id": { "name": "conversation_id", "in": "path", "required": true, "schema": { "type": "string" } },
+      "ticket": { "name": "ticket", "in": "path", "required": true, "schema": { "type": "string" } }
+    },
+    "responses": {
+      "Unauthenticated": { "description": "No bearer, or one that does not validate" },
+      "NotYours": { "description": "Not found — also the answer for a ticket or conversation that exists but belongs to another identity, so existence leaks nothing" }
+    },
+    "schemas": {
+      "Conversation": {
+        "type": "object",
+        "required": ["conversation_id", "expires_at"],
+        "properties": {
+          "conversation_id": { "type": "string" },
+          "expires_at": { "type": "string", "format": "date-time", "description": "Extended by every ask." }
+        }
+      },
+      "AskRequest": {
+        "type": "object",
+        "required": ["question"],
+        "additionalProperties": false,
+        "properties": {
+          "question": { "type": "string", "minLength": 1 },
+          "context": {
+            "type": "boolean",
+            "default": true,
+            "description": "false is the ablation: the same agent with no access to the catalog. Exists so the evals can drive this surface as they drive the library."
+          },
+          "model": { "type": "string", "description": "Overrides DAS_MODEL for this ask. Recorded in `done`." },
+          "effort": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "Overrides DAS_EFFORT. Recorded in `done`." }
+        }
+      },
+      "Ticket": {
+        "type": "object",
+        "required": ["ticket", "conversation_id", "turn", "seq", "expires_at"],
+        "properties": {
+          "ticket": { "type": "string" },
+          "conversation_id": { "type": "string" },
+          "turn": { "type": "integer", "minimum": 1 },
+          "seq": { "type": "integer", "const": 0, "description": "Nothing has been emitted yet." },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AskState": {
+        "type": "object",
+        "required": ["ticket", "conversation_id", "status", "seq"],
+        "properties": {
+          "ticket": { "type": "string" },
+          "conversation_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["running", "finished"] },
+          "seq": { "type": "integer", "description": "The latest seq emitted." },
+          "terminal": {
+            "description": "The terminal event, once finished: an `answer`, `abstention`, `refusal` or `error` object from events.schema.json.",
+            "type": ["object", "null"]
+          },
+          "done": { "description": "The `done` event, once finished.", "type": ["object", "null"] }
+        }
+      }
+    }
+  }
+}

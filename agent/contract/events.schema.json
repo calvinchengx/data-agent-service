@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://calvinchengx.github.io/data-agent-service/agent/contract/events.schema.json",
+  "title": "Ask events",
+  "description": "Every event the ask service emits on a ticket's stream. One schema per event type; the stream is the union. Client-agnostic by construction: nothing here is rendered text for any particular surface, and no event but `accepted` carries the caller's question.",
+  "oneOf": [
+    { "$ref": "#/$defs/accepted" },
+    { "$ref": "#/$defs/branch" },
+    { "$ref": "#/$defs/step" },
+    { "$ref": "#/$defs/milestone" },
+    { "$ref": "#/$defs/answer" },
+    { "$ref": "#/$defs/abstention" },
+    { "$ref": "#/$defs/refusal" },
+    { "$ref": "#/$defs/error" },
+    { "$ref": "#/$defs/done" }
+  ],
+  "$defs": {
+    "envelope": {
+      "type": "object",
+      "description": "Fields on every event.",
+      "required": ["seq", "ticket", "conversation_id", "ts", "type"],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Monotonic per ticket, no gaps. Doubles as the SSE `id:` field, so `Last-Event-ID: <seq>` resumes from seq+1."
+        },
+        "ticket": { "type": "string" },
+        "conversation_id": { "type": "string" },
+        "ts": { "type": "string", "format": "date-time" },
+        "type": {
+          "type": "string",
+          "enum": ["accepted", "branch", "step", "milestone", "answer", "abstention", "refusal", "error", "done"]
+        }
+      }
+    },
+
+    "accepted": {
+      "allOf": [{ "$ref": "#/$defs/envelope" }],
+      "properties": {
+        "type": { "const": "accepted" },
+        "question": {
+          "type": "string",
+          "description": "The question as received. This is the ONLY event that carries it; a client that stores events may store everything but this one and hold no natural language."
+        },
+        "turn": { "type": "integer", "minimum": 1, "description": "1-based position of this ask within its conversation." },
+        "contract_version": { "type": "string", "const": "1" }
+      },
+      "required": ["question", "turn", "contract_version"]
+    },
+
+    "branch": {
+      "allOf": [{ "$ref": "#/$defs/envelope" }],
+      "description": "A unit of work opened or closed. Phase 1 emits exactly one per ticket, wrapping the whole run, so clients handle branches before fan-out exists. Phase 2 emits one per sub-agent, derived from the configured sources, never from a hand-written roster.",
+      "properties": {
+        "type": { "const": "branch" },
+        "branch_id": { "type": "string" },
+        "state": { "type": "string", "enum": ["opened", "closed"] },
+        "source": {
+          "type": ["string", "null"],
+          "description": "A name from `list_sources`, or null for the supervisor's own branch."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["supervisor", "grounding", "source", "divergence"],
+          "description": "What the branch is for. `source` branches carry a `source`; the others do not."
+        }
+      },
+      "required": ["branch_id", "state", "role"]
+    },
+
+    "step": {
+      "allOf": [{ "$ref": "#/$defs/envelope" }],
+      "description": "One tool call, as it happened. DIAGNOSTIC: for traces, evals and audit reconciliation. A client should not show this to a person unless they asked to see the work. Droppable on stream overflow.",
+      "properties": {
+        "type": { "const": "step" },
+        "branch_id": { "type": "string" },
+        "tool": { "type": "string", "description": "Namespaced as the agent sees it, e.g. `warehouse__run_query`." },
+        "args": { "type": "object", "description": "As sent. A refused call's args are kept: the refusal is the evidence." },
+        "ms": { "type": "integer", "minimum": 0, "description": "Matches the executor's audit line for the same call." },
+        "is_error": { "type": "boolean", "description": "The tool returned `isError`. A refusal, not a transport failure." }
+      },
+      "required": ["branch_id", "tool", "args", "ms", "is_error"]
+    },
+
+    "milestone": {
+      "allOf": [{ "$ref": "#/$defs/envelope" }],
+      "description": "Progress a person could be told. STRUCTURED, never prose: the client renders it in its own words, length and language. Never dropped on overflow.",
+      "properties": {
+        "type": { "const": "milestone" },
+        "branch_id": { "type": "string" },
+        "phase": {
+          "type": "string",
+          "enum": ["grounding", "discovering", "querying", "reconciling"],
+          "description": "grounding: reading the catalog for meaning. discovering: finding tables or operations. querying: a statement or call is running. reconciling: results are being brought together."
+        },
+        "subject": {
+          "type": ["string", "null"],
+          "description": "What the phase is about, in the catalog's vocabulary: a glossary term, a metric, a table's display name. Never the question."
+        },
+        "source": { "type": ["string", "null"] }
+      },
+      "required": ["branch_id", "phase"]
+    },
+
+    "answer": {
+      "allOf": [{ "$ref": "#/$defs/envelope" }],
+      "description": "Terminal. The agent ran something and has a result. Fields rather than prose so every client renders in its own order with its own limits; `text` is kept so a text client prints exactly what the CLI prints today.",
+      "properties": {
+        "type": { "const": "answer" },
+        "text": { "type": "string" },
+        "path": {
+          "type": "string",
+          "enum": ["catalog", "warehouse", "multi"],
+          "description": "What answered. `catalog`: the catalog alone, no statement ran. `warehouse`: one source. `multi`: more than one source, or a divergence arm. A client may build latency policy on this; the service does not."
+        },
+        "result": {
+          "type": ["object", "null"],
+          "properties": {
+            "columns": { "type": "array", "items": { "type": "string" } },
+            "rows": { "type": "array", "items": { "type": "array" } },
+            "truncated": { "type": "boolean", "description": "The row ceiling applied." }
+          },
+          "required": ["columns", "rows", "truncated"]
+        },
+        "headline": {
+          "type": ["object", "null"],
+          "description": "Present only when one figure is the salient result. Most answers are a table and have none.",
+          "properties": {
+            "value": { "type": ["number", "string"] },
+            "unit": { "type": ["string", "null"] },
+            "label": { "type": "string", "description": "In the catalog's words where it has them." }
+          },
+          "required": ["value", "label"]
+        },
+        "definitions_applied": {
+          "type": "array",
+          "description": "Every catalog definition the answer depends on. Empty when the catalog was withheld, which is what makes the attribution metric scoreable.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "term": { "type": "string" },
+              "definition": { "type": "string" },
+              "source_fqn": { "type": "string", "description": "The OpenMetadata entity it was read from." }
+            },
+            "required": ["term", "definition", "source_fqn"]
+          }
+        },
+        "sources": { "type": "array", "items": { "type": "string" } },
+        "tables": { "type": "array", "items": { "type": "string" } },
+        "sql": { "type": "array", "items": { "type": "string" }, "description": "Every statement that ran, as the executor reported it." },
+        "caveats": {
+          "type": "array",
+          "description": "What the catalog itself raised: a deprecation tag, a disputed definition, a known gap. Short, one per item. A client that speaks must say these; a client that renders must show them.",
+          "items": { "type": "string" }
+        },
+        "divergence": {
+          "type": ["object", "null"],
+          "description": "Reserved for phase 2: what the answer would have been without the catalog, and why it differs. Always null in phase 1."
+        }
+      },
+      "required": ["text", "path", "definitions_applied", "sources", "tables", "sql", "caveats"]
+    },
+
+    "abstention": {
+      "allOf": [{ "$ref": "#/$defs/envelope" }],
+      "description": "Terminal. The agent looked and concluded the data could not answer: no statement ran and nothing was refused. Mechanical, the same rule as `Answer.abstained`. Carries the catalog vocabulary tried, never the question, so a client can forward it to a steward without forwarding what was asked.",
+      "properties": {
+        "type": { "const": "abstention" },
+        "text": { "type": "string" },
+        "searched_terms": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["text", "searched_terms"]
+    },
+
+    "refusal": {
+      "allOf": [{ "$ref": "#/$defs/envelope" }],
+      "description": "Terminal. A tool refused: the caller lacks access, or a guard declined the statement. A security event, and a different outcome from an answer, so a client can never narrate it as one. Says what was refused, never what the caller would have seen.",
+      "properties": {
+        "type": { "const": "refusal" },
+        "source": { "type": ["string", "null"] },
+        "what": {
+          "type": "string",
+          "enum": ["access", "guard", "rate_limit"],
+          "description": "access: the source or a rule withheld it. guard: the statement or call was not admissible. rate_limit: the gateway refused the call."
+        },
+        "detail": { "type": "string", "description": "The refusing tool's own message, which is already written not to leak." }
+      },
+      "required": ["what", "detail"]
+    },
+
+    "error": {
+      "allOf": [{ "$ref": "#/$defs/envelope" }],
+      "description": "Terminal. Something failed that is not a refusal: a transport error, a model error, the step ceiling, a cancel. Distinct from `refusal` because it is not a security event and a client should say so differently.",
+      "properties": {
+        "type": { "const": "error" },
+        "kind": { "type": "string", "enum": ["cancelled", "max_steps", "model", "transport", "internal"] },
+        "detail": { "type": "string" }
+      },
+      "required": ["kind", "detail"]
+    },
+
+    "done": {
+      "allOf": [{ "$ref": "#/$defs/envelope" }],
+      "description": "Always the last event, exactly once, after any terminal event. Usage for the run.",
+      "properties": {
+        "type": { "const": "done" },
+        "outcome": { "type": "string", "enum": ["answer", "abstention", "refusal", "error"] },
+        "hops": { "type": "integer", "minimum": 0, "description": "Model calls made. Equals the number of `step` events only when each hop made one tool call." },
+        "steps": { "type": "integer", "minimum": 0, "description": "Tool calls made. Equals the number of `step` events emitted, before any overflow drop." },
+        "tokens_in": { "type": "integer", "minimum": 0 },
+        "tokens_out": { "type": "integer", "minimum": 0 },
+        "cache_read_tokens": { "type": "integer", "minimum": 0 },
+        "cache_write_tokens": { "type": "integer", "minimum": 0 },
+        "ms": { "type": "integer", "minimum": 0 },
+        "model": { "type": "string" },
+        "effort": { "type": "string" }
+      },
+      "required": ["outcome", "hops", "steps", "tokens_in", "tokens_out", "cache_read_tokens", "cache_write_tokens", "ms", "model", "effort"]
+    }
+  }
+}
