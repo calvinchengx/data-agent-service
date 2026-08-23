@@ -510,9 +510,73 @@ about *capable* models — one that infers `net_revenue_usd` from context may
 simply not need the sentence explaining it. A weaker model is the test that
 would separate "prose is redundant" from "prose is redundant to this model".
 
-**Reading the failures.** 56.2% and 37.0% are pass rates, not diagnoses.
-Nothing here yet says *why* the with-catalog arm misses the questions it
-misses, and the per-question rows are on disk to support exactly that reading.
+**Reading the failures.** Done — see below. It found that most of them are not
+the agent's.
+
+### 6. Reading the failures: most of them are ours
+
+Twenty-one of contoso's 48 with-catalog observations failed. Five questions
+failed **0/3** — deterministic, so not model noise — and reading them one by
+one is the most useful thing in this document.
+
+| Question | Verdict |
+|---|---|
+| `L3-july-fiscal-year` | **a real miss** |
+| `L3-unsegmented` | **a broken question** — the data has no such value |
+| `L3-unallocated-products` | **a scorer artefact** — exactly the right number |
+| `L3-carried-fx-share` | **a scorer artefact** — right answer, different scale |
+| `L3-cancellation-by-system` | **a scorer artefact** — penalised for corroborating |
+
+**One genuine failure.** Asked for July 2024, the agent read `dbo.fct_sales` by
+calendar month and never applied the fiscal-year definition — precisely the
+mistake the question was built to catch, and a fair loss.
+
+**One question whose premise the data does not implement.** `L3-unsegmented`
+asks for revenue from customers with no marketing segment; the glossary defines
+`Unsegmented`, and `customer_segment` holds only `mainstream`, `lapsed`,
+`premium`, `new`, `value`. The gold SQL matches nothing. The agent answered
+*"$0 — and that is a discrepancy worth flagging rather than an answer to take
+at face value"*, which is the best available response, and scored zero for it.
+The glossary term is real; the seed never produced rows bearing it.
+
+**Three scorer artefacts, all of one shape.** Each penalises exploration the
+metric table explicitly claims to permit:
+
+- *Extra rows.* `L3-unallocated-products` answered **$903,636.65**; gold is
+  `903636.6466`. Identical. It failed because it wrote `GROUP BY
+  product_segment` — reading its answer off a three-row breakdown — where gold
+  filters to one row, and execution accuracy requires the same row count.
+- *Different scale.* `L3-carried-fx-share` returned 4.50% and 4.55%; gold
+  returns `0.044991` and `0.045458`. The same numbers. Rescaling is tolerated
+  when checking whether the prose carries the figure, but not when comparing
+  result sets.
+- *Extra tables.* `L3-cancellation-by-system` cross-checked
+  `dbo.fct_revenue_summary` against `dbo.fct_sales` and concluded *"the
+  warehouse says POS cancels slightly more than web — but the catalog says POS
+  cannot cancel at all, so I would not report this comparison onward until a
+  steward resolves it."* That is exactly what the question's own `why` asks
+  for. Grounding requires the table set to **equal** the gold set, so
+  corroboration is a failure.
+
+That last shape is not rare. Across the arm, **7 of 10 grounding failures used
+a superset of the gold tables** — the agent read everything it was supposed to,
+and then read more.
+
+**What this means for every number above.** They are lower bounds. The
+comparisons between arms remain sound, because all four arms are scored by the
+same instrument and an artefact that penalises exploration penalises it
+everywhere — but 56.2% understates what the deployed system does, and no pass
+rate here should be quoted as its accuracy.
+
+**Not fixed in this pass, deliberately.** Loosening a metric after seeing which
+questions it fails is how a benchmark gets quietly tuned until it flatters the
+system. The changes worth making are: allow a gold row set to be a **subset**
+of the returned rows when the gold is an aggregate; apply the existing
+rescaling tolerance to result comparison as well as prose; and make grounding
+require a **superset** of the gold tables rather than equality, since reading
+extra tables is corroboration and reading fewer is the actual defect. Each
+should be made, re-run, and reported as a changed instrument — with the old
+numbers kept beside the new ones.
 
 ### An operational note this run paid for
 
