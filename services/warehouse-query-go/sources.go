@@ -38,6 +38,13 @@ type Source struct {
 	DSN string `json:"dsn"`
 	// duckdb and any other embedded engine: the database file
 	Path string `json:"path"`
+	// rest: the OpenAPI document IS the allow-list, so a source without one
+	// cannot be guarded and is refused at start-up.
+	Spec        string   `json:"spec"`
+	BaseURL     string   `json:"base_url"`
+	Collections []string `json:"collections"`
+	MaxItems    int      `json:"max_items"`
+	MaxBytes    int      `json:"max_bytes"`
 	// How to authenticate when the engine does not federate with Entra:
 	// "keyvault:<secret-name>" -- a PAT, a password, an API key. Only for
 	// authz_tier=service, and the DSN must then carry no password, so that the
@@ -50,6 +57,12 @@ type Source struct {
 // authz_tier=user, and saying otherwise would put a guarantee in every audit
 // line that nothing behind it is making.
 var embeddedKinds = map[string]bool{"duckdb": true}
+
+// httpKinds answer over HTTP rather than SQL. They have operations and calls
+// where a SQL source has tables and statements, and the two surfaces are
+// separate on purpose: a source that offered both would let either be called
+// on either.
+var httpKinds = map[string]bool{"rest": true}
 
 func (s Source) policy(maxRows int) Policy {
 	database := s.Database
@@ -119,6 +132,16 @@ func LoadSources() (map[string]Source, error) {
 		if s.Credential != "" && dsnHasPassword(s.DSN) {
 			return nil, fmt.Errorf("source %s has a stored credential AND a password in its dsn; "+
 				"keep the credential and drop the password, so the secret has one home", s.Name)
+		}
+		// The OpenAPI document IS the allow-list for an HTTP source, so one
+		// without a spec cannot be guarded at all. Refused at start-up rather
+		// than at the first call, for the same reason an embedded source with
+		// no path is: a deployment mistake should be found before anything is
+		// served, not by a caller.
+		if httpKinds[strings.ToLower(s.Kind)] && s.Spec == "" {
+			return nil, fmt.Errorf(
+				"source %s is %s but names no `spec`; the OpenAPI document is the "+
+					"allow-list and there is nothing to guard against without it", s.Name, s.Kind)
 		}
 		out[s.Name] = s
 	}
