@@ -488,11 +488,12 @@ func callerLimit(limit *sqlglot.Expression) (int, error) {
 		}
 	}
 	value, _ := limit.Args["expression"].(*sqlglot.Expression)
-	n, err := strconv.Atoi(value.Name())
-	if err != nil {
-		return 0, nil // a non-literal limit is treated as absent
+	if n, err := strconv.Atoi(value.Name()); err == nil {
+		return n, nil
 	}
-	return n, nil
+	// A limit that is not a plain number -- an expression, a parameter -- is
+	// treated as absent, and the ceiling is applied over the top of it.
+	return 0, nil
 }
 
 // quotedSchemas renders the allow-list the way the Python guard does, so the
