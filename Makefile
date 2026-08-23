@@ -159,20 +159,39 @@ witnesses-manifest: ## Record this run's witness counts into docs/witnesses.json
 witnesses-check: ## Fail if docs/witnesses.json disagrees with a real run
 	$(TOOLS) python -m e2e.run --check-manifest $(ARGS)
 
-# The one toolchain that is NOT containerised. The docs site is built by
-# pnpm on the host, and that is a deliberate exception: it produces a static
-# site rather than touching the stack, and a container round-trip for every
-# edit would make writing docs slower than writing code.
+# The docs site is the one toolchain with two entry points, and the reason is
+# worth stating because the obvious setups both fail.
 #
-# The trap it creates, which has already cost a day: installing node_modules
-# from inside a Linux container leaves platform-specific binaries (esbuild)
-# that the host cannot execute, and the failure names esbuild rather than the
-# install, so it reads as a broken dependency. If `make docs` fails that way,
-# `rm -rf node_modules website/node_modules && pnpm install --frozen-lockfile`
-# on the HOST is the fix.
-docs: ## Build the documentation site locally (pnpm on the host, not a container)
+# `make docs` runs pnpm on the HOST: it produces a static site rather than
+# touching the stack, and a container round-trip for every edit would make
+# writing docs slower than writing code.
+#
+# `make docs-container` needs Docker and nothing else, which is what the rest
+# of this repository promises and what CI does.
+#
+# The trap is that node_modules holds PLATFORM-SPECIFIC binaries (esbuild), and
+# a bind-mounted checkout gives host and container the same directory. Whoever
+# installs last breaks the other, and the failure names esbuild rather than the
+# install, so it reads as a broken dependency. It has now cost a day in each
+# direction: a container install broke the host build, and later a host install
+# broke the container build.
+#
+# So the container gets its OWN node_modules, in named volumes mounted over the
+# bind mount. Both paths work, neither can overwrite the other's binaries, and
+# the volumes persist so the install is paid for once. `make docs-clean` drops
+# them if they ever need rebuilding.
+DOCS_VOLUMES = -v das-docs-modules:/w/node_modules -v das-docs-web-modules:/w/website/node_modules
+DOCS_NODE    = docker run --rm -v "$(PWD):/w" $(DOCS_VOLUMES) -w /w node:22-alpine
+
+docs: ## Build the documentation site locally (pnpm on the host — fast for editing)
 	pnpm install --frozen-lockfile
 	pnpm run docs:build
+
+docs-container: ## Build the documentation site in a container (Docker and nothing else)
+	$(DOCS_NODE) sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm run docs:build"
+
+docs-clean: ## Drop the container's node_modules volumes
+	-docker volume rm das-docs-modules das-docs-web-modules
 
 eval: ## Accuracy evals per use case (Phase 7) — needs ANTHROPIC_API_KEY
 	$(TOOLS) python -m evals.runner $(ARGS)
