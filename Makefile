@@ -101,6 +101,7 @@ lint: ## Lint and type-check everything (never edits; use `make format` for that
 	@$(TERRAFORM) init -backend=false -input=false >/dev/null && $(TERRAFORM) validate
 	@echo "== ty (python types)";       $(TY) check
 	@echo "== annotations vs bodies";   $(TOOLS) python -m scripts.check_annotations
+	@echo "== witness totals in prose"; $(TOOLS) python -m scripts.check_counts
 	@echo "== golangci-lint (go)";      $(GOLINT)
 
 format: ## Apply formatting and safe fixes — the only target that edits files

@@ -42,6 +42,10 @@ jobs:
       # soon as somebody writes the obvious test. This checks the definition.
       - name: annotations agree with their bodies
         run: uv run python -m scripts.check_annotations
+      # docs/witnesses.json exists so one number has one source. It did not
+      # stop the number being copied into prose, where four copies drifted.
+      - name: witness totals in prose match the manifest
+        run: uv run python -m scripts.check_counts
       - name: python tests, with the coverage floor
         # Same targets and floor as `make coverage-python`; run directly rather
         # than through the tools container, because this job has no stack and
