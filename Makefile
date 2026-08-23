@@ -120,6 +120,13 @@ format: ## Apply formatting and safe fixes — the only target that edits files
 http-corpus: ## Re-record the Python HTTP guard's verdict on every contract case
 	uv run python services/contract/gen_http_corpus.py
 
+guard-differential: ## Fuzz the Go guard and let the Python one judge every verdict (SECONDS=45)
+	@rm -f /tmp/das-guard-verdicts.jsonl
+	@cd services/warehouse-query-go && DAS_FUZZ_COLLECT=/tmp/das-guard-verdicts.jsonl \
+		CGO_ENABLED=0 go test . -run=XXX -fuzz=FuzzBothGuardsAgree -fuzztime=$${SECONDS:-45}s
+	@uv run python services/contract/adjudicate_guard.py \
+		--verdicts /tmp/das-guard-verdicts.jsonl
+
 guard-corpus: ## Re-record the Python guard's verdict on every contract statement
 	uv run python services/contract/gen_guard_corpus.py
 

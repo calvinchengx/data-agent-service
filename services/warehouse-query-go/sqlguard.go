@@ -36,6 +36,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/calvinchengx/sqlglot-go/sqlglot"
 )
@@ -106,7 +107,15 @@ var deniedPrefixes = []string{"xp_", "sp_", "fn_trace", "sys.fn_"}
 // Guard decides whether a statement may run, and returns the statement that
 // actually will.
 func Guard(sql string, p Policy) (*Verdict, error) {
-	if strings.TrimSpace(sql) == "" {
+	// Python's `str.strip()`, not Go's: the two agree everywhere except the
+	// four ASCII separators 0x1C-0x1F, which Python calls whitespace. A
+	// statement of nothing but a record separator was "empty" to the Python
+	// guard and a parse failure to this one -- both refusals, but different
+	// words, and the words are what a caller and the agent are shown.
+	//
+	// The third place this same difference has surfaced: the port's tokenizer
+	// had it, its value scan had it, and the guard above them had it too.
+	if strings.TrimFunc(sql, isSeparatorOrSpace) == "" {
 		return nil, denied("empty statement")
 	}
 	if p.MaxLength > 0 && len(sql) > p.MaxLength {
@@ -627,4 +636,13 @@ func renderNode(n *sqlglot.Expression, p Policy) string {
 		return s
 	}
 	return n.Class
+}
+
+// isSeparatorOrSpace is Python's `str.isspace()`, which is true for the four
+// ASCII separators 0x1C-0x1F where Go's unicode.IsSpace is not.
+func isSeparatorOrSpace(r rune) bool {
+	if r >= 0x1C && r <= 0x1F {
+		return true
+	}
+	return unicode.IsSpace(r)
 }

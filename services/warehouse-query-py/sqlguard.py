@@ -202,7 +202,19 @@ def guard(sql: str, policy: Policy) -> Verdict:
     # 6. row ceiling — rewrite rather than trust the caller
     columns = _columns_read(tree, tables)
     limited, row_limit = _apply_limit(root, policy)
-    rewritten = limited.sql(dialect=policy.dialect)
+    try:
+        rewritten = limited.sql(dialect=policy.dialect)
+    except Exception as e:  # noqa: BLE001 — a generator that cannot write it is a refusal
+        # sqlglot's own generator raises on trees its parser accepted:
+        # `WITH c AS(*) SELECT * FROM c, dbo.b` reaches the T-SQL generator's
+        # qualify_derived_table_outputs and comes back as an AttributeError.
+        # Unhandled, that is a 500 from a security control rather than a
+        # refusal — and a caller cannot tell a crash from an outage.
+        #
+        # The Go guard already refused here, because Generate returns an error
+        # rather than raising. Found by the differential fuzz, which is the
+        # only check that compares the two rather than each to itself.
+        raise Denied(f"could not rewrite the statement for {policy.dialect}: {e}") from None
     _verify_ceiling_survived(rewritten, row_limit, policy)
     return Verdict(
         sql=rewritten,
