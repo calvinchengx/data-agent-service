@@ -49,6 +49,16 @@ func toolDefinitions() []map[string]any {
 	}
 	return []map[string]any{
 		{
+			"name": "list_dashboard_candidates",
+			"description": "Questions people keep asking that do not yet have a dashboard. " +
+				"Offer one to the user when their question matches a candidate — the counts " +
+				"are approximate on purpose and no question text is stored. Returns nothing " +
+				"unless your role may see them.",
+			"inputSchema": map[string]any{
+				"type": "object", "properties": map[string]any{}, "additionalProperties": false,
+			},
+		},
+		{
 			"name": "list_sources",
 			"description": "List the data sources you may query, with the SQL dialect each speaks " +
 				"and the OpenMetadata service that holds its business context. Call this first " +
@@ -241,6 +251,18 @@ func callTool(r *http.Request, p *Principal, name string, raw json.RawMessage) m
 	}
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &args)
+	}
+	if name == "list_dashboard_candidates" {
+		// Role-gated, and the gate is the point: a list of what a team
+		// repeatedly cannot answer is not something every caller should have.
+		// An empty DAS_PROMOTE_ROLES means nobody, not everybody.
+		if !mayPromote(p.Roles) {
+			audit("op", name, "user", p.Name, "roles", p.Roles, "verdict", "denied", "via", "mcp")
+			return textContent("your role may not see dashboard candidates", true)
+		}
+		found := dashboardCandidates()
+		audit("op", name, "user", p.Name, "verdict", "ok", "count", len(found), "via", "mcp")
+		return textContent(map[string]any{"candidates": found}, false)
 	}
 	if name == "list_sources" {
 		payload := sourcesPayload()

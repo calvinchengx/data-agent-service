@@ -244,3 +244,32 @@ def test_a_page_size_is_configured_not_hardcoded_at_the_call_site():
 
     assert access.PAGE_SIZE >= 1000
     assert access.MAX_PAGES >= 10
+
+
+# --------------------------------------------- who may see dashboard candidates --
+def test_an_unset_promote_roles_means_nobody(monkeypatch):
+    """Not everybody. A list of what a team repeatedly cannot answer is not
+    something every caller should have by default."""
+    import access
+
+    monkeypatch.setenv("DAS_PROMOTE_ROLES", "")
+    assert access.promote_roles() == ()
+    assert not access.may_promote(("Data.Admin",))
+
+
+def test_only_a_named_role_may_see_candidates(monkeypatch):
+    import access
+
+    monkeypatch.setenv("DAS_PROMOTE_ROLES", "Data.Admin,Data.Analyst")
+    assert access.may_promote(("Data.Analyst",))
+    assert not access.may_promote(("Data.Finance",))
+    assert not access.may_promote(())
+
+
+def test_role_matching_ignores_case_and_padding(monkeypatch):
+    """An operator typing `data.analyst` should not be silently ignored."""
+    import access
+
+    monkeypatch.setenv("DAS_PROMOTE_ROLES", " data.analyst , Data.Admin ")
+    assert access.may_promote(("Data.Analyst",))
+    assert access.promote_roles() == ("data.analyst", "Data.Admin")

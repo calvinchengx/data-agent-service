@@ -199,6 +199,10 @@ def _challenge() -> dict[str, str]:
 
 DEFAULT_SOURCE = os.environ.get("DAS_DEFAULT_SOURCE", "").strip()
 
+# Where the promoter files its candidates. One name, shared by the job that
+# writes them and the service that reads them.
+CANDIDATE_DOMAIN = "dashboard_candidates"
+
 
 def _source(name: str | None):
     """Which source a call is about.
@@ -813,6 +817,46 @@ def _filter_fields(p: Principal, described: dict) -> tuple[dict, list[str]]:
     return out, hidden
 
 
+def _dashboard_candidates() -> list[dict]:
+    """Candidates, read from the catalog rather than a file.
+
+    The promoter is a job and this is a service; in Azure they share no
+    filesystem, so the catalog is the channel. A catalog that cannot be read
+    yields no candidates rather than an error -- unlike a tag denial, a
+    missing suggestion withholds nothing and failing the whole call would turn
+    a nicety into an outage.
+    """
+    base = os.environ.get("DAS_OM_URL", "").rstrip("/")
+    token = os.environ.get("DAS_OM_BOT_TOKEN", "")
+    if not base or not token:
+        return []
+    try:
+        import vaultref
+
+        resolved = vaultref.resolve(token)
+        url = f"{base}/api/v1/dataProducts?limit=200&fields=domains"
+        request = urllib.request.Request(url, headers={"Authorization": "Bearer " + resolved})
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode())
+    except Exception:  # noqa: BLE001 — a missing suggestion is not an outage
+        LOG.warning("could not read dashboard candidates from the catalog")
+        return []
+
+    out = []
+    for product in payload.get("data", []) or []:
+        domains = [d.get("name", "") for d in (product.get("domains") or [])]
+        if CANDIDATE_DOMAIN not in domains:
+            continue
+        out.append(
+            {
+                "title": product.get("displayName") or product.get("name", ""),
+                "why": product.get("description", ""),
+                "fullyQualifiedName": product.get("fullyQualifiedName", ""),
+            }
+        )
+    return out
+
+
 def _sources_payload() -> dict:
     return {
         "sources": [
@@ -838,6 +882,18 @@ def _dispatch(p: Principal, name: str, args: dict) -> dict:
     """Run one tool. A refusal is reported as a TOOL error, not a protocol
     error, so the model can read the reason and adapt."""
     try:
+        if name == "list_dashboard_candidates":
+            # Role-gated, and the gate is the point: a list of what a team
+            # repeatedly cannot answer is not something every caller should
+            # have. An empty DAS_PROMOTE_ROLES means nobody.
+            if not access.may_promote(p.roles):
+                audit(op=name, user=p.name, roles=list(p.roles), verdict="denied", via="mcp")
+                return mcpproto.text_content(
+                    "your role may not see dashboard candidates", is_error=True
+                )
+            found = _dashboard_candidates()
+            audit(op=name, user=p.name, verdict="ok", count=len(found), via="mcp")
+            return mcpproto.text_content({"candidates": found})
         if name == "list_sources":
             # What this caller may not read, and why. A tag-derived denial
             # is invisible in the settings file -- the rule names a tag, not a

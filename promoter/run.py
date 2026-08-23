@@ -15,7 +15,7 @@ import pathlib
 import subprocess
 import sys
 
-from promoter import store
+from promoter import publish_candidates, store
 from promoter.audit import parse
 from promoter.score import release
 from promoter.title import derive
@@ -93,6 +93,14 @@ def main() -> int:
         "skipped": skipped.as_dict(),
     }
     OUT.write_text(json.dumps(report, indent=2) + "\n")
+
+    # The file is for whoever is reading the output; the CATALOG is how the
+    # agent finds out. The promoter is a job and the executor is a service --
+    # in Azure they share no filesystem, so a local file is not a channel
+    # between them.
+    if released and publish_candidates.enabled():
+        written = publish_candidates.publish_candidates([r.as_dict() for r in released])
+        print(f"  wrote {len(written)} candidate(s) to the catalog")
 
     if a.json:
         print(json.dumps(report, indent=2))

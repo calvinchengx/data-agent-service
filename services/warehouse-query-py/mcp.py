@@ -100,6 +100,16 @@ def tool_definitions(default_source: str | None, dialect: str) -> list[dict]:
             },
         },
         {
+            "name": "list_dashboard_candidates",
+            "description": (
+                "Questions people keep asking that do not yet have a dashboard. Offer one "
+                "to the user when their question matches a candidate — the counts are "
+                "approximate on purpose and no question text is stored. Returns nothing "
+                "unless your role may see them."
+            ),
+            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+        {
             "name": "list_tables",
             "description": (
                 "List the tables of a source, as the asking user is permitted to see them. "

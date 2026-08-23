@@ -1882,6 +1882,49 @@ def quality() -> None:
         detail,
     )
 
+    # Phase 15's exit test said candidates are "visible only to
+    # DAS_PROMOTE_ROLES". Until now that setting was read by no code at all
+    # and the tool that would have shown them did not exist, so the row was
+    # marked complete against a claim nothing could satisfy.
+    from agent import identity as _identity
+
+    def candidates_for(user: str):
+        token = _identity.token_for(user)
+        _st, _hd, text = c.http(
+            "POST",
+            GW + c.CFG.get("DAS_WAREHOUSE_MCP_PATH", "/warehouse/mcp"),
+            headers={"Authorization": "Bearer " + token},
+            json_body={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "list_dashboard_candidates", "arguments": {}},
+            },
+        )
+        return json.loads(text)["result"]
+
+    allowed = candidates_for("alice@entraemulator.dev")
+    refused = candidates_for("carol@entraemulator.dev")
+    check(
+        "phase15",
+        "a role in DAS_PROMOTE_ROLES can see dashboard candidates",
+        not allowed.get("isError"),
+        allowed["content"][0]["text"][:70],
+    )
+    check(
+        "phase15",
+        "a role outside it cannot — the setting is enforced, not decorative",
+        bool(refused.get("isError")) and "may not see" in refused["content"][0]["text"],
+        refused["content"][0]["text"][:70],
+    )
+    listed = json.loads(allowed["content"][0]["text"]).get("candidates", [])
+    check(
+        "phase15",
+        "a candidate carries its title and its reason, and no question text",
+        all(x.get("title") and x.get("why") for x in listed) if listed else False,
+        f"{len(listed)} candidate(s)" if listed else "none published yet",
+    )
+
     check(
         "quality",
         "go lint configuration is present and enables the checks that matter",

@@ -222,7 +222,13 @@ def conform(base: str) -> None:
     # not the others would leave a client able to find an operation and unable
     # to call it. Optional rather than required because the Go executor has no
     # REST adapter — recorded in ADR 0001 and docs/parity.md, not implied here.
-    core = {"list_sources", "list_tables", "describe_table", "run_query"}
+    core = {
+        "list_sources",
+        "list_tables",
+        "describe_table",
+        "run_query",
+        "list_dashboard_candidates",
+    }
     http_surface = {"list_operations", "describe_operation", "call_operation"}
     published = set(tools)
     check(
@@ -344,6 +350,23 @@ def conform(base: str) -> None:
     # for the scope ITS OWN engine accepts — one global scope silently hands a
     # Databricks warehouse an Azure SQL token, which fails at sign-in and reads
     # as an outage. A suite that only exercises one engine keeps that property.
+    # Both implementations must gate the candidate list the same way. The
+    # setting was named in the plan's exit test and read by neither until now,
+    # so a rule only one of them enforced would be the same defect this
+    # project keeps finding, in a new place.
+    err, text = ex.tool("list_dashboard_candidates", {}, alice)
+    check(
+        "a role in DAS_PROMOTE_ROLES may list dashboard candidates",
+        err is False,
+        text[:60],
+    )
+    err, text = ex.tool("list_dashboard_candidates", {}, carol)
+    check(
+        "a role outside DAS_PROMOTE_ROLES may not",
+        bool(err) and "may not see" in text,
+        text[:60],
+    )
+
     err, text = ex.tool("list_sources", {}, alice)
     listed = json.loads(text).get("sources", []) if err is False else []
     check(

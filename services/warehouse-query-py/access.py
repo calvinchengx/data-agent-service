@@ -242,6 +242,28 @@ class Denied(Exception):
     role, so an agent can choose different columns instead of retrying."""
 
 
+def promote_roles() -> tuple[str, ...]:
+    """Which roles may see dashboard candidates.
+
+    Named in every settings template and, until now, read by nothing -- the
+    plan's exit test for phase 15 said candidates were visible only to these
+    roles, and the tool that would have shown them did not exist. An empty
+    setting means nobody, not everybody: a recurring-question list says what a
+    team is repeatedly unable to answer, which is not information every caller
+    should have by default.
+    """
+    raw = os.environ.get("DAS_PROMOTE_ROLES", "")
+    return tuple(r.strip() for r in raw.split(",") if r.strip())
+
+
+def may_promote(roles: tuple[str, ...]) -> bool:
+    allowed = promote_roles()
+    if not allowed:
+        return False
+    lowered = {r.lower() for r in roles}
+    return any(a.lower() in lowered for a in allowed)
+
+
 class Rules:
     def __init__(self, raw: list[dict] | None = None, tags: TagIndex | None = None):
         self.rules = (
