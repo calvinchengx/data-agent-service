@@ -218,10 +218,22 @@ to match either way.
 
 **The adapter is not exercised by CI.** Nothing runs `go test -tags duckdb`,
 so it can rot without anyone hearing about it, and this line is here so that
-is a known cost rather than a surprise. Run it by hand with `libduckdb` on the
-library path. A build without the tag refuses a DuckDB source at start-up
-rather than at the first query, and says to rebuild with the tag; the tag-off
-paths have their own tests.
+is a known cost rather than a surprise. Run it by hand, with `libduckdb` on the
+library path:
+
+```sh
+CGO_ENABLED=0 go test -tags duckdb ./...
+```
+
+`CGO_ENABLED=0` is not decoration. Without it the tagged build compiles
+`runtime/cgo`, which on a Mac lacking the Command Line Tools headers fails at
+`stdlib.h` before a single test runs — a toolchain error that reads exactly
+like a broken adapter. Setting it also matches how the image is built, so the
+manual run exercises the same compilation the tag would ship.
+
+A build without the tag refuses a DuckDB source at start-up rather than at the
+first query, and says to rebuild with the tag; the tag-off paths have their own
+tests.
 
 **Still to do: D2 (HTTP surface and REST adapter) and D3 (Databricks).**
 Neither is started. D2 is the larger — three operations, an `httpguard.go`
