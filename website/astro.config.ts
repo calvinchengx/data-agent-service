@@ -71,6 +71,7 @@ export default defineConfig({
           items: [
             { slug: '00-plan' },
             { slug: '15-http-sources' },
+            { slug: '16-go-parity' },
             { slug: 'parity' },
             { slug: 'upstream-issues' },
             { slug: 'adr/0001-two-executors' },

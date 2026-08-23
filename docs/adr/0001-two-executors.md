@@ -88,6 +88,16 @@ wrong the moment the executor is fast. This is the argument for measuring both.
   those operations — loudly, since the Go router refuses an unknown `kind`
   rather than guessing.
 
+* **Retiring the Go executor was considered and declined.** After the
+  comma-join bypass shipped in `executor-go:0.1.0`, the question of whether a
+  second implementation is worth a second guard was put plainly. The decision
+  is that it is, **on the condition that parity is mechanised** rather than
+  asserted: one shared refusal corpus both guards must pass, the contract run
+  against both executors on every build, and both guards made to fail closed
+  by construction. `docs/16-go-parity.md` is that plan. The claim above that
+  the Go guard "fails closed" was not true of the code when written; Phase A
+  of that plan makes it true.
+
 * **Two implementations is a real cost.** It is justified here because this
   repo's purpose is to answer questions like this one with measurements. A
   product would pick one — and, on these numbers, would pick Go for the
