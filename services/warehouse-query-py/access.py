@@ -172,6 +172,11 @@ class TagIndex:
                 out |= self._by_tag.get(tag, set())
             return sorted(out)
 
+    def read_at(self) -> float | None:
+        """When the tag set was last read, or None if it never has been."""
+        with self._lock:
+            return self._at if self._read_once else None
+
     def known_tags(self) -> set[str]:
         with self._lock:
             return set(self._by_tag)
@@ -267,6 +272,47 @@ class Rules:
             fallback = [r for r in self.rules if r.get("role") == "*"]
             allow = [p for r in fallback for p in r.get("allow_tables", [])] or allow
         return {"allow_tables": allow or ["*"], "deny_columns": deny}
+
+    def explain(self, roles: tuple[str, ...]) -> dict:
+        """What this caller may not read, and WHY each denial exists.
+
+        "The catalog said so" is not reviewable unless you can read what it
+        said. A denial derived from a tag is invisible in the settings file --
+        the rule names a tag, not a column -- so without this the only way to
+        answer "why can Alice not see that column" is to read the catalog by
+        hand and reproduce the resolution in your head.
+
+        Distinguishes the two sources deliberately. A literal denial is
+        something a person wrote and can edit; a tag denial is something a
+        steward can change without touching this deployment at all, and
+        knowing which one you are looking at decides who you go and talk to.
+        """
+        literal: list[str] = []
+        by_tag: dict[str, list[str]] = {}
+        applies = False
+        for rule in self.rules:
+            role = rule.get("role", "*")
+            if role != "*" and role not in roles:
+                continue
+            applies = True
+            literal += rule.get("deny_columns", [])
+            for tag_fqn in rule.get("deny_tagged", []):
+                if self.tags is None:
+                    continue
+                by_tag.setdefault(tag_fqn, [])
+                by_tag[tag_fqn] += self.tags.resolve((tag_fqn,))
+        effective = (
+            self.for_roles(roles) if applies else {"allow_tables": ["*"], "deny_columns": []}
+        )
+        return {
+            "roles": list(roles),
+            "allowTables": effective["allow_tables"],
+            "deniedByRule": sorted(set(literal)),
+            "deniedByTag": {t: sorted(set(cols)) for t, cols in sorted(by_tag.items())},
+            # The catalog is a moving part now; when it was last read is part
+            # of the answer, not a detail.
+            "tagsReadAt": None if self.tags is None else self.tags.read_at(),
+        }
 
     def check(
         self, roles: tuple[str, ...], tables: tuple[str, ...], columns: tuple[str, ...]

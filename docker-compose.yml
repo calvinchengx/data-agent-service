@@ -310,6 +310,11 @@ services:
       # unchanged by the choice.
       dockerfile: services/warehouse-query-${DAS_EXECUTOR:-py}/Dockerfile
     depends_on:
+      # With `deny_tagged` in DAS_ACCESS_RULES the executor refuses to serve
+      # until it has read the catalog once (docs/00-plan.md §19). Waiting for
+      # health here is the difference between a slow start and a crash loop.
+      openmetadata:
+        condition: service_healthy
       entra-emulator:
         condition: service_healthy
       fabric-emulator:

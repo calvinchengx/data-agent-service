@@ -839,7 +839,17 @@ def _dispatch(p: Principal, name: str, args: dict) -> dict:
     error, so the model can read the reason and adapt."""
     try:
         if name == "list_sources":
-            return mcpproto.text_content({**_sources_payload(), "yourRoles": list(p.roles)})
+            # What this caller may not read, and why. A tag-derived denial
+            # is invisible in the settings file -- the rule names a tag, not a
+            # column -- so an agent that reports "I was refused" can at least
+            # say whether a person or a steward decides that.
+            return mcpproto.text_content(
+                {
+                    **_sources_payload(),
+                    "yourRoles": list(p.roles),
+                    "yourRestrictions": RULES.explain(p.roles),
+                }
+            )
         src = _source(args.get("source"))
         # Surface check on the MCP path too. Without it a SELECT against an
         # http source reaches the SQL guard and is refused for a reason about
