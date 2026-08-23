@@ -41,6 +41,7 @@ unlikely.
 | **Every answer runs as the person asking** | The user's token is exchanged on-behalf-of all the way to the engine, so row and column permissions are the engine's decision, not the agent's | `make test` — two personas, same question, different rows |
 | **It cannot write, wander, or work around a refusal** | One read-only `SELECT`, parsed rather than pattern-matched; schema allow-list; row ceiling applied for you; a refusal is reported, not routed around | `make conformance` — a 28-assertion contract the executor must satisfy |
 | **It answers with its reasoning attached** | The figure, the definition applied, the tables it came from, and any caveat the catalog raised | `make ask Q="..."` |
+| **A question that keeps recurring becomes a governed dashboard** | The promoter counts templates, not questions — no natural language is stored. A released candidate is published to Power BI, Superset and Tableau from one `Plan`, each verified against the SQL it came from before it reaches the catalog | [`docs/14-publishing.md`](docs/14-publishing.md) |
 | **Any MCP client, no custom code** | Claude, Cursor, VS Code and the SDKs connect over standard MCP with OAuth discovery | [`docs/09-mcp-clients.md`](docs/09-mcp-clients.md) |
 | **Runs on your laptop, deploys to real Azure unchanged** | The whole stack runs on the emulator family; switching to Fabric, APIM and Entra is configuration, not a code path | [`docs/10-production.md`](docs/10-production.md) |
 | **Nothing here is claimed without something that checks it** | Every capability carries a command that proves it; where something is designed but not built, the docs say so | the witnesses badge above, live from `docs/witnesses.json`, in CI on every push |
@@ -62,17 +63,19 @@ or `make stack` to do the whole bring-up from nothing, which is what CI runs.
 
 | Path | Purpose |
 |---|---|
-| `docker-compose.yml` | Pinned, published images only — dependencies are used as-is |
+| `docker-compose.yml` | Emulators and OpenMetadata are pinned, published images used as-is. Only this repo's own services build — plus `superset`, which adds the database drivers Apache Superset's image deliberately ships without |
 | `.env.example` | Every `DAS_*` setting; copy to `.env` (local) or `.env.prod` (real Azure) |
 | `docs/00-plan.md` | Architecture, decisions, phases, evaluation, load, authz, extension |
 | `docs/` | Quickstart, architecture, authorization, classification, evaluation, load, MCP clients, adding a source, production, CI |
 | `services/` | The warehouse-query executor (Python and Go), and the contract both answer to |
+| `promoter/`, `publisher/` | What keeps being asked, and the `Plan` each dashboard target spells in its own language |
+| `publisher-go/` | A second generator held to the same recorded bytes — deterministic output, checked rather than described |
 | `agent/`, `evals/`, `e2e/` | The agent, the accuracy suite, and the witnesses |
 | `seed/` | Datasets, warehouse provisioning, OpenMetadata semantics, identity setup |
 | `infra/terraform/` | Terraform for real Azure; `docs/10-production.md` is the runbook |
-| `.github/workflows/ci.yml` | Four jobs; `docs/11-ci.md` says what each proves |
+| `.github/workflows/ci.yml` | Six jobs; `docs/11-ci.md` says what each proves |
 | `website/` | The docs site — Astro + Starlight, generated from `docs/`, which stays the source of truth |
-| `scripts/` | `doctor.sh`, `status.sh`, `check-discipline.sh`, `preflight.py` |
+| `scripts/` | `doctor.sh`, `status.sh`, `check-discipline.sh`, `preflight.py`, and the gates `make lint` runs |
 
 ## Discipline
 

@@ -135,7 +135,7 @@ footer a{text-decoration:none}
 <header class="hero">
   <div class="wrap">
     <p class="eyebrow">Data Agent Service</p>
-    <a class="release-pill" href="https://github.com/calvinchengx/data-agent-service/releases/tag/v0.1.1"><span>v0.1.1</span> security fix — upgrade from 0.1.0 &rarr;</a>
+    <a class="release-pill" href="https://github.com/calvinchengx/data-agent-service/releases/tag/v0.2.0"><span>v0.2.0</span> security fix — upgrade from 0.1.0 &rarr;</a>
     <h1>Ask your warehouse a question. Get an answer you can defend.</h1>
     <p>Natural-language questions over the warehouses, databases and APIs you already have —
        Fabric and Azure SQL, PostgreSQL, Databricks, and any REST service including a retrieval
@@ -335,17 +335,34 @@ footer a{text-decoration:none}
         <p>Recurring ad-hoc questions are the signal that a dashboard is justified. Queries are
            canonicalised — literals and aliases normalised away — so the same question asked
            differently lands on one template, and frequency becomes measurable evidence.</p>
-        <span class="ev">promoter/ · 6 witnesses · no natural language is stored</span>
+        <span class="ev">promoter/ · <b data-witness-phase="phase15">&mdash;</b> witnesses · no natural language is stored</span>
       </div>
 
       <div class="card">
-        <h3>Power BI generation <span class="tag t-ship">shipped</span></h3>
-        <p>The end of the promotion path: a promoted template becomes a semantic model and a report in
-           Fabric, created under the identity of the person who asked. The DAX measure is evaluated and
-           compared against the SQL it came from, and only a dashboard whose two answers agree reaches
-           the catalog. Rendering is prod-only — the emulator persists a report definition and does not
-           interpret it.</p>
-        <span class="ev">7 witnesses · a viewer is refused, a contributor publishes, lineage recorded</span>
+        <h3>Three dashboard targets, one plan <span class="tag t-ship">shipped</span></h3>
+        <p>A released candidate becomes a <code>Plan</code> — tables, measures, dimensions, slots — and
+           each target spells that one object in its own language: a <b>Power BI</b> semantic model and
+           report in Fabric, an <b>Apache Superset</b> dataset and chart, a <b>Tableau</b> workbook.
+           Every target is then asked the question through its <em>own</em> engine and the answer is
+           compared with the SQL the template came from. A dashboard whose two answers disagree does
+           not reach the catalog.</p>
+        <p>Each carries the guarded template rather than the tables behind it — a Direct Lake binding,
+           a virtual dataset, a custom-SQL relation — so no target can widen the surface the executor's
+           access rules narrowed.</p>
+        <span class="ev"><b data-witness-phase="phase16">&mdash;</b> + <b data-witness-phase="phase19">&mdash;</b>
+           + <b data-witness-phase="phase20">&mdash;</b> witnesses · identity carried where the tool can
+           hold it, and named honestly where it cannot</span>
+      </div>
+
+      <div class="card">
+        <h3>Tableau: the generator, not the tenant <span class="tag t-wip">generator shipped, hop unwitnessed</span></h3>
+        <p>Tableau has no container, so the split is drawn where the evidence stops. The workbook, the
+           VizQL Data Service query and the connected-app token are pure functions of the
+           <code>Plan</code>, recorded in the contract and witnessed on every push. Publishing to a real
+           site is not, and <a href="docs/parity/">the parity ledger</a> carries it red rather than
+           letting a green suite imply otherwise.</p>
+        <span class="ev"><b data-witness-phase="phase20">&mdash;</b> witnesses above the tenant line ·
+           <code>publish()</code> refuses by name</span>
       </div>
 
     </div>
@@ -410,7 +427,10 @@ footer a{text-decoration:none}
           <tr><td>Audit trail</td><td><span class="tag t-ship">shipped</span></td><td>Structured line per operation, authz tier recorded</td></tr>
           <tr><td>Production parity (real Azure)</td><td><span class="tag t-wip">gated, unwitnessed</span></td><td>Terraform validates, runbook and preflight exist; not yet run against a tenant</td></tr>
           <tr><td>Dashboard promotion</td><td><span class="tag t-ship">shipped</span></td><td>Templates counted by pseudonymous user, k-threshold, catalog-derived titles; no question stored</td></tr>
-          <tr><td>Power BI generation</td><td><span class="tag t-ship">shipped</span></td><td>Published under OBO and verified against its own SQL; rendering prod-only</td></tr>
+          <tr><td>Power BI target</td><td><span class="tag t-ship">shipped</span></td><td>Direct Lake semantic model and PBIR report, published under OBO as the asking person, verified by evaluating its own DAX against the SQL; rendering prod-only</td></tr>
+          <tr><td>Apache Superset target</td><td><span class="tag t-ship">shipped</span></td><td>Virtual dataset carrying the guarded template, chart and dashboard; verified through Superset&rsquo;s own query layer. <code>authz_tier: service</code> &mdash; Superset has no on-behalf-of exchange, so the asker is recorded as an OpenMetadata owner and the docs say so rather than implying otherwise</td></tr>
+          <tr><td>Tableau target</td><td><span class="tag t-wip">generator shipped, hop unwitnessed</span></td><td>Workbook, VizQL Data Service query and connected-app token are pure functions of the <code>Plan</code>, recorded in the contract and witnessed in CI. <code>authz_tier: user</code> via direct trust. Publishing to a real site needs a tenant &mdash; <a href="docs/parity/">red in the ledger</a> until one is witnessed</td></tr>
+          <tr><td>A fourth dashboard target</td><td><span class="tag t-plan">not built</span></td><td>Cube, Looker, Metabase and the rest are a <code>DashboardTarget</code> each &mdash; see <a href="docs/15-adding-a-dashboard-target/">adding a dashboard target</a>. The filters that decide whether one is worth building are written down there</td></tr>
           <tr><td>Existing MCP server as a source</td><td><span class="tag t-ship">shipped</span></td><td>APIM <code>mcpMode: passthrough</code>; OpenMetadata's own MCP server reaches the agent this way in every run</td></tr>
           <tr><td>REST source, no adapter (APIM REST&rarr;MCP)</td><td><span class="tag t-wip">blocked upstream</span></td><td>The pinned gateway builds a fresh request and copies no inbound headers, so on-behalf-of sees an anonymous caller (<a href="docs/upstream-issues/">upstream #8</a>)</td></tr>
           <tr><td>REST source adapter (incl. retrieval APIs)</td><td><span class="tag t-ship">shipped</span></td><td>Python executor; guarded against the OpenAPI document, registered in OpenMetadata as an <code>apiService</code>, 10 witnesses</td></tr>
@@ -427,8 +447,8 @@ footer a{text-decoration:none}
     <h2>Get it</h2>
     <p class="lede">Two executor images, same contract, same version. Pick either — nothing above the
       executor changes, and both now serve every configured source.</p>
-<pre><code>docker pull ghcr.io/calvinchengx/data-agent-service/executor-py:0.1.1
-docker pull ghcr.io/calvinchengx/data-agent-service/executor-go:0.1.1</code></pre>
+<pre><code>docker pull ghcr.io/calvinchengx/data-agent-service/executor-py:0.2.0
+docker pull ghcr.io/calvinchengx/data-agent-service/executor-go:0.2.0</code></pre>
     <div class="scroll">
       <table class="tbl">
         <thead><tr><th>Image</th><th>Size</th><th>Platforms</th><th>Engines it serves</th></tr></thead>
@@ -496,9 +516,22 @@ ENV=prod make test  # the same checks against a real tenant</code></pre>
   fetch('witnesses-manifest.json')
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
-      if (d && d.total) {
+      if (!d) { return; }
+      if (d.total) {
         document.getElementById('witness-count').textContent = d.total;
       }
+      // Per-phase counts, for the same reason as the total and with the same
+      // fallback. Two of these were typed in and both were stale within a day
+      // -- 6 where the promoter had 13, 7 where Power BI had 17 -- because a
+      // number on a page has no idea a witness was added.
+      var phases = (d.phases || {});
+      Array.prototype.forEach.call(
+        document.querySelectorAll('[data-witness-phase]'),
+        function (el) {
+          var phase = phases[el.getAttribute('data-witness-phase')];
+          if (phase && phase.total) { el.textContent = phase.total; }
+        }
+      );
     })
     .catch(function () {});
 </script>
