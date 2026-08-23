@@ -1,3 +1,5 @@
+//go:build duckdb
+
 // DuckDB — a library reading a file, not a server.
 //
 // The guard needed no changes for this engine, which is the dialect
@@ -36,6 +38,12 @@ type DuckDBBackend struct {
 
 var _ Backend = (*DuckDBBackend)(nil)
 
+// duckDBSupported is true in this build; see sources_duckdb_absent.go.
+const duckDBSupported = true
+
+// The concrete type, not Backend: the tag-off variant in
+// sources_duckdb_absent.go returns the interface, and the two never compile
+// together. Returning it here would only cost the tests the pool() they test.
 func NewDuckDBBackend() *DuckDBBackend { return &DuckDBBackend{pools: map[string]*sql.DB{}} }
 
 // readOnlyDSN is how the file is opened, and the reason this adapter waited

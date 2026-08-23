@@ -12,7 +12,7 @@ drifted without anyone noticing for two phases.
 | SQL surface (`list_tables`, `describe_table`, `run_query`) | ✅ | ✅ | — |
 | Fabric / Azure SQL / Synapse (TDS) | ✅ | ✅ | — |
 | PostgreSQL | ✅ | ✅ | — |
-| DuckDB | ✅ | ✅ | — |
+| DuckDB | ✅ | ⚠️ written, `-tags duckdb`, not in the shipped image | see D1 |
 | Databricks | ✅ unwitnessed | ❌ | adapter |
 | HTTP surface (`list_operations`, `describe_operation`, `call_operation`) | ✅ | ❌ | three operations + `httpguard` |
 | REST adapter | ✅ | ❌ | adapter |
@@ -163,9 +163,12 @@ Twelve million executions have found nothing since.
 
 ## Phase D — the missing adapters and surface
 
-**D1 (DuckDB) is done.** `services/warehouse-query-go/sources_duckdb.go`, over
-[`calvinchengx/go-pduckdb`](https://github.com/calvinchengx/go-pduckdb) — the
-decision and its cost are recorded under Phase D1 below.
+**D1 (DuckDB) is written but not shipped.** The adapter is
+`services/warehouse-query-go/sources_duckdb.go`, over
+[`calvinchengx/go-pduckdb`](https://github.com/calvinchengx/go-pduckdb), and it
+works — but it is behind `-tags duckdb` and out of the default image, pending
+a decision on whether an embedded engine is worth what it costs the image. The
+cost, and the mistaken assumption that hid it, are recorded below.
 
 The guard needed no changes, which is the dialect parameterisation earning its
 keep: sqlglot-go reads `duckdb`, the ceiling is applied by rewriting the parse
@@ -192,12 +195,33 @@ claiming `authz_tier=user` is refused, because there is no per-user identity
 behind the claim and every audit line would carry a guarantee nothing is
 making; a DuckDB source with no `path` is refused too.
 
-**What the image costs.** "Pure Go" means no C toolchain, not no C library.
-`libduckdb.so` is 73 MB and links against `libstdc++`, which a distroless
-static base does not carry, so the Go executor image goes from roughly 20 MB to
-**98 MB**. The DuckDB musl build is the correct one for this base; the glibc
-build loads and then fails on a symbol. All of that is in the Dockerfile with
-the reasoning beside it.
+**Not in the default build, and why.** The adapter is behind `-tags duckdb`
+and is not compiled into the shipped image. The first version of this was
+wrong in a way worth recording, because the wrong half sounded right: "pure
+Go" does mean no C toolchain, and `CGO_ENABLED=0` does hold -- but it does not
+mean a static binary. purego reaches `libduckdb.so` through `dlopen`, and a
+binary that calls `dlopen` is dynamically linked and needs a loader. The
+binding constraint is therefore not that distroless/static lacks `libstdc++`;
+it is that distroless/static carries **no dynamic loader at all**, so it could
+not have hosted that binary whichever libduckdb was copied in beside it. The
+image built and then failed to start, with `exec /usr/local/bin/warehouse-
+query: no such file or directory` -- the ENOENT being the missing interpreter,
+not the missing binary.
+
+So it is a package deal: DuckDB brings a dynamic binary, a loader-carrying
+base, and ~78 MB of `libduckdb` plus `libstdc++`, taking the image from ~20 MB
+to 98 MB -- for every deployment, including the ones with no DuckDB source,
+which is currently all of them. Opt in with `go build -tags duckdb` on an
+alpine base (musl libduckdb, loader at `/lib/ld-musl-*.so.1`); a
+loader-carrying glibc base needs the glibc libduckdb instead. The pairing has
+to match either way.
+
+**The adapter is not exercised by CI.** Nothing runs `go test -tags duckdb`,
+so it can rot without anyone hearing about it, and this line is here so that
+is a known cost rather than a surprise. Run it by hand with `libduckdb` on the
+library path. A build without the tag refuses a DuckDB source at start-up
+rather than at the first query, and says to rebuild with the tag; the tag-off
+paths have their own tests.
 
 **Still to do: D2 (HTTP surface and REST adapter) and D3 (Databricks).**
 Neither is started. D2 is the larger — three operations, an `httpguard.go`

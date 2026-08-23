@@ -97,6 +97,14 @@ func LoadSources() (map[string]Source, error) {
 			if s.Path == "" {
 				return nil, fmt.Errorf("source %s is %s but names no `path`", s.Name, s.Kind)
 			}
+			// Same reasoning one step earlier: a binary built without the
+			// engine cannot serve this source at all, and discovering that
+			// at the first query is discovering it from a user.
+			if strings.EqualFold(s.Kind, "duckdb") && !duckDBSupported {
+				return nil, fmt.Errorf(
+					"source %s is duckdb, but this executor was built without DuckDB support; "+
+						"rebuild with `-tags duckdb` (docs/16-go-parity.md)", s.Name)
+			}
 		}
 		out[s.Name] = s
 	}
