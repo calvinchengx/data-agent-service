@@ -43,7 +43,7 @@ unlikely.
 | **It answers with its reasoning attached** | The figure, the definition applied, the tables it came from, and any caveat the catalog raised | `make ask Q="..."` |
 | **Any MCP client, no custom code** | Claude, Cursor, VS Code and the SDKs connect over standard MCP with OAuth discovery | [`docs/09-mcp-clients.md`](docs/09-mcp-clients.md) |
 | **Runs on your laptop, deploys to real Azure unchanged** | The whole stack runs on the emulator family; switching to Fabric, APIM and Entra is configuration, not a code path | [`docs/10-production.md`](docs/10-production.md) |
-| **Nothing here is claimed without something that checks it** | Every capability carries a command that proves it; where something is designed but not built, the docs say so | 124 end-to-end witnesses, in CI on every push |
+| **Nothing here is claimed without something that checks it** | Every capability carries a command that proves it; where something is designed but not built, the docs say so | 125 end-to-end witnesses, in CI on every push |
 
 Status: **Phases 0-16 landed** — see [docs/00-plan.md](docs/00-plan.md).
 

@@ -32,7 +32,7 @@ purpose is to check other code.
 not that any of them was right. A test suite at 100% coverage that asserts
 nothing passes; the witness fleet is what says a forged token is refused, a
 withheld column stays withheld, and a wrong definition produces a wrong
-ranking. That is why the badges publish `124/124 witnesses` next to the
+ranking. That is why the badges publish `125/125 witnesses` next to the
 percentages rather than a single "coverage" figure — one number would quietly
 claim the wrong thing.
 
@@ -59,7 +59,7 @@ the site serving them, and nothing leaves the project.
 Three numbers, because one would lie. Coverage describes the unit suites and
 nothing else; the work that actually catches defects here is the witness fleet
 — a token that verifies, a role that is refused, a definition that changes the
-answer — and no statement counter scores any of that. **124/124 witnesses** is a
+answer — and no statement counter scores any of that. **125/125 witnesses** is a
 stronger claim than any percentage, because it says every assertion ran against
 real services.
 
