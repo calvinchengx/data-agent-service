@@ -216,6 +216,7 @@ Emulator numbers are relative (laptop SQL Server sidecar), not Fabric capacity �
 | 16 Dashboard publish ✅ | C17 | `SemanticModel` + `Report` items created in Fabric via OBO (emulator: definition persisted; rendering prod-only); OM `Dashboard` lineage present; DAX measure == SQL answer | 15 |
 | 18 Catalog-carried rules ✅ | C18 | a column tagged in OpenMetadata is refused by BOTH executors without a settings change; an unresolvable tag fails at startup | 6, 13 |
 | 19a Dashboard targets | `DashboardTarget` + `Plan` + `plan.schema.json`; Power BI extracted; Go generator | phase-16 witnesses pass unchanged; a non-Fabric candidate gets a *reason*; Go and Python artefacts byte-equal | 16 |
+| 20 Latency & fast path | per-hop instrumentation; catalog prefetched into the cached prompt; `Canonicaliser` protocol dispatched on `surface` (SQL + HTTP); fast path built against the protocol (§21) | per-hop latency recorded by phase; hop count falls with no eval regression; an HTTP line canonicalises with no literal on the released surface and a truncated URL is refused | 15, 19a |
 | 12 Stretch ✅ | LLM via APIM (`llm-token-limit`); `DAS_OM_CONTEXT_MODE=native` | 429 after quota; native passes same evals | 11 |
 
 > **Phase 15 was marked complete before it was.** The exit test says candidates
@@ -227,7 +228,10 @@ Emulator numbers are relative (laptop SQL Server sidecar), not Fabric capacity �
 
 MVP = phases 0–7 + 10. Then 8, 9, 11, 12.
 
-**All phases above are landed and witnessed** — 121 witnesses, green in CI on every push. Anything further is new scope rather than remaining scope, and
+**Every phase carrying a ✅ is landed and witnessed** — 159 witnesses, green in CI on
+every push. **19a and 20 are not**: they are written down here as scope, and a row in this
+table is a plan until a witness says otherwise — which is the same rule Phase 15 was marked
+complete in violation of, noted below.
 `docs/parity.md` remains the honest record of what has been proved against the emulators versus against real Azure: nothing in this table is a claim about production until that ledger says so.
 
 ---
@@ -571,3 +575,148 @@ a digest-pinned base, which is the layer a hosted Superset needs too.
 Docs: `14-publishing.md` loses its Power BI-only framing;
 `15-adding-a-dashboard-target.md` mirrors `09-adding-a-source.md`;
 `parity.md` gains a Superset row (witnessed) and a Tableau row (not yet).
+
+---
+
+## 21. Latency, and the fast path
+
+A question takes **26 s at the median** and 39–48 at p95. `data-agent-voice`
+consumes this service, and a conversation reads as broken after about one
+second of silence. This section is what *this* service can do about that.
+
+### Where the time is not
+
+`make load` measures the gateway path at **p95 17.5 ms, 257 req/s**. The data
+plane is not the problem and optimising it would buy nothing. From this
+repository's own eval reports (`evals/reports/`, n=117, most recent):
+
+| Condition | median | tool calls |
+|---|---|---|
+| with catalog | 27.8 s | 7 |
+| schema only | 56.8 s | 5 |
+| without catalog | 52.0 s | 9 |
+| naive floor | 61.9 s | 0 |
+
+Seven hops at roughly 3.5 s each, on `claude-opus-5` at `DAS_EFFORT=high`. The
+catalog is already **saving** about 25 s; it is not the cost. The cost is that
+it is rediscovered over MCP → APIM → OpenMetadata on every question, for a
+catalog of four tables and five glossary terms that changes daily at most.
+
+> **The number above is from `claude-code` CLI runs and carries CLI overhead.**
+> A voice client uses the API path in `agent/agent.py`. Those may differ
+> materially and the one worth optimising is the one voice actually pays;
+> measuring it needs `ANTHROPIC_API_KEY`. Until that has been run, every
+> figure in this section describes the CLI path and says so.
+
+### Two targets, not one
+
+Conflating these produces the wrong roadmap.
+
+**Time-to-first-sound** is already solvable and mostly already built. The ask
+service returns a ticket *before anything runs* and streams `milestone` events
+carrying `phase` (`grounding` | `discovering` | `querying`) and `subject` from
+the catalog's vocabulary. A client can speak inside a second today. Per
+§20-ask-service's own test — *would a Slack bot want it?* — the speech itself
+belongs in `data-agent-voice`, not here.
+
+**Time-to-answer** is the 26 s, and is what this section attacks. No amount of
+loop optimisation reaches 1 s: one hop at the current settings is ~3.5 s. Only
+the fast path below gets there, and only for questions someone has asked
+before.
+
+### Step 0 — instrument before ranking
+
+Runs record total `ms` and a tool-call **count**, nothing more. Which of the
+seven hops is the 3.5 s is currently unknowable, so choosing between the
+levers below would be a guess dressed as a plan. `milestone_for()` already
+classifies every call into a phase; recording per-hop latency against that
+phase turns this list into a measured ranking. **Nothing else in this section
+starts before this does.**
+
+### The levers
+
+| # | Lever | Expected | Costs |
+|---|---|---|---|
+| 1 | Catalog prefetched into the cached system prompt | 7 hops → 2–3 | staleness window |
+| 2 | Effort tiered per hop | ~1 s/hop on presentation | accuracy risk on the SQL hop |
+| 3 | Stream the final hop | perceived only | none |
+| 4 | Known-question fast path | ~1 s, no model | only for repeats |
+| 5 | Parallel tool calls in one turn | 1–2 hops | none |
+
+**1 is the one to bet on.** `agent.py` says business meaning "arrives from the
+catalog at runtime", and that is 4–6 hops per question spent rediscovering it.
+Rendering it into the system block — which already sits behind a
+`cache_control: ephemeral` breakpoint — is not a new idea in this repository:
+`TagIndex` caches catalog state on a `DAS_TAG_REFRESH_S` interval and fails
+closed on a partial read. The same discipline applies, and the same refusal:
+an agent that could not read the catalog must abstain, not answer from a
+stale copy it does not say is stale.
+
+**2 needs Step 0 first.** `DAS_EFFORT=high` runs on all seven hops including
+"read this result and say it in a sentence".
+
+### The fast path, and the seam it needs
+
+The promoter already reduces a recurring question to a literal-free template
+with a stable hash (§17). A question matching a released template can skip
+authoring entirely. That is lever 4, and it is the only one that reaches a
+conversational budget.
+
+**The machinery is SQL-only today, at three layers, by construction:**
+
+| Layer | The binding |
+|---|---|
+| `promoter/audit.py` | `AuditLine.promotable` requires `op == "run_query"` **and** `bool(self.sql)`; a `call_operation` line is excluded before anything sees it |
+| `promoter/canonical.py` | entirely `sqlglot` — parses to a tree and walks `exp.*`; there is no non-SQL path |
+| `Template` / `Plan` | `sql`, `tables`, `measures`, `dimensions`, `slicers`, `comparison_sql` — the vocabulary is relational |
+
+**But the HTTP surface already carries the same shape.** `httpguard.Verdict`
+has `operation`, `method`, `url`, `collection`, `params`, `item_limit`,
+`body`, `fields`:
+
+| SQL template | HTTP equivalent |
+|---|---|
+| `tables` | `collection` |
+| projected columns | `fields` |
+| literal → `Slot(column, type)` | `params` → `Slot(name, type)` |
+| row ceiling, dropped from the template | `item_limit`, must also be dropped |
+| aliases normalised `t0..tn` | none exist — nothing to normalise |
+
+So the fix is **one layer, not a redesign**, and the seam already exists twice
+in this repository: `sqlguard` and `httpguard` are two implementations of one
+idea, dispatched on `surface`. The promoter gets the same — a `Canonicaliser`
+protocol with a SQL implementation and an HTTP one, dispatched the same way.
+The fast path is built against the *protocol*, never against `Template`.
+
+### What deliberately does not generalise
+
+**`Plan` and the dashboard targets stay SQL-shaped.** Superset takes a query;
+Power BI takes a semantic model over tables. A REST collection is not a star
+schema, and widening `Plan` to pretend otherwise would make the IR mean
+nothing — which is the opposite of why §20 extracted it. Promotion-to-dashboard
+and the fast path have different requirements and only the second one is
+general: it needs a stable canonical key and a re-executable verdict, and
+nothing about a measure or a visual.
+
+### Two hazards, and one ordering rule
+
+**The privacy guarantee does not transfer for free.** For SQL the promoter is
+handed `sql` and strips literals into typed placeholders, which is how §17
+keeps every literal off the released surface. For HTTP the literals are
+*inside* `url`, which the executor audits as `url=verdict.url[:300]`.
+Canonicalising means parsing that back apart, and §17's guarantee has to be
+**re-earned on that path rather than inherited**. Getting it wrong leaks
+precisely what the SQL path is careful not to.
+
+**There is no truncation guard on the HTTP side.** `AuditLine` sets
+`truncated = len(sql) >= 1000` and refuses to guess at a clipped statement.
+The URL is capped at **300** — tighter, on a string where a dropped query
+parameter changes the template *silently* rather than failing to parse. The
+same refusal is required before any HTTP line is promoted, or the first long
+REST call produces a confidently wrong template.
+
+**You can only promote what you can already guard.** A template must be
+re-executable through the checks that authorised it the first time. GraphQL
+fits the protocol — operation plus variables, into a template plus slots — but
+has no adapter and no guard here, so a GraphQL fast path needs `graphqlguard`
+first. Promotion follows a guard and never precedes one.
