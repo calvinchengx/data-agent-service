@@ -351,3 +351,20 @@ func TestRefusalMessagesReadLikeThePythons(t *testing.T) {
 		t.Errorf("a value containing both = %s", got)
 	}
 }
+
+func TestALeadingSpaceIsNotAColumnNobodyOwns(t *testing.T) {
+	// The second seed FuzzTableOfNeverGuesses produced, kept as a named case.
+	// It failed the PROPERTY, not the code: the property counted owners of
+	// the raw string while TableOf strips a template alias and surrounding
+	// space first. Worth a test of its own, because it fixes the contract of
+	// Bare into the suite rather than leaving it implied by a corpus file.
+	owned := map[string][]string{"dbo.a": {"amount"}}
+	for _, in := range []string{" amount", "amount ", "\tamount", "t0. amount", " t0.amount "} {
+		got, err := TableOf(in, []string{"dbo.a"}, owned)
+		if err != nil {
+			t.Errorf("TableOf(%q) refused: %v", in, err)
+		} else if got != "dbo.a" {
+			t.Errorf("TableOf(%q) = %q", in, got)
+		}
+	}
+}

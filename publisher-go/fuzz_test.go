@@ -144,34 +144,37 @@ func FuzzTableOfNeverGuesses(f *testing.F) {
 	// back, it must be the only one of those offered that owns the column.
 	f.Add("amount", "a.orders", "a.refunds", "amount", "amount")
 	f.Add("team", "dbo.tickets", "dbo.agents", "status", "team")
-	f.Fuzz(func(t *testing.T, column, t1, t2, c1, c2 string) {
+	f.Fuzz(func(t *testing.T, qualified, t1, t2, c1, c2 string) {
 		tables := []string{t1, t2}
 		owned := map[string][]string{t1: {c1}, t2: {c2}}
-		got, err := TableOf(column, tables, owned)
-		owners := 0
+		got, err := TableOf(qualified, tables, owned)
+
+		// Against the BARE column, because stripping a template alias is part
+		// of what TableOf promises -- an earlier version of this property
+		// counted owners of the raw string and reported `0 tables own " 0"`
+		// for an input the code had correctly bound after trimming. The
+		// property was wrong, not the code, which is the failure mode a
+		// property has that a hand-written case does not.
+		column := Bare(qualified)
+		owners := map[string]bool{}
 		for _, tbl := range tables {
 			for _, c := range owned[tbl] {
 				if c == column {
-					owners++
+					owners[tbl] = true
 					break
 				}
 			}
 		}
-		// t1 == t2 collapses the map to one entry, so count distinct owners.
-		if t1 == t2 {
-			owners = 0
-			for _, c := range owned[t1] {
-				if c == column {
-					owners = 1
-					break
-				}
-			}
+		if len(owners) == 1 && err != nil {
+			t.Errorf("exactly one table owns %q (from %q) and it was refused: %v",
+				column, qualified, err)
 		}
-		if owners == 1 && err != nil {
-			t.Errorf("exactly one table owns %q and it was refused: %v", column, err)
+		if len(owners) != 1 && err == nil {
+			t.Errorf("%d distinct tables own %q (from %q) and it was bound to %q anyway",
+				len(owners), column, qualified, got)
 		}
-		if owners != 1 && err == nil {
-			t.Errorf("%d tables own %q and it was bound to %q anyway", owners, column, got)
+		if err == nil && !owners[got] {
+			t.Errorf("bound %q to %q, which does not own it", qualified, got)
 		}
 	})
 }

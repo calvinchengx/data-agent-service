@@ -78,6 +78,34 @@
       "why": "the qualifier is stripped: template aliases mean nothing outside the template"
     },
     {
+      "column": "  t0. amount ",
+      "owned": {
+        "a.orders": [
+          "amount"
+        ]
+      },
+      "refused": null,
+      "table": "a.orders",
+      "tables": [
+        "a.orders"
+      ],
+      "why": "surrounding space is stripped along with the alias"
+    },
+    {
+      "column": "T0.amount",
+      "owned": {
+        "a.orders": [
+          "amount"
+        ]
+      },
+      "refused": "no table in ['a.orders'] has a column 'T0.amount'",
+      "table": null,
+      "tables": [
+        "a.orders"
+      ],
+      "why": "an uppercase alias is NOT a qualifier; the pattern is lowercase by design"
+    },
+    {
       "column": "amount",
       "owned": {
         "a.orders": [

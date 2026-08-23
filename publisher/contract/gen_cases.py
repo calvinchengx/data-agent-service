@@ -155,6 +155,18 @@ BINDINGS: list[dict[str, Any]] = [
         "owned": {"a.orders": ["amount"]},
     },
     {
+        "why": "surrounding space is stripped along with the alias",
+        "column": "  t0. amount ",
+        "tables": ["a.orders"],
+        "owned": {"a.orders": ["amount"]},
+    },
+    {
+        "why": "an uppercase alias is NOT a qualifier; the pattern is lowercase by design",
+        "column": "T0.amount",
+        "tables": ["a.orders"],
+        "owned": {"a.orders": ["amount"]},
+    },
+    {
         "why": "a table in the list with no columns known contributes no ownership",
         "column": "amount",
         "tables": ["a.orders", "a.unknown"],
