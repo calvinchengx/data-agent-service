@@ -12,7 +12,7 @@ drifted without anyone noticing for two phases.
 | SQL surface (`list_tables`, `describe_table`, `run_query`) | ✅ | ✅ | — |
 | Fabric / Azure SQL / Synapse (TDS) | ✅ | ✅ | — |
 | PostgreSQL | ✅ | ✅ | — |
-| DuckDB | ✅ | ⚠️ written, `-tags duckdb`, not in the shipped image | see D1 |
+| DuckDB | ✅ | ✅ opt-in, `-tags duckdb` — decided, not pending | see D1 |
 | Databricks | ✅ unwitnessed | ❌ | adapter |
 | HTTP surface (`list_operations`, `describe_operation`, `call_operation`) | ✅ | ❌ | three operations + `httpguard` |
 | REST adapter | ✅ | ❌ | adapter |
@@ -163,12 +163,20 @@ Twelve million executions have found nothing since.
 
 ## Phase D — the missing adapters and surface
 
-**D1 (DuckDB) is written but not shipped.** The adapter is
-`services/warehouse-query-go/sources_duckdb.go`, over
-[`calvinchengx/go-pduckdb`](https://github.com/calvinchengx/go-pduckdb), and it
-works — but it is behind `-tags duckdb` and out of the default image, pending
-a decision on whether an embedded engine is worth what it costs the image. The
-cost, and the mistaken assumption that hid it, are recorded below.
+**D1 (DuckDB) is done, and opt-in is the answer rather than a holding
+position.** The adapter is `services/warehouse-query-go/sources_duckdb.go`,
+over [`calvinchengx/go-pduckdb`](https://github.com/calvinchengx/go-pduckdb).
+It is behind `-tags duckdb` and out of the default image, and that is the
+decision: **the Go executor stays pure Go and statically linked.** An embedded
+engine cannot be had on those terms — the reasoning is below — so the engine
+is what gives way, not the property. Anyone who wants DuckDB builds with the
+tag on a base that has a dynamic loader.
+
+The property being protected is not image size for its own sake. A static
+binary on `distroless/static` has no loader, no libc and no shell, which is
+the difference between this image and the Python one and most of the reason
+the Go executor exists. Trading that away for an engine no deployment
+currently uses would have been paying the whole cost for none of the benefit.
 
 The guard needed no changes, which is the dialect parameterisation earning its
 keep: sqlglot-go reads `duckdb`, the ceiling is applied by rewriting the parse
@@ -216,10 +224,16 @@ alpine base (musl libduckdb, loader at `/lib/ld-musl-*.so.1`); a
 loader-carrying glibc base needs the glibc libduckdb instead. The pairing has
 to match either way.
 
-**The adapter is not exercised by CI.** Nothing runs `go test -tags duckdb`,
-so it can rot without anyone hearing about it, and this line is here so that
-is a known cost rather than a surprise. Run it by hand, with `libduckdb` on the
-library path:
+**The adapter IS exercised by CI**, in its own job. This paragraph said the
+opposite for a few hours and was correct when written: the tag meant the `go`
+job never compiled the adapter, so it was asserted by nothing. Worse, its tests
+skip themselves when `libduckdb` cannot be loaded — right on a laptop, useless
+in CI — and `TestADuckDBSourceIsOpenedReadOnly` asserts the one property no
+behavioural test can find. So the `Go executor (DuckDB adapter)` job installs
+the library and treats a SKIP as a failure; without that it would report
+success having proved nothing.
+
+To run it by hand, with `libduckdb` on the library path:
 
 ```sh
 CGO_ENABLED=0 go test -tags duckdb ./...
@@ -232,8 +246,11 @@ like a broken adapter. Setting it also matches how the image is built, so the
 manual run exercises the same compilation the tag would ship.
 
 A build without the tag refuses a DuckDB source at start-up rather than at the
-first query, and says to rebuild with the tag; the tag-off paths have their own
-tests.
+first query, and says to rebuild with the tag. The tag-off paths have their own
+tests, including that the router still dispatches `duckdb` to the DuckDB
+backend rather than falling through to Fabric — that fall-through is the
+failure the router exists to prevent, and a build tag must not quietly
+reintroduce it.
 
 **Still to do: D2 (HTTP surface and REST adapter) and D3 (Databricks).**
 Neither is started. D2 is the larger — three operations, an `httpguard.go`
