@@ -34,22 +34,36 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-      - run: uv sync --all-groups --frozen
+      - name: install dependencies
+        id: deps
+        run: uv sync --all-groups --frozen
+
+      # Every gate below runs even when an earlier one failed. They are
+      # independent checks, and GitHub's default stops the job at the first
+      # failure -- so one red `ty` skipped EIGHT gates, and a skipped step
+      # reads as "not the problem" rather than "not checked". Whoever fixes
+      # the type error then discovers the next gate, one round trip at a time.
+      # Guarded on `deps` because a failed `uv sync` makes all of them
+      # meaningless noise rather than eight findings.
 
       # LINT_MODE=host: the runner already has the toolchain, and building the
       # tools image to lint would trade three minutes for nothing.
       - name: ruff
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: uv run ruff check . && uv run ruff format --check .
       - name: ty
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: uv run ty check
       # ty reports a signature/body contradiction only where a CALLER violates
       # it, so one can sit in the tree for weeks and then fail the build as
       # soon as somebody writes the obvious test. This checks the definition.
       - name: annotations agree with their bodies
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: uv run python -m scripts.check_annotations
       # docs/witnesses.json exists so one number has one source. It did not
       # stop the number being copied into prose, where four copies drifted.
       - name: witness totals in prose match the manifest
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: uv run python -m scripts.check_counts
       # Both of these were in `make lint` and in no CI job, which is the same
       # hole as a check nobody runs -- it holds only for whoever remembers.
@@ -58,10 +72,13 @@ jobs:
       # would have said so. It reads `git ls-files`, not the filesystem, which
       # is exactly why it catches that case.
       - name: the docs sidebar matches committed pages
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: python3 scripts/check_docs_nav.py
       - name: pull commands name the released version
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: uv run python -m scripts.check_version
       - name: python tests, with the coverage floor
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         # Same targets and floor as `make coverage-python`; run directly rather
         # than through the tools container, because this job has no stack and
         # does not need one to measure unit coverage.
@@ -73,13 +90,16 @@ jobs:
       # Discipline rule 2, mechanically: no emulator-only code path, and no
       # development-only surface without a stated reason.
       - name: no emulator-only code paths
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: sh scripts/check-discipline.sh
       - name: no development-only paths
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: uv run python -m scripts.check_prod_paths --strict
 
       # The production template must stay coherent even though nothing here
       # deploys: an incoherent one is discovered at the worst moment otherwise.
       - name: production settings are coherent
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         # Against the PRODUCTION template, which is what the step name claims.
         # Run against .env.example it proves nothing about production and
         # fails on ids that only exist after seeding.
@@ -95,6 +115,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
+        id: setup
         with:
           go-version-file: services/warehouse-query-go/go.mod
           cache-dependency-path: services/warehouse-query-go/go.sum
@@ -102,8 +123,15 @@ jobs:
       # not built, so nothing in this job needs it. The adapter is therefore
       # unexercised by CI until the strategy for embedded engines is settled --
       # said plainly in docs/16-go-parity.md rather than left to be discovered.
-      - run: go vet ./...
+      # Independent gates, run even after an earlier one fails -- same
+      # reasoning as the quality job above. A vet error masking the coverage
+      # floor and the verdict diff costs three round trips to learn what one
+      # run already knew.
+      - name: go vet
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: go vet ./...
       - name: go test, with the coverage floor
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # Same measurement as `make coverage-go`, on the runner's own toolchain.
         run: |
           go test ./... -coverprofile=cover.out
@@ -111,6 +139,7 @@ jobs:
           pct=$(go tool cover -func=cover.out | tail -1 | awk '{gsub(/%/,"",$NF); print $NF}')
           awk -v p="$pct" 'BEGIN { if (p+0 < 90) { printf "go coverage %s%% is below the 90%% floor\n", p; exit 1 } }'
       - uses: golangci/golangci-lint-action@v9
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         with:
           version: v2.13.1
           working-directory: services/warehouse-query-go
@@ -119,6 +148,7 @@ jobs:
       # regenerate them and diff: a Python change that moves a verdict without
       # the Go side following it fails here rather than in production.
       - name: the recorded verdicts still describe the Python guard
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         working-directory: .
         run: |
           pipx install uv || pip install uv
