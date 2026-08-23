@@ -83,6 +83,16 @@ jobs:
         with:
           go-version-file: services/warehouse-query-go/go.mod
           cache-dependency-path: services/warehouse-query-go/go.sum
+      # DuckDB's library, because the DuckDB adapter's tests skip without it.
+      # A skipped test is not a passing test: the read-only property is a
+      # security property no behavioural check can find, so it has to actually
+      # run here rather than only on a laptop that happens to have brew.
+      - name: install the DuckDB library
+        working-directory: .
+        run: |
+          curl -sSL https://github.com/duckdb/duckdb/releases/download/v1.5.4/libduckdb-linux-amd64.zip -o /tmp/libduckdb.zip
+          sudo unzip -j -o /tmp/libduckdb.zip libduckdb.so -d /usr/local/lib
+          sudo ldconfig
       - run: go vet ./...
       - name: go test, with the coverage floor
         # Same measurement as `make coverage-go`, on the runner's own toolchain.
