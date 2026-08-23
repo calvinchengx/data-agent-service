@@ -18,7 +18,31 @@
 [extend]
 useDefault = true
 
-[allowlist]
+# The golden tokens in the publisher contract are the ONE tracked exception.
+# They exist so the Go and Python generators can be proved byte-identical, and
+# they are signed with TABLEAU_SECRET = "not-a-real-connected-app-secret",
+# checked in beside them -- tokens anyone can regenerate, authenticating to
+# nothing.
+#
+# Keyed on the VALUE and not the path, which is the tighter of the two and was
+# arrived at the hard way: an earlier version listed the path as well, with
+# `condition = "AND"`, on the assumption that both had to match. A path match
+# short-circuits, so that version silently allowed ANY jwt in that file. Caught
+# by injecting a token with a real-looking issuer and watching it be swallowed
+# -- 4 findings without the entry, 0 with it.
+#
+# The regex is the base64 of {"alg":"HS256","iss":"00000000...client", so it
+# admits only tokens issued for the fake connected app, wherever they appear.
+# A real token in the same file still fires. If the generator's header ever
+# changes shape the match stops and gitleaks fires, which is the direction this
+# should fail in.
+[[allowlists]]
+description = "Publisher contract goldens: JWTs issued for the fake connected app"
+regexes = [
+  '''^eyJhbGciOiJIUzI1NiIsImlzcyI6IjAwMDAwMDAw''',
+]
+
+[[allowlists]]
 description = "Generated artifacts, none of them tracked by git"
 
 paths = [
