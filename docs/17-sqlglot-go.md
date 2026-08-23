@@ -118,7 +118,7 @@ build), none of which is port work.
 
 **Done, and it found six bugs.** The tier existed because the risk was depth
 rather than breadth: nothing the service is held to was unparsed, no statement
-in sqlglot's 2,171 parsed into a different tree, and yet feeding the
+in the 2,171 the corpus held THEN parsed into a different tree, and yet feeding the
 generator's output back through the parser found real bugs in minutes, all
 inside grammar the port already handled.
 
@@ -164,12 +164,20 @@ reproducer. It now finds none, and runs in CI beside the pinned-oracle check.
 `make fuzz` runs it by hand. Findings worth keeping are promoted into
 `EDGE_CORPUS`, where the differential holds the port to them from then on —
 which is how the `IS NOT NULL` divergence was found, the statement not being
-in any of the 2,171 fixtures.
+in any of the 2,171 fixtures the corpus held then. The harvest that later took
+it to 4,506 found the same divergence sitting in `test_dialect.py` all along --
+the fuzzer got there first, but it did not have to.
 
 ### What Tier 2 gets built from
 
-Not from this list. The guard records the construct it could not read, so the
-statements callers actually send decide the order:
+Two instruments, and they answer different questions. The **corpus** says what
+the port cannot read at all, in clusters with counts -- that is what the phases
+below are built from, and it needs no traffic. The **guard's telemetry** says
+which of those a caller actually hit, which is what orders the work inside a
+phase. The corpus gives the shape; traffic gives the priority.
+
+The guard records the construct it could not read, so the statements callers
+actually send can decide the order:
 
 ```
 audit op=run_query verdict=blocked unsupported="trailing tokens at OVER" dialect=tsql
@@ -196,34 +204,130 @@ So the ordering question -- windows before `PIVOT`, or the type grammar before
 either -- is answered by counting, once there is traffic. The fixture corpus
 says what sqlglot can parse; it does not say what anyone asks this service.
 
-### Tier 2 — everything a SELECT can contain
+### Tier 2 / Target A — everything a SELECT can contain
 
-Window functions, `GROUP BY` extensions, `QUALIFY`, `PIVOT`/`UNPIVOT`,
-`VALUES`, the full function catalogue for the four dialects, `CAST`/`TRY_CAST`
-with the type grammar. Done when
-`tests/dialects/test_{tsql,postgres,duckdb,databricks}.py` round-trip.
+Done when `tests/dialects/test_{tsql,postgres,duckdb,databricks}.py` round-trip
+and `mismatched` stays 0 in every dialect.
 
-**Its trigger is the refusal counts, not the end of Tier 1.** Nothing on that
-list is currently known to be wanted: every statement this service is held to
-already parses, and the instrument that would say otherwise shipped only
-recently. The 29% of sqlglot's corpus the port does not read is honest
-headroom, not a backlog — most of it is DML, DDL and dialects nobody here
-queries.
+**The gap is now measured rather than guessed.** The corpus harvest put every
+statement sqlglot pins for these four dialects in front of the port, and the
+port records why it refuses each one it cannot read:
 
-Starting Tier 2 before the counts arrive means choosing between windows,
-`PIVOT` and the type grammar by guessing, which is the guess the instrument
-exists to replace. It has already been earned once: the service corpus found
-two bugs — `nulls_first` and typed division — that 2,171 reference fixtures
-could not see, because a corpus tells you what a parser CAN read and never
-what anyone asks it to.
+```
+1,465 / 4,506 parsed identically   3,041 refused   0 divergent
+```
 
-### Tier 3 — the rest of sqlglot
+| cluster | refusals | share |
+|---|---:|---:|
+| function builders the probe rejects (101 names) | 901 | 29.6% |
+| DDL/DML — `SET`, `CREATE`, `INSERT` … | 848 | 27.9% |
+| grammar the parser stops at — slices, lambdas, `ARRAY<T>`, `N'…'`, `@x` | 781 | 25.7% |
+| named constructs — `INTERVAL`, CTE column lists, `ESCAPE`, `CAST` without `AS` | 465 | 15.3% |
+| no-paren functions — `MAP`, `ANY`, `IF` | 47 | 1.5% |
 
-DML/DDL parsing (not just refusal), the remaining 30 dialects, the optimizer,
-transpilation. **Deferred, not abandoned** — the intent is a complete port, and
-Tier 3 is the rest of the road. It is simply not what data agent service needs,
-so it is not what gets built first. Listed so nobody mistakes Tier 2 for "done",
-and so the repo's README can say where the port currently stands.
+So the phases, in the order the numbers argue for:
+
+| phase | what | clears |
+|---|---|---:|
+| **A1** | Widen `probe_functions`: arity-keyed specs, and builders that need a typed or dialect argument | ~901 |
+| **A2** | The expression grammar the parser stops at | ~781 |
+| **A3** | The named constructs | ~465 |
+| **A4** | No-paren functions | ~47 |
+| **A5** | Enough statement grammar to NAME a write whose verb follows a CTE — see below | small |
+
+**A1 first, and not because it is biggest.** It needs no new grammar and no new
+verification: it widens a probe that already exists, and the reference supplies
+every answer. The 101 names come in two shapes — 65 whose spec varies with
+argument count or nests its arguments, 36 whose builder raises when handed
+plain placeholder columns — so this is one mechanism, not 101 features.
+
+**The window functions and `PIVOT` this section used to lead with are still
+here**, inside A2 and A3. What changed is that they are no longer the headline:
+the measurement says the function catalogue is the larger and cheaper win, and
+guessing between windows and `PIVOT` was exactly the guess the refusal
+instrument exists to replace. Traffic still decides the ORDER inside a phase;
+the corpus decides the SHAPE of the gap, and that is what these phases are.
+
+#### Why DDL/DML is mostly NOT in Target A — and the part that is
+
+848 of those refusals are writes, and porting their grammar buys the executor
+nothing, because **both guards already refuse them for the right reason**:
+
+```
+INSERT INTO dbo.t VALUES (1)  ->  only SELECT is allowed … (got INSERT)
+```
+
+identical in both, and arrived at by NAMING the leading keyword rather than by
+failing to parse. That is the `must_name_the_statement` category of the service
+corpus, and it passes today.
+
+The argument holds only while the write verb comes first, and there it stops:
+
+```
+WITH c AS (SELECT 1) INSERT INTO dbo.t SELECT * FROM c
+  python:  only SELECT is allowed … (got INSERT)
+  go:      could not parse as tsql: unsupported statement: expression at "INTO"
+
+BEGIN TRANSACTION
+  python:  … (got TRANSACTION)      go:  … (got BEGIN)
+```
+
+A verb after a `WITH` clause cannot be named without parsing past the CTE. Both
+guards still REFUSE, so there is no security divergence -- but they refuse for
+different reasons, which is the `must_parse_to_refuse` failure the conformance
+suite exists to catch, and neither statement is in the shared corpus, which is
+why nothing caught them. **Both are open.** A5 is the bounded piece of statement
+grammar that closes them; the remaining ~848 belong to Target B.
+
+### Tier 3 / Target B — the rest of sqlglot
+
+**Deferred, not abandoned**, and larger than the name suggests:
+
+| phase | what | lines |
+|---|---|---:|
+| **B1** | `annotate_types` — type inference over the tree | ~1,000 |
+| **B2** | `transforms.py` — the dialect rewrites | 1,083 |
+| **B3** | DDL/DML parsing, not just refusal | — |
+| **B4** | The optimizer's 19 rules, one at a time | 9,467 |
+| **B5** | The remaining 29 dialects | ~14,000 |
+| **B6** | `executor`, `planner`, `lineage`, `diff`, `jsonpath`, `anonymize` | ~4,900 |
+
+For scale: sqlglot is 80,434 lines of Python; the port is 4,188 hand-written
+Go plus 18,461 generated. The optimizer alone is more than twice the port's
+hand-written size. Target B is multi-quarter work, and that is worth saying
+plainly before anyone plans around the name `sqlglot-go`.
+
+**B1 and B2 are not "after" Target A -- they are its last mile.** The generator
+refusals added while closing the harvest all wait on them: T-SQL has no boolean
+literal and needs the transform, a standalone `IF` is written three different
+ways per dialect, and `REGEXP_REPLACE` refuses precisely because its builder
+calls the type annotator. So the sequence is:
+
+```
+A1 -> A2 -> A3 -> A4 -> A5 -> B1 -> B2 -> [DuckDB oracle] -> B4 -> B3 -> B5 -> B6
+```
+
+B4 is more tractable than its size suggests: `tests/fixtures/optimizer/` is
+15,426 lines across 23 files, **one per rule**. Port `simplify`, diff it against
+`simplify.sql`, move on. Each rule is its own gate.
+
+#### The one place the testing must change
+
+Every harness in the repo compares parse trees and generated strings. An
+optimizer REWRITES trees, so a wrong-but-plausible rewrite passes all of them --
+and unlike a parser bug, the SQL still runs and returns wrong rows.
+
+**So B4 cannot begin before the DuckDB execution oracle exists.** That is what
+makes the oracle non-optional rather than a refinement, and it is what sqlglot
+itself does for its own optimizer: `test_executor.py` runs TPC-H and TPC-DS
+through DuckDB and compares results.
+
+#### Estimating
+
+Target A is weeks and A1 is most of the value; the estimate should be redone
+after A1 lands rather than projected now. Two earlier estimates of this work
+were both wrong in the same direction, which is the argument for measuring the
+clusters and re-measuring after each phase instead.
 
 ## Verification — the part that makes this safe to ship
 
@@ -313,17 +417,25 @@ writing them.
 |---|---|---|---|
 | 1 — guard's needs, executor switched | ~6,000–8,000 lines | 3–4 weeks | **done** |
 | 1.5 — properties over what is ported | ~600 | done, in a day | **done** — six bugs |
-| 2 — full SELECT for four dialects | ~6,000 more | 3–4 weeks | **the refusal counts name a construct** |
-| differential harness (built first, used throughout) | ~800 | 3 days | done |
+| differential harness (built first, used throughout) | ~800 | 3 days | **done** |
+| corpus harvest — sqlglot's whole dialect contract | ~40 | a day | **done** — 31 divergent trees |
+| 2 / Target A — full SELECT for four dialects | A1 is most of it | weeks; re-estimate after A1 | **now: the clusters are measured** |
+| 3 / Target B — the rest of sqlglot | ~30,000 | multi-quarter | after A, except B1/B2 which finish A |
 
 Tier 1 first, with the harness before any parser code — so the first parser
 commit is already measured against the reference.
 
-The "starts when" column is the part worth keeping. Tier 2 does not follow
-Tier 1 because it is numbered next; it follows evidence that someone is being
-refused for something on its list. Until then the return on a week of
-properties is higher than on a month of grammar, and today's three bugs are
-the argument.
+**What changed the "starts when" column.** It used to say Tier 2 waits for
+refusal counts from real traffic, on the argument that choosing between window
+functions, `PIVOT` and the type grammar would otherwise be a guess. That
+argument was right, and the harvest answered it a different way: putting
+sqlglot's whole dialect contract in front of the port turned 3,041 refusals
+into five clusters with counts, and the largest — 30% of everything, in one
+mechanism — is not on the old Tier 2 list at all.
+
+So the guess is gone without waiting for traffic. Traffic still decides the
+ORDER inside a phase, and the refusal instrument still earns its place for
+that. It is no longer the gate on starting.
 
 ## Relationship to the parity plan
 
