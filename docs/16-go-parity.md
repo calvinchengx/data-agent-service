@@ -47,6 +47,11 @@ is its *shape*.
 
 ## Phase A — make the Go guard genuinely fail closed
 
+> **Done, by the port rather than by this plan.** `services/warehouse-query-go/sqlguard.go`
+> now walks a tree from [`sqlglot-go`](https://github.com/calvinchengx/sqlglot-go)
+> and the tokeniser is gone — 650 lines to 446. It fails closed because it
+> reads the whole statement, not because it recognises more shapes.
+>
 > **Superseded by `docs/17-sqlglot-go.md`.** The positive FROM grammar below
 > was a patch for one clause; the decision is to port sqlglot's parser to Go
 > so the whole statement is a tree. Kept for the record of what the patch
@@ -81,10 +86,26 @@ becomes true.
 
 ## Phase B — the shared corpus becomes the source of truth
 
-Today the refusal corpus is written three times: `tests/test_sqlguard.py`,
-`sqlguard_test.go`, and `services/conformance/run.py`. Three copies of one
-list drift, and when one implementation's copy is missing a case, that
-implementation is simply untested on it.
+**Half done.** `services/contract/guard_corpus.json` now records the Python
+guard's verdict on all 44 contract statements: permitted or not, the reason,
+and for a permitted one the exact statement that will run, the tables and
+columns reported, and the row ceiling. `sqlguard_test.go` is held to the whole
+verdict, so a caller cannot tell which executor answered — and `make
+guard-corpus` regenerates it while CI regenerates and diffs it, so the record
+cannot drift from the guard it describes.
+
+That closed a divergence neither suite had noticed: the Go guard refused
+`SELECT dbo.fct_sales` as "expected FROM" where Python has always said "the
+query reads no table". Both messages satisfied the fragment the contract
+asserts; only comparing whole verdicts surfaced it. Two more followed — a
+capped `UNION` was written as `… LIMIT 500`, which T-SQL does not accept and
+which sqlglot wraps in a `SELECT TOP 500 * FROM (…)`, and the schema allow-list
+was rendered differently in refusal messages.
+
+**Remaining:** the statement list itself still lives in
+`tests/test_sqlguard.py` and is read out of it by the generator. Moving the
+list into the JSON, so one file feeds `tests/test_sqlguard.py`,
+`sqlguard_test.go` and `services/conformance/run.py`, is the other half.
 
 Move the corpus to **one data file** — `services/contract/guard_corpus.json` —
 with each case naming the dialect, the statement, and whether it must be

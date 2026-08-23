@@ -128,9 +128,17 @@ func Guard(sql string, p Policy) (*Verdict, error) {
 		return nil, denied("the query reads no table")
 	}
 
-	rowLimit, err := applyCeiling(root, p)
+	// Read the columns before the ceiling is applied: capping a set operation
+	// wraps it in `SELECT * FROM (…)`, and that star is the guard's own, not
+	// something the caller asked to read.
+	columns := columnsRead(tree, tables)
+
+	rowLimit, capped, err := applyCeiling(root, p)
 	if err != nil {
 		return nil, err
+	}
+	if capped != nil {
+		tree = capped
 	}
 	rewritten, err := sqlglot.Generate(tree, p.Dialect)
 	if err != nil {
@@ -140,7 +148,7 @@ func Guard(sql string, p Policy) (*Verdict, error) {
 	return &Verdict{
 		SQL:      rewritten,
 		Tables:   tables,
-		Columns:  columnsRead(tree, tables),
+		Columns:  columns,
 		RowLimit: rowLimit,
 	}, nil
 }
@@ -151,12 +159,29 @@ func Guard(sql string, p Policy) (*Verdict, error) {
 func parseRefusal(err error, p Policy) error {
 	var notAQuery *sqlglot.NotAQueryError
 	if errors.As(err, &notAQuery) {
-		return denied("%s is not allowed; this endpoint is read-only", notAQuery.Kind)
+		return denied("only SELECT is allowed; this endpoint is read-only (got %s)",
+			statementClass(notAQuery.Kind))
 	}
 	if errors.Is(err, sqlglot.ErrMultipleStatements) {
 		return denied("exactly one statement is allowed")
 	}
 	return denied("could not parse as %s: %v", p.Dialect, err)
+}
+
+// statementClass names a statement the way the Python guard names it: after
+// the node class sqlglot would have built, not after the keyword. The two
+// differ for exactly two statements, and a caller comparing the executors'
+// refusals should not have to know which one answered.
+var statementClasses = map[string]string{
+	"TRUNCATE": "TRUNCATETABLE",
+	"EXEC":     "EXECUTE",
+}
+
+func statementClass(keyword string) string {
+	if class, ok := statementClasses[keyword]; ok {
+		return class
+	}
+	return keyword
 }
 
 func refuseForbiddenNodes(tree *sqlglot.Expression) error {
@@ -217,8 +242,8 @@ func refuseFunctionsUsedAsTables(tree *sqlglot.Expression, p Policy) error {
 		if inner == nil || inner.Class == "Subquery" || inner.Class == "Select" {
 			continue
 		}
-		return denied("%s is a function used as a table; only tables in %v may be read",
-			renderNode(inner, p), sortedSchemas(p))
+		return denied("%s is a function used as a table; only tables in %s may be read",
+			renderNode(inner, p), quotedSchemas(p))
 	}
 	return nil
 }
@@ -252,8 +277,8 @@ func tablesRead(tree *sqlglot.Expression, p Policy) ([]string, error) {
 		// covers the functions no one has thought of yet, which is the only
 		// kind that matters.
 		if this := t.This(); this == nil || this.Class != "Identifier" {
-			return nil, denied("%s is a table function, not a table; only tables in %v may be read",
-				renderNode(this, p), sortedSchemas(p))
+			return nil, denied("%s is a table function, not a table; only tables in %s may be read",
+				renderNode(this, p), quotedSchemas(p))
 		}
 
 		catalog, schema, name := tableName(t)
@@ -375,25 +400,74 @@ func columnsRead(tree *sqlglot.Expression, tables []string) []string {
 // applyCeiling enforces the row ceiling by rewriting the tree, keeping a
 // smaller caller-supplied limit if there is one. Which construct the dialect
 // writes -- TOP in front, LIMIT at the end -- is the generator's business.
-func applyCeiling(root *sqlglot.Expression, p Policy) (int, error) {
+//
+// A set operation is the exception, and the reason this is not simply "set
+// the limit arg": T-SQL has no LIMIT, and TOP belongs to a SELECT, so a
+// capped UNION has to be wrapped in one. sqlglot does the same, and the two
+// executors have to send the engine the same statement.
+func applyCeiling(root *sqlglot.Expression, p Policy) (int, *sqlglot.Expression, error) {
 	cap := p.MaxRows
 	existing, _ := root.Args["limit"].(*sqlglot.Expression)
 	current, err := callerLimit(existing)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if current > 0 && current <= cap {
-		return current, nil
+		return current, nil, nil
 	}
-	root.Set("limit", sqlglot.New("Limit",
+
+	limit := sqlglot.New("Limit",
 		sqlglot.Arg{Key: "this", Value: nil},
 		sqlglot.Arg{Key: "expression", Value: sqlglot.New("Literal",
 			sqlglot.Arg{Key: "this", Value: strconv.Itoa(cap)},
 			sqlglot.Arg{Key: "is_string", Value: false})},
 		sqlglot.Arg{Key: "limit_options", Value: nil},
 		sqlglot.Arg{Key: "expressions", Value: nil},
-	))
-	return cap, nil
+	)
+
+	if root.Class != "Select" && topDialect(p) {
+		// TOP belongs to a SELECT, so a capped set operation is wrapped in
+		// one. The alias is sqlglot's, so both executors name it the same.
+		wrapped := newSelect()
+		wrapped.Set("expressions", []*sqlglot.Expression{newStar()})
+		wrapped.Set("limit", limit)
+		wrapped.Set("from_", sqlglot.New("From", sqlglot.Arg{Key: "this", Value: sqlglot.New("Subquery",
+			sqlglot.Arg{Key: "this", Value: root},
+			sqlglot.Arg{Key: "alias", Value: sqlglot.New("TableAlias",
+				sqlglot.Arg{Key: "this", Value: sqlglot.New("Identifier",
+					sqlglot.Arg{Key: "this", Value: "_l_0"},
+					sqlglot.Arg{Key: "quoted", Value: false})},
+				sqlglot.Arg{Key: "columns", Value: nil})},
+			sqlglot.Arg{Key: "sample", Value: nil})}))
+		return cap, wrapped, nil
+	}
+
+	root.Set("limit", limit)
+	return cap, nil, nil
+}
+
+// newSelect builds a Select with the argument order the reference constructs
+// it with, so a tree the guard assembles dumps and writes like a parsed one.
+func newSelect() *sqlglot.Expression {
+	sel := sqlglot.New("Select")
+	for _, key := range []string{
+		"kind", "hint", "distinct", "expressions", "limit", "exclude", "operation_modifiers",
+	} {
+		sel.Set(key, nil)
+	}
+	return sel
+}
+
+func newStar() *sqlglot.Expression {
+	return sqlglot.New("Star",
+		sqlglot.Arg{Key: "ilike", Value: nil}, sqlglot.Arg{Key: "except_", Value: nil},
+		sqlglot.Arg{Key: "replace", Value: nil}, sqlglot.Arg{Key: "rename", Value: nil})
+}
+
+// topDialect reports whether the dialect writes its row ceiling as TOP.
+func topDialect(p Policy) bool {
+	cfg, ok := sqlglot.ConfigFor(p.Dialect)
+	return ok && cfg.Tables.LimitIsTop
 }
 
 // callerLimit is the row limit the caller asked for, or 0 if there isn't one.
@@ -419,6 +493,16 @@ func callerLimit(limit *sqlglot.Expression) (int, error) {
 		return 0, nil // a non-literal limit is treated as absent
 	}
 	return n, nil
+}
+
+// quotedSchemas renders the allow-list the way the Python guard does, so the
+// two executors' refusals are the same string and not merely the same idea.
+func quotedSchemas(p Policy) string {
+	out := sortedSchemas(p)
+	for i, s := range out {
+		out[i] = "'" + s + "'"
+	}
+	return "[" + strings.Join(out, ", ") + "]"
 }
 
 func sortedSchemas(p Policy) []string {

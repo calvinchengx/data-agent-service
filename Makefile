@@ -23,7 +23,7 @@ endif
 
 PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
-.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance client-config ask docs coverage coverage-python coverage-go coverage-manifest witnesses-manifest witnesses-check unit
+.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance client-config ask docs coverage coverage-python coverage-go coverage-manifest witnesses-manifest witnesses-check unit guard-corpus
 
 help: ## Show the available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -109,6 +109,9 @@ format: ## Apply formatting and safe fixes — the only target that edits files
 	$(RUFF) check . --fix
 	$(RUFF) format .
 	docker run --rm -v "$(PWD):/src" -w /src/services/warehouse-query-go $(GOLANGCI) golangci-lint fmt ./...
+
+guard-corpus: ## Re-record the Python guard's verdict on every contract statement
+	uv run python services/contract/gen_guard_corpus.py
 
 conformance: ## The executor contract, against whichever implementation is running
 	$(TOOLS) python -m services.conformance.run

@@ -101,7 +101,10 @@ def guard(sql: str, policy: Policy) -> Verdict:
     except Exception as e:  # noqa: BLE001 — sqlglot raises several unrelated types
         raise Denied(f"could not parse as {policy.dialect}: {e}") from None
     if len(statements) != 1:
-        raise Denied(f"exactly one statement is allowed; got {len(statements)}")
+        # No count: the Go guard refuses at the second statement rather than
+        # parsing the rest, and a number neither caller can act on is not
+        # worth making the two implementations say different things.
+        raise Denied("exactly one statement is allowed")
     tree = statements[0]
 
     # 2. root must be a SELECT (or a CTE/set-operation over SELECTs)
