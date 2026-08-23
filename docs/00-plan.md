@@ -103,6 +103,7 @@ Agent workflow (prompt encodes the *workflow*, never a table name): find glossar
 | C15 | `agent/skills/` | SKILL.md folders (Agent SDK) | generic | Procedural skills only: `om-grounded-sql`, `dialect-<x>`, `result-presentation`, `dashboard-authoring`, `om-context-native`; selected by config; hashes pinned into eval reports |
 | C16 | `promoter/` | Py (sqlglot) | generic | Canonicalise audited SQL into literal-free templates; pseudonymous user counts; k-threshold + DP on release; catalog-derived titles; `list_dashboard_candidates`; OM write-back incl. catalog gaps; **no natural language stored** (§17) |
 | C17 | `publisher/` | Py | generic | Deterministic TMDL/TMSL + PBIR generators from a template; publish `SemanticModel` + `Report` via Fabric REST under OBO; OM `Dashboard` lineage; DAX-vs-SQL verification |
+| C18 | `services/warehouse-query-{py,go}` access layer | + OM tags | generic | Rules may deny by TAG as well as by column; tag vocabulary is the catalog's, not ours; refresh interval and unreachable-catalog behaviour are config (§19) |
 
 ---
 
@@ -211,6 +212,7 @@ Emulator numbers are relative (laptop SQL Server sidecar), not Fabric capacity �
 | 14 Skills | C15 | evals re-run with skill hashes pinned; no scorecard regression vs Phase 7 | 7 |
 | 15 Promotion ✅ | C16 + 15b catalog gaps + persona-replay eval | promoter fires on seeded recurring template, not on one-offs; no prose in store; title "Resolution Time by Team"; candidates visible only to `DAS_PROMOTE_ROLES` | 8, 14 |
 | 16 Dashboard publish ✅ | C17 | `SemanticModel` + `Report` items created in Fabric via OBO (emulator: definition persisted; rendering prod-only); OM `Dashboard` lineage present; DAX measure == SQL answer | 15 |
+| 18 Catalog-carried rules | C18 | a column tagged in OpenMetadata is refused by BOTH executors without a settings change; an unresolvable tag fails at startup | 6, 13 |
 | 12 Stretch | LLM via APIM (`llm-token-limit`); `DAS_OM_CONTEXT_MODE=native` | 429 after quota; native passes same evals | 11 |
 
 MVP = phases 0–7 + 10. Then 8, 9, 11, 12.
@@ -325,3 +327,81 @@ What the design gives up, knowingly: literal values. "APAC every Monday" surface
 | Verify | model's DAX measure == SQL answer | emulator DAX evaluator locally; XMLA in prod | both |
 
 Flow: candidate → draft → user approval → publish (OBO) → OM lineage → report URL returned.
+
+---
+
+## 19. Access rules the catalog can carry (C18)
+
+Today `DAS_ACCESS_RULES` names withheld columns literally —
+`dbo.dim_customer.email`, `support.agents.email`. That list is maintained by
+hand and has to track a catalog it does not read: a steward who classifies a
+new column as personal data protects nothing until somebody remembers to edit
+JSON. The catalog already knows; the executor does not ask.
+
+The change is to let a rule name a **tag** as well as a column, and resolve
+tags against OpenMetadata at startup and on refresh.
+
+```json
+[{"role": "Data.Analyst",
+  "allow_tables": ["dbo.*"],
+  "deny_columns": ["dbo.dim_party.email"],
+  "deny_tagged":  ["PII.Sensitive", "Contoso Restricted.Under NDA"]}]
+```
+
+### Nothing about the vocabulary is hardcoded
+
+Verified against the running instance rather than assumed: OpenMetadata ships
+`PII`, `PersonalData`, `Tier` and `Certification` as `provider: system`, and a
+deployment can create its own with `provider: user`. A custom classification
+takes tags, the tags apply to columns, and they read back through the same API
+as the built-ins — so an organisation with its own vocabulary
+(`Restricted`, `ExportControlled`, `Under NDA`) is not a special case.
+
+Therefore:
+
+| Decision | Where it lives | Why not in code |
+|---|---|---|
+| Which tags deny | `deny_tagged` in `DAS_ACCESS_RULES`, per role | Two organisations classify differently; neither is more correct |
+| Which classification is authoritative | nothing — a rule names a **tag FQN**, and a classification is only its prefix | Hardcoding `PII.*` would make everyone else's vocabulary second-class |
+| Whether a tag is exclusive | the catalog's `mutuallyExclusive`, read not assumed | `PII` ships exclusive; a custom one need not be, and the rule engine must not care |
+| How often tags are re-read | `DAS_TAG_REFRESH_S` | A tag added at 09:00 should deny before the next deploy |
+| What happens when the catalog is unreachable | `DAS_TAG_FAILURE` (`closed` or `last-known`) | An availability-versus-security trade a deployment makes, not us |
+
+The seeded datasets get their PII columns tagged so the local stack exercises
+this, but the seeding is dataset config (`semantics.py`), not executor code —
+the same boundary that keeps business meaning out of prompts.
+
+### Rules that must be stated, because tags are looser than columns
+
+* **Column tags only, to begin with.** OpenMetadata also tags tables, and
+  propagates some tags through lineage. A table tag denying every column is a
+  much larger blast radius than it looks, so the first version reads column
+  tags and says so; table-level and propagated tags are a later decision with
+  their own witness.
+* **Tags narrow, exactly like columns do.** A rule cannot grant. The engine's
+  own permissions still apply underneath.
+* **A tag that resolves to nothing is an error, not an allow.** A typo in
+  `deny_tagged` must fail loudly at startup — silently denying nothing is the
+  worst outcome available, and it looks like success.
+* **The resolved set is auditable.** `list_sources` (or an operator endpoint)
+  reports which columns a role is denied and *why* — literal rule or tag —
+  because "the catalog said so" is not reviewable unless you can see what it
+  said.
+
+### Both executors, one contract
+
+The Go executor resolves the same way against the same catalog. `services/
+contract/openapi.json` and the conformance suite gain assertions that a
+tag-denied column is refused identically by both — the last several defects
+here were one implementation disagreeing with the other, and a rule source
+that only one of them reads would be the same mistake in a new place.
+
+### What this is not
+
+It is not row-level security, and it does not replace the source's own
+permissions. A user who cannot see a table in Fabric still cannot see it.
+`authz_tier=service` sources remain weaker by construction, and tag-derived
+rules do not paper over that — they are the only per-user layer there, which
+`docs/05-authorization.md` already says.
+
+---

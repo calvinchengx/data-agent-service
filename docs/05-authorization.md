@@ -93,6 +93,52 @@ Two properties worth stating, because they are easy to get wrong:
 * **Ambiguity fails closed.** An unqualified column name with several tables in
   scope is attributed to all of them, so a denial anywhere applies.
 
+## Planned: rules the catalog carries (§19 of the plan)
+
+Everything above names columns literally, which means the list has to track a
+catalog it never reads. A steward who classifies a new column as personal data
+protects nothing until somebody edits JSON. The catalog already knows.
+
+The planned addition lets a rule name a **tag**:
+
+```json
+[{"role": "Data.Analyst",
+  "allow_tables": ["dbo.*"],
+  "deny_columns": ["dbo.dim_party.email"],
+  "deny_tagged":  ["PII.Sensitive", "Contoso Restricted.Under NDA"]}]
+```
+
+**The vocabulary is yours, not ours.** OpenMetadata ships `PII`,
+`PersonalData`, `Tier` and `Certification` as system classifications, and a
+deployment can create its own — checked against a running instance, not
+assumed: a user-provided classification takes tags, the tags apply to columns,
+and they read back through the same API as the built-ins. So a rule names a
+tag **fully-qualified name**, and no classification is privileged in code.
+`Contoso Restricted.Under NDA` is as first-class as `PII.Sensitive`.
+
+Four things that will be configuration rather than code:
+
+| Setting | Decides |
+|---|---|
+| `deny_tagged` per role | which tags withhold a column |
+| `DAS_TAG_REFRESH_S` | how soon a newly tagged column starts being refused |
+| `DAS_TAG_FAILURE` | `closed` or `last-known` when the catalog is unreachable |
+| the tag FQNs themselves | your classification scheme, whatever it is |
+
+And three rules that will be stated rather than discovered:
+
+* **Column tags only at first.** OpenMetadata also tags tables and propagates
+  tags through lineage; a table tag denies far more than it appears to, so
+  that is a separate decision with its own witness.
+* **An unresolvable tag fails at startup.** A typo in `deny_tagged` that
+  silently denied nothing would look exactly like success.
+* **You can see what was derived.** The resolved denials are reportable per
+  role, with each one marked as coming from a literal rule or from a tag —
+  "the catalog said so" is not reviewable unless you can read what it said.
+
+This narrows like every other rule: it cannot grant, and the source's own
+permissions still apply underneath.
+
 ## Why a refusal's origin matters
 
 The agent behaves differently for "you may not" than for "that query is wrong",
