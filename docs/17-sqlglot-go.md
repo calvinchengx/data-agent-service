@@ -93,7 +93,20 @@ one, and the guard only needs the kind. And `SELECT … INTO` is the exception
 that proves it: a query that writes, where only the tree says so, so it is
 parsed.
 
-Next: the generator, so the guard can emit the statement it rewrote.
+The port now also **writes SQL back out**, held to the reference's own output
+string for string: 593 of the statements it parses are written back
+identically, and the guard's rewrite — inject a row ceiling, emit — lands as
+`TOP 500` in T-SQL and `LIMIT 500` in DuckDB from one edit to one node. Where a
+dialect would transform a statement in a way the port does not perform, the
+generator refuses rather than emit something close.
+
+**Tier 1 is complete in the port, and the executor has switched over.**
+`services/warehouse-query-go/sqlguard.go` walks a tree instead of scanning
+tokens (650 lines → 446), and both guards are held to one recorded verdict —
+see Phase B in `docs/16-go-parity.md`. What remains of the parity plan is Phase
+C (differential fuzzing), Phase D (the Go DuckDB, HTTP and Databricks
+adapters), and Phase E (running the contract against both executors on every
+build), none of which is port work.
 
 ### Tier 2 — everything a SELECT can contain
 
