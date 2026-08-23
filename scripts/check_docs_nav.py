@@ -38,31 +38,73 @@ def tracked_docs() -> set[str]:
     return {p[len("docs/") : -len(".md")] for p in out if p.endswith(".md")}
 
 
+def committed_config() -> str | None:
+    """astro.config.ts as HEAD has it, or None if HEAD has no such file."""
+    r = subprocess.run(
+        ["git", "show", f"HEAD:{CONFIG.relative_to(ROOT)}"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return r.stdout if r.returncode == 0 else None
+
+
+def worktree_docs() -> set[str]:
+    return {str(q.relative_to(ROOT / "docs"))[: -len(".md")] for q in (ROOT / "docs").rglob("*.md")}
+
+
+def disagreements(slugs: list[str], docs: set[str], committed: bool) -> list[str]:
+    """Every way the two can fail to describe the same site."""
+    out: list[str] = []
+    for slug in (s for s in slugs if s not in docs and s not in GENERATED):
+        if committed:
+            local = (ROOT / "docs" / f"{slug}.md").exists()
+            why = "exists locally but is NOT COMMITTED" if local else "does not exist"
+        else:
+            why = "does not exist"
+        out.append(f"sidebar names '{slug}': docs/{slug}.md {why}")
+    out += [
+        f"docs/{d}.md exists but no sidebar entry reaches it" for d in sorted(docs - set(slugs))
+    ]
+    out += [
+        f"sidebar names '{s}' more than once"
+        for s in sorted({s for s in slugs if slugs.count(s) > 1})
+    ]
+    return out
+
+
 def main() -> int:
-    slugs = sidebar_slugs(CONFIG.read_text())
-    if not slugs:
-        print(f"no sidebar slugs found in {CONFIG.relative_to(ROOT)} -- has its shape changed?")
-        return 1
-    docs = tracked_docs()
+    # BOTH states, because they answer different questions and this script got
+    # it half right for a day: it judged docs by `git ls-files` and the sidebar
+    # by the file on disk. A sidebar entry left uncommitted beside a committed
+    # document therefore passed here and failed the build -- the working tree
+    # reporting a laptop's state, which is the very thing this exists to catch.
+    # See docs/11-ci.md, "The working tree is not the repository".
+    checks = [("as committed (what CI builds)", committed_config(), tracked_docs())]
+    if (disk := CONFIG.read_text()) != checks[0][1]:
+        checks.append(("in the working tree (what you see)", disk, worktree_docs()))
 
-    orphans = [s for s in slugs if s not in docs and s not in GENERATED]
-    unreachable = sorted(d for d in docs if d not in slugs)
-    duplicates = sorted({s for s in slugs if slugs.count(s) > 1})
-
-    for slug in orphans:
-        local = (ROOT / "docs" / f"{slug}.md").exists()
-        why = "exists locally but is NOT COMMITTED" if local else "does not exist"
-        print(f"sidebar names '{slug}': docs/{slug}.md {why}")
-    for slug in unreachable:
-        print(f"docs/{slug}.md is committed but no sidebar entry reaches it")
-    for slug in duplicates:
-        print(f"sidebar names '{slug}' more than once")
-
-    if orphans or unreachable or duplicates:
-        print(f"\n{len(slugs)} sidebar entries, {len(docs)} committed docs -- they disagree.")
-        return 1
-    print(f"sidebar and docs/ agree: {len(docs)} pages, all reachable, all committed")
-    return 0
+    failed = False
+    for label, config, docs in checks:
+        if config is None:
+            print(f"{label}: {CONFIG.relative_to(ROOT)} is not in HEAD -- commit it first.")
+            failed = True
+            continue
+        slugs = sidebar_slugs(config)
+        if not slugs:
+            print(f"{label}: no sidebar slugs found -- has the config's shape changed?")
+            failed = True
+            continue
+        problems = disagreements(slugs, docs, committed=label.startswith("as committed"))
+        if problems:
+            failed = True
+            print(f"{label} -- {len(slugs)} sidebar entries, {len(docs)} documents:")
+            for line in problems:
+                print(f"  {line}")
+        else:
+            print(f"{label}: {len(docs)} pages, all reachable")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
