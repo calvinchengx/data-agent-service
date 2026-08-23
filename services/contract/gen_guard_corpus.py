@@ -1,26 +1,34 @@
-"""Record the Python guard's verdict on every statement the contract covers.
+"""Re-record the Python guard's verdict on every statement in the contract.
 
-    uv run python services/contract/gen_guard_corpus.py
+    make guard-corpus
 
-The two executors must agree, and "both were tested on the same examples" is
-not agreement -- the Go guard once refused `SELECT dbo.fct_sales` with a
-message the Python guard has never produced, and nothing caught it because no
-shared case covered that shape.
+services/contract/guard_corpus.json is the guard's contract, and the only copy
+of it. It carries the statements, what each must produce, why the case exists,
+and -- refreshed by this script -- the verdict the Python guard actually
+returns: for a permitted statement the exact SQL that will run, the tables and
+columns reported and the row ceiling; for a refused one the reason in full.
 
-So the Python guard's verdict IS the contract: for each statement, whether it
-is permitted, the reason if not, and for a permitted one the exact statement
-that will run, the tables and columns it reads, and the row ceiling. The Go
-guard is held to the file, so it needs no Python to run -- and CI regenerates
-the file and diffs it, so the file cannot drift from the guard it describes.
+Three suites read it and none of them owns it:
 
-The statements are read out of tests/test_sqlguard.py rather than duplicated
-here. Moving them into this file, so one list feeds both suites, is the
-remaining half of Phase B in docs/16-go-parity.md.
+  * tests/test_sqlguard.py runs it against the Python guard;
+  * services/warehouse-query-go/guard_parity_test.go runs it against the Go
+    guard and compares the WHOLE verdict, not a fragment of the message;
+  * services/conformance/run.py sends the cases marked `contract` to whichever
+    executor is running, over HTTP.
+
+It was three copies until this file existed, and they had drifted: the Go
+guard refused `SELECT dbo.fct_sales` with a message the Python guard has never
+produced, and both suites passed, because each asserted only that the refusal
+mentioned the right phrase.
+
+This script never invents a case. It reads the statements that are already in
+the file and refreshes what the guard does with them, so a change in behaviour
+shows up as a diff to review rather than as a test that quietly still passes.
+Adding a case means editing the JSON by hand and running this.
 """
 
 from __future__ import annotations
 
-import ast
 import json
 import pathlib
 import sys
@@ -30,6 +38,8 @@ sys.path.insert(0, str(ROOT / "services" / "warehouse-query-py"))
 
 from sqlguard import Denied, Policy, guard  # noqa: E402
 
+CORPUS = ROOT / "services" / "contract" / "guard_corpus.json"
+
 POLICIES = {
     "tsql": Policy(
         dialect="tsql", allowed_schemas=("dbo",), max_rows=500, database="contoso_warehouse"
@@ -37,70 +47,50 @@ POLICIES = {
     "duckdb": Policy(dialect="duckdb", allowed_schemas=("main",), max_rows=500),
 }
 
-
-def string_literals(node: ast.AST) -> list[str]:
-    return [
-        e.value
-        for e in getattr(node, "elts", [])
-        if isinstance(e, ast.Constant) and isinstance(e.value, str)
-    ]
-
-
-def statements() -> list[tuple[str, str, str]]:
-    """(dialect, sql, required fragment) from the guard's own test module."""
-    tree = ast.parse((ROOT / "tests" / "test_sqlguard.py").read_text())
-    out: list[tuple[str, str, str]] = []
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                name = getattr(target, "id", "")
-                dialect = "duckdb" if "DUCKDB" in name else "tsql"
-                if "ALLOWED" in name:
-                    out += [(dialect, sql, "") for sql in string_literals(node.value)]
-                elif "DENIED" in name:
-                    for element in getattr(node.value, "elts", []):
-                        if isinstance(element, ast.Tuple) and len(element.elts) == 2:
-                            sql, fragment = element.elts
-                            if isinstance(sql, ast.Constant) and isinstance(fragment, ast.Constant):
-                                out.append((dialect, sql.value, fragment.value))
-        if isinstance(node, ast.FunctionDef):
-            body = ast.dump(node)
-            dialect = "duckdb" if "id='D'" in body else "tsql"
-            for decorator in node.decorator_list:
-                if (
-                    isinstance(decorator, ast.Call)
-                    and getattr(decorator.func, "attr", "") == "parametrize"
-                ):
-                    for argument in decorator.args[1:]:
-                        out += [(dialect, sql, "") for sql in string_literals(argument)]
-    return out
+# The keys a case carries, in the order they are written, so a regenerated
+# file diffs against the previous one line for line.
+FIELDS = ("dialect", "sql", "expect", "fragment", "why", "contract")
 
 
 def main() -> int:
-    cases = []
-    for dialect, sql, fragment in statements():
-        if not sql.strip():
-            continue
-        case: dict[str, object] = {"dialect": dialect, "sql": sql, "fragment": fragment}
-        try:
-            verdict = guard(sql, POLICIES[dialect])
-        except Denied as e:
-            case.update(permitted=False, reason=str(e))
-        else:
-            case.update(
-                permitted=True,
-                rewritten=verdict.sql,
-                tables=list(verdict.tables),
-                columns=list(verdict.columns),
-                row_limit=verdict.row_limit,
-            )
-        cases.append(case)
+    corpus = json.loads(CORPUS.read_text())
+    out = []
+    disagreements = []
 
-    cases.sort(key=lambda c: (c["dialect"], c["sql"]))
-    out = ROOT / "services" / "contract" / "guard_corpus.json"
-    out.write_text(json.dumps({"cases": cases}, indent=1) + "\n")
-    permitted = sum(1 for c in cases if c["permitted"])
-    print(f"{len(cases)} statements: {permitted} permitted, {len(cases) - permitted} refused")
+    for case in corpus["cases"]:
+        recorded = {k: case[k] for k in FIELDS}
+        try:
+            verdict = guard(case["sql"], POLICIES[case["dialect"]])
+        except Denied as e:
+            recorded["verdict"] = {"permitted": False, "reason": str(e)}
+            if case["expect"] != "refused":
+                disagreements.append(f"{case['sql']!r} is expected to be permitted: {e}")
+            elif case["fragment"].lower() not in str(e).lower():
+                disagreements.append(
+                    f"{case['sql']!r} refused without mentioning {case['fragment']!r}: {e}"
+                )
+        else:
+            recorded["verdict"] = {
+                "permitted": True,
+                "rewritten": verdict.sql,
+                "tables": list(verdict.tables),
+                "columns": list(verdict.columns),
+                "row_limit": verdict.row_limit,
+            }
+            if case["expect"] != "permitted":
+                disagreements.append(f"{case['sql']!r} is expected to be refused, and was not")
+        out.append(recorded)
+
+    out.sort(key=lambda c: (c["dialect"], c["expect"], c["sql"]))
+    CORPUS.write_text(json.dumps({"cases": out}, indent=1) + "\n")
+
+    permitted = sum(1 for c in out if c["verdict"]["permitted"])
+    print(f"{len(out)} statements: {permitted} permitted, {len(out) - permitted} refused")
+    if disagreements:
+        print("the Python guard does not do what the corpus says:")
+        for d in disagreements:
+            print(f"  {d}")
+        return 1
     return 0
 
 

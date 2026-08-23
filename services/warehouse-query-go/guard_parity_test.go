@@ -27,15 +27,17 @@ func TestTheTwoGuardsAgree(t *testing.T) {
 	}
 	var corpus struct {
 		Cases []struct {
-			Dialect   string   `json:"dialect"`
-			SQL       string   `json:"sql"`
-			Fragment  string   `json:"fragment"`
-			Permitted bool     `json:"permitted"`
-			Reason    string   `json:"reason"`
-			Rewritten string   `json:"rewritten"`
-			Tables    []string `json:"tables"`
-			Columns   []string `json:"columns"`
-			RowLimit  int      `json:"row_limit"`
+			Dialect  string `json:"dialect"`
+			SQL      string `json:"sql"`
+			Fragment string `json:"fragment"`
+			Verdict  struct {
+				Permitted bool     `json:"permitted"`
+				Reason    string   `json:"reason"`
+				Rewritten string   `json:"rewritten"`
+				Tables    []string `json:"tables"`
+				Columns   []string `json:"columns"`
+				RowLimit  int      `json:"row_limit"`
+			} `json:"verdict"`
 		} `json:"cases"`
 	}
 	if err := json.Unmarshal(raw, &corpus); err != nil {
@@ -54,41 +56,41 @@ func TestTheTwoGuardsAgree(t *testing.T) {
 
 	for _, c := range corpus.Cases {
 		verdict, err := Guard(c.SQL, policies[c.Dialect])
-		if c.Permitted != (err == nil) {
+		if c.Verdict.Permitted != (err == nil) {
 			t.Errorf("[%s] %q\n  python %s, go %s",
-				c.Dialect, c.SQL, permitted(c.Permitted), permitted(err == nil))
+				c.Dialect, c.SQL, permitted(c.Verdict.Permitted), permitted(err == nil))
 			continue
 		}
 
-		if !c.Permitted {
+		if !c.Verdict.Permitted {
 			// Where the refusal is that the statement does not parse, the two
 			// parsers say so in their own words -- one is sqlglot's message
 			// and one is the port's. What the contract requires is the
 			// reason, which the fragment names.
-			if strings.Contains(c.Reason, "could not parse") {
+			if strings.Contains(c.Verdict.Reason, "could not parse") {
 				if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(c.Fragment)) {
 					t.Errorf("[%s] %q refused for the wrong reason\n  want it to mention %q\n  got %q",
 						c.Dialect, c.SQL, c.Fragment, err.Error())
 				}
 				continue
 			}
-			if err.Error() != c.Reason {
+			if err.Error() != c.Verdict.Reason {
 				t.Errorf("[%s] %q refused differently\n  python: %s\n  go:     %s",
-					c.Dialect, c.SQL, c.Reason, err.Error())
+					c.Dialect, c.SQL, c.Verdict.Reason, err.Error())
 			}
 			continue
 		}
 
 		switch {
-		case verdict.SQL != c.Rewritten:
+		case verdict.SQL != c.Verdict.Rewritten:
 			t.Errorf("[%s] %q would run a different statement\n  python: %s\n  go:     %s",
-				c.Dialect, c.SQL, c.Rewritten, verdict.SQL)
-		case verdict.RowLimit != c.RowLimit:
-			t.Errorf("[%s] %q: row ceiling %d, python %d", c.Dialect, c.SQL, verdict.RowLimit, c.RowLimit)
-		case !sameStrings(verdict.Tables, c.Tables):
-			t.Errorf("[%s] %q reports tables %v, python %v", c.Dialect, c.SQL, verdict.Tables, c.Tables)
-		case !sameStrings(verdict.Columns, c.Columns):
-			t.Errorf("[%s] %q reports columns %v, python %v", c.Dialect, c.SQL, verdict.Columns, c.Columns)
+				c.Dialect, c.SQL, c.Verdict.Rewritten, verdict.SQL)
+		case verdict.RowLimit != c.Verdict.RowLimit:
+			t.Errorf("[%s] %q: row ceiling %d, python %d", c.Dialect, c.SQL, verdict.RowLimit, c.Verdict.RowLimit)
+		case !sameStrings(verdict.Tables, c.Verdict.Tables):
+			t.Errorf("[%s] %q reports tables %v, python %v", c.Dialect, c.SQL, verdict.Tables, c.Verdict.Tables)
+		case !sameStrings(verdict.Columns, c.Verdict.Columns):
+			t.Errorf("[%s] %q reports columns %v, python %v", c.Dialect, c.SQL, verdict.Columns, c.Verdict.Columns)
 		}
 	}
 	t.Logf("%d statements, both guards in agreement", len(corpus.Cases))

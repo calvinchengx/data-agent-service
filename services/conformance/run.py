@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import pathlib
 import sys
 
 from seed import common as c
@@ -81,52 +82,16 @@ class Executor:
         return bool(result.get("isError")), (content[0].get("text", "") if content else "")
 
 
-# Statement -> the phrase the refusal must contain. Same corpus both ways.
-REFUSED = {
-    "DROP TABLE dbo.fct_sales": "read-only",
-    "DELETE FROM dbo.fct_sales": "read-only",
-    "UPDATE dbo.fct_sales SET amount_usd = 0": "read-only",
-    "INSERT INTO dbo.fct_sales VALUES (1)": "read-only",
-    "TRUNCATE TABLE dbo.fct_sales": "read-only",
-    "SELECT * INTO dbo.copy FROM dbo.fct_sales": "read-only",
-    "SELECT 1; DROP TABLE dbo.fct_sales": "one statement",
-    "SELECT * FROM master.dbo.sysdatabases": "cross-database",
-    "SELECT * FROM OPENROWSET('a','b','c')": "not allowed",
-    # A table function is not a table. Both guards let a SCHEMA-QUALIFIED one
-    # through until this was pinned -- `dbo.read_csv_auto('/etc/passwd')`
-    # satisfies every other rule, and on an engine that reads files as
-    # relations that is arbitrary file access through a SELECT. Both had the
-    # hole, which is why the contract stayed green over it.
-    "SELECT * FROM dbo.read_csv_auto('/etc/passwd')": "table function",
-    "SELECT * FROM dbo.fct_sales, dbo.read_csv_auto('/etc/passwd')": "table function",
-    # `FROM a, b` names two tables and only the first follows the FROM
-    # keyword. The Go recogniser scanned only after FROM/JOIN, so the second
-    # was invisible to the schema allow-list, to the cross-database rule, and
-    # to the table list the access rules and the audit are built from.
-    "SELECT * FROM dbo.fct_sales, other.secrets": "not queryable",
-    "SELECT * FROM dbo.fct_sales, master.dbo.sysdatabases": "cross-database",
-    "SELECT * FROM dbo.fct_sales, unqualified": "schema-qualified",
-    # APPLY over a function: a relation with no Table node in it, so the
-    # schema check never saw it. Both implementations allowed it.
-    "SELECT * FROM dbo.fct_sales CROSS APPLY other.f(1)": "",
-    # A proportion is not a ceiling: `TOP 100 PERCENT` returns every row, and
-    # both implementations read its literal as a row count.
-    "SELECT TOP 100 PERCENT * FROM dbo.fct_sales": "proportion",
-    "SELECT * FROM other_schema.secrets": "not queryable",
-    "SELECT * FROM fct_sales": "schema-qualified",
-    "SELECT 1": "reads no table",
-    "SELECT * FRO dbo.x": "parse",
-    "": "empty",
-}
+# The guard's contract, read from the one file that holds it. The cases marked
+# `contract` are the ones worth sending over HTTP: the same statements the unit
+# suites run against each guard in-process, now against whichever executor is
+# actually up. See services/contract/gen_guard_corpus.py.
+_CORPUS = json.loads(
+    (pathlib.Path(__file__).resolve().parent.parent / "contract" / "guard_corpus.json").read_text()
+)["cases"]
 
-ALLOWED = [
-    "SELECT COUNT(*) AS n FROM dbo.fct_revenue_summary",
-    "SELECT TOP 5 product_name FROM dbo.dim_product ORDER BY list_price_usd DESC",
-    "WITH x AS (SELECT * FROM dbo.fct_sales) SELECT COUNT(*) FROM x",
-    "SELECT s.amount_usd FROM dbo.fct_sales s JOIN dbo.dim_product p ON p.product_id = s.product_id",
-    "SELECT country, SUM(revenue_usd) AS r FROM dbo.fct_revenue_summary GROUP BY country",
-]
-
+REFUSED = {c["sql"]: c["fragment"] for c in _CORPUS if c["contract"] and c["expect"] == "refused"}
+ALLOWED = [c["sql"] for c in _CORPUS if c["contract"] and c["expect"] == "permitted"]
 
 # Statements each tier's probe runs. Kept beside the checks rather than inline
 # so a new engine changes one line instead of hunting through assertions.

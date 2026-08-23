@@ -2,414 +2,813 @@
  "cases": [
   {
    "dialect": "duckdb",
-   "sql": "DELETE FROM main.tickets",
-   "fragment": "read-only",
-   "permitted": false,
-   "reason": "only SELECT is allowed; this endpoint is read-only (got DELETE)"
-  },
-  {
-   "dialect": "duckdb",
-   "sql": "DROP TABLE main.tickets",
-   "fragment": "read-only",
-   "permitted": false,
-   "reason": "only SELECT is allowed; this endpoint is read-only (got DROP)"
-  },
-  {
-   "dialect": "duckdb",
-   "sql": "INSERT INTO main.tickets VALUES (1)",
-   "fragment": "read-only",
-   "permitted": false,
-   "reason": "only SELECT is allowed; this endpoint is read-only (got INSERT)"
-  },
-  {
-   "dialect": "duckdb",
-   "sql": "SELECT * FROM main.glob('/**')",
-   "fragment": "",
-   "permitted": false,
-   "reason": "GLOB('/**') is a table function, not a table; only tables in ['main'] may be read"
-  },
-  {
-   "dialect": "duckdb",
-   "sql": "SELECT * FROM main.read_csv_auto('/etc/passwd')",
-   "fragment": "",
-   "permitted": false,
-   "reason": "READ_CSV_AUTO('/etc/passwd') is a table function, not a table; only tables in ['main'] may be read"
-  },
-  {
-   "dialect": "duckdb",
-   "sql": "SELECT * FROM main.read_parquet('s3://other/secrets.parquet')",
-   "fragment": "",
-   "permitted": false,
-   "reason": "READ_PARQUET('s3://other/secrets.parquet') is a table function, not a table; only tables in ['main'] may be read"
-  },
-  {
-   "dialect": "duckdb",
    "sql": "SELECT * FROM main.tickets ORDER BY minutes LIMIT 10",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": true,
-   "rewritten": "SELECT * FROM main.tickets ORDER BY minutes LIMIT 10",
-   "tables": [
-    "main.tickets"
-   ],
-   "columns": [
-    "main.tickets.*",
-    "main.tickets.minutes"
-   ],
-   "row_limit": 10
-  },
-  {
-   "dialect": "duckdb",
-   "sql": "SELECT * FROM main.tickets, main.read_csv_auto('/etc/passwd')",
-   "fragment": "",
-   "permitted": false,
-   "reason": "READ_CSV_AUTO('/etc/passwd') is a table function, not a table; only tables in ['main'] may be read"
-  },
-  {
-   "dialect": "duckdb",
-   "sql": "SELECT * FROM read_csv_auto('/etc/passwd')",
-   "fragment": "",
-   "permitted": false,
-   "reason": "READ_CSV_AUTO('/etc/passwd') is a table function, not a table; only tables in ['main'] may be read"
-  },
-  {
-   "dialect": "duckdb",
-   "sql": "SELECT * FROM secret.tickets",
-   "fragment": "not queryable",
-   "permitted": false,
-   "reason": "schema secret is not queryable; allowed: main"
-  },
-  {
-   "dialect": "duckdb",
-   "sql": "SELECT * FROM tickets",
-   "fragment": "schema-qualified",
-   "permitted": false,
-   "reason": "table tickets must be schema-qualified (e.g. main.tickets)"
-  },
-  {
-   "dialect": "duckdb",
-   "sql": "SELECT 1",
-   "fragment": "reads no table",
-   "permitted": false,
-   "reason": "the query reads no table"
-  },
-  {
-   "dialect": "duckdb",
-   "sql": "SELECT 1; DROP TABLE main.tickets",
-   "fragment": "one statement",
-   "permitted": false,
-   "reason": "exactly one statement is allowed"
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT * FROM main.tickets ORDER BY minutes LIMIT 10",
+    "tables": [
+     "main.tickets"
+    ],
+    "columns": [
+     "main.tickets.*",
+     "main.tickets.minutes"
+    ],
+    "row_limit": 10
+   }
   },
   {
    "dialect": "duckdb",
    "sql": "SELECT t.team FROM main.tickets t JOIN main.agents a ON a.team = t.team",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": true,
-   "rewritten": "SELECT t.team FROM main.tickets AS t JOIN main.agents AS a ON a.team = t.team LIMIT 500",
-   "tables": [
-    "main.agents",
-    "main.tickets"
-   ],
-   "columns": [
-    "main.agents.team",
-    "main.tickets.team"
-   ],
-   "row_limit": 500
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT t.team FROM main.tickets AS t JOIN main.agents AS a ON a.team = t.team LIMIT 500",
+    "tables": [
+     "main.agents",
+     "main.tickets"
+    ],
+    "columns": [
+     "main.agents.team",
+     "main.tickets.team"
+    ],
+    "row_limit": 500
+   }
   },
   {
    "dialect": "duckdb",
    "sql": "SELECT team, COUNT(*) AS n FROM main.tickets GROUP BY team",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": true,
-   "rewritten": "SELECT team, COUNT(*) AS n FROM main.tickets GROUP BY team LIMIT 500",
-   "tables": [
-    "main.tickets"
-   ],
-   "columns": [
-    "main.tickets.*",
-    "main.tickets.team"
-   ],
-   "row_limit": 500
-  },
-  {
-   "dialect": "duckdb",
-   "sql": "UPDATE main.tickets SET minutes = 0",
-   "fragment": "read-only",
-   "permitted": false,
-   "reason": "only SELECT is allowed; this endpoint is read-only (got UPDATE)"
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT team, COUNT(*) AS n FROM main.tickets GROUP BY team LIMIT 500",
+    "tables": [
+     "main.tickets"
+    ],
+    "columns": [
+     "main.tickets.*",
+     "main.tickets.team"
+    ],
+    "row_limit": 500
+   }
   },
   {
    "dialect": "duckdb",
    "sql": "WITH x AS (SELECT * FROM main.tickets) SELECT COUNT(*) FROM x",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": true,
-   "rewritten": "WITH x AS (SELECT * FROM main.tickets) SELECT COUNT(*) FROM x LIMIT 500",
-   "tables": [
-    "main.tickets"
-   ],
-   "columns": [
-    "main.tickets.*"
-   ],
-   "row_limit": 500
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "WITH x AS (SELECT * FROM main.tickets) SELECT COUNT(*) FROM x LIMIT 500",
+    "tables": [
+     "main.tickets"
+    ],
+    "columns": [
+     "main.tickets.*"
+    ],
+    "row_limit": 500
+   }
   },
   {
-   "dialect": "tsql",
-   "sql": "DELETE FROM dbo.fct_sales",
+   "dialect": "duckdb",
+   "sql": "",
+   "expect": "refused",
+   "fragment": "empty",
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "empty statement"
+   }
+  },
+  {
+   "dialect": "duckdb",
+   "sql": "DELETE FROM main.tickets",
+   "expect": "refused",
    "fragment": "read-only",
-   "permitted": false,
-   "reason": "only SELECT is allowed; this endpoint is read-only (got DELETE)"
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "only SELECT is allowed; this endpoint is read-only (got DELETE)"
+   }
   },
   {
-   "dialect": "tsql",
-   "sql": "DROP TABLE dbo.fct_sales",
+   "dialect": "duckdb",
+   "sql": "DROP TABLE main.tickets",
+   "expect": "refused",
    "fragment": "read-only",
-   "permitted": false,
-   "reason": "only SELECT is allowed; this endpoint is read-only (got DROP)"
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "only SELECT is allowed; this endpoint is read-only (got DROP)"
+   }
   },
   {
-   "dialect": "tsql",
-   "sql": "EXEC xp_cmdshell 'dir'",
-   "fragment": "",
-   "permitted": false,
-   "reason": "only SELECT is allowed; this endpoint is read-only (got EXECUTE)"
-  },
-  {
-   "dialect": "tsql",
-   "sql": "INSERT INTO dbo.fct_sales VALUES (1)",
+   "dialect": "duckdb",
+   "sql": "INSERT INTO main.tickets VALUES (1)",
+   "expect": "refused",
    "fragment": "read-only",
-   "permitted": false,
-   "reason": "only SELECT is allowed; this endpoint is read-only (got INSERT)"
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "only SELECT is allowed; this endpoint is read-only (got INSERT)"
+   }
   },
   {
-   "dialect": "tsql",
-   "sql": "SELECT * FRO dbo.x",
-   "fragment": "parse",
-   "permitted": false,
-   "reason": "could not parse as tsql: Invalid expression / Unexpected token. Line 1, Col: 16.\n  SELECT * FRO \u001b[4mdbo\u001b[0m.x"
+   "dialect": "duckdb",
+   "sql": "SELECT * FROM main.glob('/**')",
+   "expect": "refused",
+   "fragment": "table function",
+   "why": "DuckDB reads files as relations. That is a fine feature of the engine and not something a question may reach \u2014 and for an embedded source this guard is the only thing saying so, because there is no database-side permission behind it.",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "GLOB('/**') is a table function, not a table; only tables in ['main'] may be read"
+   }
   },
   {
-   "dialect": "tsql",
-   "sql": "SELECT * FROM OPENROWSET('SQLNCLI','...','SELECT 1')",
-   "fragment": "not allowed",
-   "permitted": false,
-   "reason": "function openrowset is not allowed"
+   "dialect": "duckdb",
+   "sql": "SELECT * FROM main.read_csv_auto('/etc/passwd')",
+   "expect": "refused",
+   "fragment": "table function",
+   "why": "SCHEMA-QUALIFIED: these went through until the table-function check existed. `main.read_csv_auto('/etc/passwd')` names an allowed schema and reads a local file \u2014 arbitrary file read through a SELECT.",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "READ_CSV_AUTO('/etc/passwd') is a table function, not a table; only tables in ['main'] may be read"
+   }
+  },
+  {
+   "dialect": "duckdb",
+   "sql": "SELECT * FROM main.read_parquet('s3://other/secrets.parquet')",
+   "expect": "refused",
+   "fragment": "table function",
+   "why": "DuckDB reads files as relations. That is a fine feature of the engine and not something a question may reach \u2014 and for an embedded source this guard is the only thing saying so, because there is no database-side permission behind it.",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "READ_PARQUET('s3://other/secrets.parquet') is a table function, not a table; only tables in ['main'] may be read"
+   }
+  },
+  {
+   "dialect": "duckdb",
+   "sql": "SELECT * FROM main.tickets, main.read_csv_auto('/etc/passwd')",
+   "expect": "refused",
+   "fragment": "table function",
+   "why": "And hidden beside a legitimate table, which is how it would arrive.",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "READ_CSV_AUTO('/etc/passwd') is a table function, not a table; only tables in ['main'] may be read"
+   }
+  },
+  {
+   "dialect": "duckdb",
+   "sql": "SELECT * FROM read_csv_auto('/etc/passwd')",
+   "expect": "refused",
+   "fragment": "table function",
+   "why": "Unqualified: caught by the schema rule.",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "READ_CSV_AUTO('/etc/passwd') is a table function, not a table; only tables in ['main'] may be read"
+   }
+  },
+  {
+   "dialect": "duckdb",
+   "sql": "SELECT * FROM secret.tickets",
+   "expect": "refused",
+   "fragment": "not queryable",
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "schema secret is not queryable; allowed: main"
+   }
+  },
+  {
+   "dialect": "duckdb",
+   "sql": "SELECT * FROM tickets",
+   "expect": "refused",
+   "fragment": "schema-qualified",
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "table tickets must be schema-qualified (e.g. main.tickets)"
+   }
+  },
+  {
+   "dialect": "duckdb",
+   "sql": "SELECT 1",
+   "expect": "refused",
+   "fragment": "reads no table",
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "the query reads no table"
+   }
+  },
+  {
+   "dialect": "duckdb",
+   "sql": "SELECT 1; DROP TABLE main.tickets",
+   "expect": "refused",
+   "fragment": "one statement",
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "exactly one statement is allowed"
+   }
+  },
+  {
+   "dialect": "duckdb",
+   "sql": "UPDATE main.tickets SET minutes = 0",
+   "expect": "refused",
+   "fragment": "read-only",
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "only SELECT is allowed; this endpoint is read-only (got UPDATE)"
+   }
   },
   {
    "dialect": "tsql",
    "sql": "SELECT * FROM contoso_warehouse.dbo.dim_country",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": true,
-   "rewritten": "SELECT TOP 500 * FROM contoso_warehouse.dbo.dim_country",
-   "tables": [
-    "dbo.dim_country"
-   ],
-   "columns": [
-    "dbo.dim_country.*"
-   ],
-   "row_limit": 500
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT TOP 500 * FROM contoso_warehouse.dbo.dim_country",
+    "tables": [
+     "dbo.dim_country"
+    ],
+    "columns": [
+     "dbo.dim_country.*"
+    ],
+    "row_limit": 500
+   }
   },
   {
    "dialect": "tsql",
    "sql": "SELECT * FROM dbo.fct_sales CROSS APPLY (SELECT product_id FROM dbo.dim_product) t",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": true,
-   "rewritten": "SELECT TOP 500 * FROM dbo.fct_sales CROSS APPLY (SELECT product_id FROM dbo.dim_product) AS t",
-   "tables": [
-    "dbo.dim_product",
-    "dbo.fct_sales"
-   ],
-   "columns": [
-    "dbo.dim_product.*",
-    "dbo.dim_product.product_id",
-    "dbo.fct_sales.*",
-    "dbo.fct_sales.product_id"
-   ],
-   "row_limit": 500
-  },
-  {
-   "dialect": "tsql",
-   "sql": "SELECT * FROM dbo.fct_sales CROSS APPLY dbo.f(1)",
-   "fragment": "",
-   "permitted": false,
-   "reason": "dbo.f(1) is a function used as a table; only tables in ['dbo'] may be read"
-  },
-  {
-   "dialect": "tsql",
-   "sql": "SELECT * FROM dbo.fct_sales CROSS APPLY other.f(1)",
-   "fragment": "",
-   "permitted": false,
-   "reason": "other.f(1) is a function used as a table; only tables in ['dbo'] may be read"
+   "why": "The legitimate form. Its tables are checked like any others.",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT TOP 500 * FROM dbo.fct_sales CROSS APPLY (SELECT product_id FROM dbo.dim_product) AS t",
+    "tables": [
+     "dbo.dim_product",
+     "dbo.fct_sales"
+    ],
+    "columns": [
+     "dbo.dim_product.*",
+     "dbo.dim_product.product_id",
+     "dbo.fct_sales.*",
+     "dbo.fct_sales.product_id"
+    ],
+    "row_limit": 500
+   }
   },
   {
    "dialect": "tsql",
    "sql": "SELECT * FROM dbo.fct_sales OUTER APPLY (SELECT product_id FROM dbo.dim_product) t",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": true,
-   "rewritten": "SELECT TOP 500 * FROM dbo.fct_sales OUTER APPLY (SELECT product_id FROM dbo.dim_product) AS t",
-   "tables": [
-    "dbo.dim_product",
-    "dbo.fct_sales"
-   ],
-   "columns": [
-    "dbo.dim_product.*",
-    "dbo.dim_product.product_id",
-    "dbo.fct_sales.*",
-    "dbo.fct_sales.product_id"
-   ],
-   "row_limit": 500
+   "why": "The legitimate form. Its tables are checked like any others.",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT TOP 500 * FROM dbo.fct_sales OUTER APPLY (SELECT product_id FROM dbo.dim_product) AS t",
+    "tables": [
+     "dbo.dim_product",
+     "dbo.fct_sales"
+    ],
+    "columns": [
+     "dbo.dim_product.*",
+     "dbo.dim_product.product_id",
+     "dbo.fct_sales.*",
+     "dbo.fct_sales.product_id"
+    ],
+    "row_limit": 500
+   }
   },
   {
    "dialect": "tsql",
-   "sql": "SELECT * FROM dbo.fct_sales OUTER APPLY other.g(1)",
+   "sql": "SELECT COUNT(*) AS n FROM dbo.fct_revenue_summary",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": false,
-   "reason": "other.g(1) is a function used as a table; only tables in ['dbo'] may be read"
-  },
-  {
-   "dialect": "tsql",
-   "sql": "SELECT * FROM fct_sales",
-   "fragment": "schema-qualified",
-   "permitted": false,
-   "reason": "table fct_sales must be schema-qualified (e.g. dbo.fct_sales)"
-  },
-  {
-   "dialect": "tsql",
-   "sql": "SELECT * FROM other.fct_sales",
-   "fragment": "not queryable",
-   "permitted": false,
-   "reason": "schema other is not queryable; allowed: dbo"
-  },
-  {
-   "dialect": "tsql",
-   "sql": "SELECT * FROM otherdb.dbo.fct_sales",
-   "fragment": "cross-database",
-   "permitted": false,
-   "reason": "cross-database reference otherdb.dbo.fct_sales is not allowed"
-  },
-  {
-   "dialect": "tsql",
-   "sql": "SELECT * INTO dbo.copy FROM dbo.fct_sales",
-   "fragment": "read-only",
-   "permitted": false,
-   "reason": "SELECT \u2026 INTO writes a table; this endpoint is read-only"
-  },
-  {
-   "dialect": "tsql",
-   "sql": "SELECT 1",
-   "fragment": "reads no table",
-   "permitted": false,
-   "reason": "the query reads no table"
-  },
-  {
-   "dialect": "tsql",
-   "sql": "SELECT 1; DROP TABLE dbo.fct_sales",
-   "fragment": "one statement",
-   "permitted": false,
-   "reason": "exactly one statement is allowed"
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT TOP 500 COUNT(*) AS n FROM dbo.fct_revenue_summary",
+    "tables": [
+     "dbo.fct_revenue_summary"
+    ],
+    "columns": [
+     "dbo.fct_revenue_summary.*"
+    ],
+    "row_limit": 500
+   }
   },
   {
    "dialect": "tsql",
    "sql": "SELECT TOP 10 * FROM dbo.dim_product ORDER BY list_price_usd DESC",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": true,
-   "rewritten": "SELECT TOP 10 * FROM dbo.dim_product ORDER BY list_price_usd DESC",
-   "tables": [
-    "dbo.dim_product"
-   ],
-   "columns": [
-    "dbo.dim_product.*",
-    "dbo.dim_product.list_price_usd"
-   ],
-   "row_limit": 10
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT TOP 10 * FROM dbo.dim_product ORDER BY list_price_usd DESC",
+    "tables": [
+     "dbo.dim_product"
+    ],
+    "columns": [
+     "dbo.dim_product.*",
+     "dbo.dim_product.list_price_usd"
+    ],
+    "row_limit": 10
+   }
   },
   {
    "dialect": "tsql",
-   "sql": "SELECT TOP 100 PERCENT * FROM dbo.fct_sales",
+   "sql": "SELECT TOP 5 product_name FROM dbo.dim_product ORDER BY list_price_usd DESC",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": false,
-   "reason": "TOP \u2026 PERCENT is a proportion, not a row ceiling; use TOP n"
-  },
-  {
-   "dialect": "tsql",
-   "sql": "SELECT TOP 50 PERCENT * FROM dbo.fct_sales",
-   "fragment": "",
-   "permitted": false,
-   "reason": "TOP \u2026 PERCENT is a proportion, not a row ceiling; use TOP n"
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT TOP 5 product_name FROM dbo.dim_product ORDER BY list_price_usd DESC",
+    "tables": [
+     "dbo.dim_product"
+    ],
+    "columns": [
+     "dbo.dim_product.list_price_usd",
+     "dbo.dim_product.product_name"
+    ],
+    "row_limit": 5
+   }
   },
   {
    "dialect": "tsql",
    "sql": "SELECT a.country FROM dbo.dim_country a UNION SELECT b.country FROM dbo.dim_customer b",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": true,
-   "rewritten": "SELECT TOP 500 * FROM (SELECT a.country FROM dbo.dim_country AS a UNION SELECT b.country FROM dbo.dim_customer AS b) AS _l_0",
-   "tables": [
-    "dbo.dim_country",
-    "dbo.dim_customer"
-   ],
-   "columns": [
-    "dbo.dim_country.country",
-    "dbo.dim_customer.country"
-   ],
-   "row_limit": 500
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT TOP 500 * FROM (SELECT a.country FROM dbo.dim_country AS a UNION SELECT b.country FROM dbo.dim_customer AS b) AS _l_0",
+    "tables": [
+     "dbo.dim_country",
+     "dbo.dim_customer"
+    ],
+    "columns": [
+     "dbo.dim_country.country",
+     "dbo.dim_customer.country"
+    ],
+    "row_limit": 500
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT country, SUM(revenue_usd) AS r FROM dbo.fct_revenue_summary GROUP BY country",
+   "expect": "permitted",
+   "fragment": "",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT TOP 500 country, SUM(revenue_usd) AS r FROM dbo.fct_revenue_summary GROUP BY country",
+    "tables": [
+     "dbo.fct_revenue_summary"
+    ],
+    "columns": [
+     "dbo.fct_revenue_summary.country",
+     "dbo.fct_revenue_summary.revenue_usd"
+    ],
+    "row_limit": 500
+   }
   },
   {
    "dialect": "tsql",
    "sql": "SELECT fiscal_year_label, SUM(revenue_usd) FROM dbo.fct_revenue_summary GROUP BY fiscal_year_label",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": true,
-   "rewritten": "SELECT TOP 500 fiscal_year_label, SUM(revenue_usd) FROM dbo.fct_revenue_summary GROUP BY fiscal_year_label",
-   "tables": [
-    "dbo.fct_revenue_summary"
-   ],
-   "columns": [
-    "dbo.fct_revenue_summary.fiscal_year_label",
-    "dbo.fct_revenue_summary.revenue_usd"
-   ],
-   "row_limit": 500
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT TOP 500 fiscal_year_label, SUM(revenue_usd) FROM dbo.fct_revenue_summary GROUP BY fiscal_year_label",
+    "tables": [
+     "dbo.fct_revenue_summary"
+    ],
+    "columns": [
+     "dbo.fct_revenue_summary.fiscal_year_label",
+     "dbo.fct_revenue_summary.revenue_usd"
+    ],
+    "row_limit": 500
+   }
   },
   {
    "dialect": "tsql",
    "sql": "SELECT s.amount_usd FROM dbo.fct_sales s JOIN dbo.dim_product p ON p.product_id = s.product_id",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": true,
-   "rewritten": "SELECT TOP 500 s.amount_usd FROM dbo.fct_sales AS s JOIN dbo.dim_product AS p ON p.product_id = s.product_id",
-   "tables": [
-    "dbo.dim_product",
-    "dbo.fct_sales"
-   ],
-   "columns": [
-    "dbo.dim_product.product_id",
-    "dbo.fct_sales.amount_usd",
-    "dbo.fct_sales.product_id"
-   ],
-   "row_limit": 500
-  },
-  {
-   "dialect": "tsql",
-   "sql": "TRUNCATE TABLE dbo.fct_sales",
-   "fragment": "read-only",
-   "permitted": false,
-   "reason": "only SELECT is allowed; this endpoint is read-only (got TRUNCATETABLE)"
-  },
-  {
-   "dialect": "tsql",
-   "sql": "UPDATE dbo.fct_sales SET amount_usd = 0",
-   "fragment": "read-only",
-   "permitted": false,
-   "reason": "only SELECT is allowed; this endpoint is read-only (got UPDATE)"
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT TOP 500 s.amount_usd FROM dbo.fct_sales AS s JOIN dbo.dim_product AS p ON p.product_id = s.product_id",
+    "tables": [
+     "dbo.dim_product",
+     "dbo.fct_sales"
+    ],
+    "columns": [
+     "dbo.dim_product.product_id",
+     "dbo.fct_sales.amount_usd",
+     "dbo.fct_sales.product_id"
+    ],
+    "row_limit": 500
+   }
   },
   {
    "dialect": "tsql",
    "sql": "WITH x AS (SELECT * FROM dbo.fct_sales) SELECT COUNT(*) FROM x",
+   "expect": "permitted",
    "fragment": "",
-   "permitted": true,
-   "rewritten": "WITH x AS (SELECT * FROM dbo.fct_sales) SELECT TOP 500 COUNT(*) FROM x",
-   "tables": [
-    "dbo.fct_sales"
-   ],
-   "columns": [
-    "dbo.fct_sales.*"
-   ],
-   "row_limit": 500
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "WITH x AS (SELECT * FROM dbo.fct_sales) SELECT TOP 500 COUNT(*) FROM x",
+    "tables": [
+     "dbo.fct_sales"
+    ],
+    "columns": [
+     "dbo.fct_sales.*"
+    ],
+    "row_limit": 500
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "",
+   "expect": "refused",
+   "fragment": "empty",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "empty statement"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "DELETE FROM dbo.fct_sales",
+   "expect": "refused",
+   "fragment": "read-only",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "only SELECT is allowed; this endpoint is read-only (got DELETE)"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "DROP TABLE dbo.fct_sales",
+   "expect": "refused",
+   "fragment": "read-only",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "only SELECT is allowed; this endpoint is read-only (got DROP)"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "EXEC xp_cmdshell 'dir'",
+   "expect": "refused",
+   "fragment": "read-only",
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "only SELECT is allowed; this endpoint is read-only (got EXECUTE)"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "INSERT INTO dbo.fct_sales VALUES (1)",
+   "expect": "refused",
+   "fragment": "read-only",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "only SELECT is allowed; this endpoint is read-only (got INSERT)"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FRO dbo.x",
+   "expect": "refused",
+   "fragment": "parse",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "could not parse as tsql: Invalid expression / Unexpected token. Line 1, Col: 16.\n  SELECT * FRO \u001b[4mdbo\u001b[0m.x"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM OPENROWSET('SQLNCLI','...','SELECT 1')",
+   "expect": "refused",
+   "fragment": "not allowed",
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "function openrowset is not allowed"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM OPENROWSET('a','b','c')",
+   "expect": "refused",
+   "fragment": "not allowed",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "function openrowset is not allowed"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM dbo.fct_sales CROSS APPLY dbo.f(1)",
+   "expect": "refused",
+   "fragment": "function used as a table",
+   "why": "Even in an allowed schema: a callable is not a table, and what it reads is not something this guard can see.",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "dbo.f(1) is a function used as a table; only tables in ['dbo'] may be read"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM dbo.fct_sales CROSS APPLY other.f(1)",
+   "expect": "refused",
+   "fragment": "function used as a table",
+   "why": "APPLY over a function: a relation with no Table node in it, so the schema check never saw it. Both implementations allowed it.",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "other.f(1) is a function used as a table; only tables in ['dbo'] may be read"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM dbo.fct_sales OUTER APPLY other.g(1)",
+   "expect": "refused",
+   "fragment": "function used as a table",
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "other.g(1) is a function used as a table; only tables in ['dbo'] may be read"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM dbo.fct_sales, dbo.read_csv_auto('/etc/passwd')",
+   "expect": "refused",
+   "fragment": "table function",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "READ_CSV_AUTO('/etc/passwd') is a table function, not a table; only tables in ['dbo'] may be read"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM dbo.fct_sales, master.dbo.sysdatabases",
+   "expect": "refused",
+   "fragment": "cross-database",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "cross-database reference master.dbo.sysdatabases is not allowed"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM dbo.fct_sales, other.secrets",
+   "expect": "refused",
+   "fragment": "not queryable",
+   "why": "`FROM a, b` names two tables and only the first follows the FROM keyword. The Go recogniser scanned only after FROM/JOIN, so the second was invisible to the schema allow-list, to the cross-database rule, and to the table list the access rules and the audit are built from.",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "schema other is not queryable; allowed: dbo"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM dbo.fct_sales, unqualified",
+   "expect": "refused",
+   "fragment": "schema-qualified",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "table unqualified must be schema-qualified (e.g. dbo.unqualified)"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM dbo.read_csv_auto('/etc/passwd')",
+   "expect": "refused",
+   "fragment": "table function",
+   "why": "A table function is not a table. Both guards let a SCHEMA-QUALIFIED one through until this was pinned -- `dbo.read_csv_auto('/etc/passwd')` satisfies every other rule, and on an engine that reads files as relations that is arbitrary file access through a SELECT. Both had the hole, which is why the contract stayed green over it.",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "READ_CSV_AUTO('/etc/passwd') is a table function, not a table; only tables in ['dbo'] may be read"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM fct_sales",
+   "expect": "refused",
+   "fragment": "schema-qualified",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "table fct_sales must be schema-qualified (e.g. dbo.fct_sales)"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM master.dbo.sysdatabases",
+   "expect": "refused",
+   "fragment": "cross-database",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "cross-database reference master.dbo.sysdatabases is not allowed"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM other.fct_sales",
+   "expect": "refused",
+   "fragment": "not queryable",
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "schema other is not queryable; allowed: dbo"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM other_schema.secrets",
+   "expect": "refused",
+   "fragment": "not queryable",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "schema other_schema is not queryable; allowed: dbo"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * FROM otherdb.dbo.fct_sales",
+   "expect": "refused",
+   "fragment": "cross-database",
+   "why": "",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "cross-database reference otherdb.dbo.fct_sales is not allowed"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT * INTO dbo.copy FROM dbo.fct_sales",
+   "expect": "refused",
+   "fragment": "read-only",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "SELECT \u2026 INTO writes a table; this endpoint is read-only"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT 1",
+   "expect": "refused",
+   "fragment": "reads no table",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "the query reads no table"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT 1; DROP TABLE dbo.fct_sales",
+   "expect": "refused",
+   "fragment": "one statement",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "exactly one statement is allowed"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT TOP 100 PERCENT * FROM dbo.fct_sales",
+   "expect": "refused",
+   "fragment": "proportion",
+   "why": "`TOP 100 PERCENT` returns EVERY row. Reading its literal as a count had the guard reporting a statement as capped at 100 while the engine returned the whole table.",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "TOP \u2026 PERCENT is a proportion, not a row ceiling; use TOP n"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT TOP 50 PERCENT * FROM dbo.fct_sales",
+   "expect": "refused",
+   "fragment": "proportion",
+   "why": "`TOP 100 PERCENT` returns EVERY row. Reading its literal as a count had the guard reporting a statement as capped at 100 while the engine returned the whole table.",
+   "contract": false,
+   "verdict": {
+    "permitted": false,
+    "reason": "TOP \u2026 PERCENT is a proportion, not a row ceiling; use TOP n"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "TRUNCATE TABLE dbo.fct_sales",
+   "expect": "refused",
+   "fragment": "read-only",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "only SELECT is allowed; this endpoint is read-only (got TRUNCATETABLE)"
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "UPDATE dbo.fct_sales SET amount_usd = 0",
+   "expect": "refused",
+   "fragment": "read-only",
+   "why": "",
+   "contract": true,
+   "verdict": {
+    "permitted": false,
+    "reason": "only SELECT is allowed; this endpoint is read-only (got UPDATE)"
+   }
   }
  ]
 }
