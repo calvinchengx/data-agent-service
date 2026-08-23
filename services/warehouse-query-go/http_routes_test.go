@@ -393,3 +393,47 @@ func doRequest(t *testing.T, server *httptest.Server, req *http.Request) (int, s
 	body, _ := io.ReadAll(response.Body)
 	return response.StatusCode, string(body)
 }
+
+// Every source declares its surface, which is what phase17 asserts. It is
+// defaulted from the kind where a source does not say, so a deployment need
+// not repeat what `kind` already implies -- and a source that DOES say wins,
+// because a kind is not always the whole story.
+func TestEverySourceDeclaresItsSurface(t *testing.T) {
+	t.Setenv("DAS_SOURCES", `[
+	  {"name":"w","kind":"fabric","dialect":"tsql","schemas":["dbo"]},
+	  {"name":"api","kind":"rest","spec":"https://x/openapi.json","collections":["Tables"]},
+	  {"name":"odd","kind":"rest","surface":"http","spec":"https://y/openapi.json"}
+	]`)
+	loaded, err := LoadSources()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := sources
+	sources = loaded
+	t.Cleanup(func() { sources = previous })
+
+	want := map[string]string{"w": "sql", "api": "http", "odd": "http"}
+	for name, surface := range want {
+		if loaded[name].Surface != surface {
+			t.Errorf("%s: surface = %q, want %q", name, loaded[name].Surface, surface)
+		}
+	}
+
+	// And it reaches the payload, with collections or schemas but never both.
+	payload, _ := sourcesPayload()["sources"].([]map[string]any)
+	if len(payload) != 3 {
+		t.Fatalf("payload has %d sources", len(payload))
+	}
+	for _, entry := range payload {
+		name, _ := entry["name"].(string)
+		if entry["surface"] != want[name] {
+			t.Errorf("%s: payload surface = %v", name, entry["surface"])
+		}
+		_, hasCollections := entry["collections"]
+		_, hasSchemas := entry["schemas"]
+		if hasCollections == hasSchemas {
+			t.Errorf("%s: collections=%v schemas=%v; exactly one applies",
+				name, hasCollections, hasSchemas)
+		}
+	}
+}

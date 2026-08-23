@@ -38,6 +38,10 @@ type Source struct {
 	DSN string `json:"dsn"`
 	// duckdb and any other embedded engine: the database file
 	Path string `json:"path"`
+	// Which contract's operations apply. A SQL source has tables and
+	// statements, an HTTP one has operations and calls, and `list_sources`
+	// reports which so a caller need not infer it from the kind.
+	Surface string `json:"surface"`
 	// rest: the OpenAPI document IS the allow-list, so a source without one
 	// cannot be guarded and is refused at start-up.
 	Spec        string   `json:"spec"`
@@ -138,7 +142,16 @@ func LoadSources() (map[string]Source, error) {
 		// than at the first call, for the same reason an embedded source with
 		// no path is: a deployment mistake should be found before anything is
 		// served, not by a caller.
-		if httpKinds[strings.ToLower(s.Kind)] && s.Spec == "" {
+		// Defaulted from the kind where a source does not say, exactly as the
+		// reference defaults it: a `rest` source is an HTTP surface unless it
+		// declares otherwise.
+		if s.Surface == "" {
+			s.Surface = "sql"
+			if httpKinds[strings.ToLower(s.Kind)] {
+				s.Surface = "http"
+			}
+		}
+		if s.Surface == "http" && s.Spec == "" {
 			return nil, fmt.Errorf(
 				"source %s is %s but names no `spec`; the OpenAPI document is the "+
 					"allow-list and there is nothing to guard against without it", s.Name, s.Kind)

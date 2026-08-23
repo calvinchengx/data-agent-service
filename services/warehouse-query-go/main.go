@@ -416,10 +416,19 @@ func sourcesPayload() map[string]any {
 	list := make([]map[string]any, 0, len(sources))
 	for _, name := range sourceNames() {
 		s := sources[name]
-		list = append(list, map[string]any{
+		entry := map[string]any{
 			"name": s.Name, "kind": s.Kind, "dialect": s.Dialect, "authzTier": s.AuthzTier,
-			"openMetadataService": s.OMService, "schemas": s.Schemas,
-		})
+			"openMetadataService": s.OMService, "surface": s.Surface,
+		}
+		// Collections or schemas, never both: they are the same idea on the
+		// two surfaces, and a source carrying both would invite a caller to
+		// read the one that does not apply.
+		if s.Surface == "http" {
+			entry["collections"] = s.Collections
+		} else {
+			entry["schemas"] = s.Schemas
+		}
+		list = append(list, entry)
 	}
 	return map[string]any{"sources": list}
 }
