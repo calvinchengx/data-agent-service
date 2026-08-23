@@ -175,17 +175,21 @@ def ensure_classification(fqn: str) -> None:
 
 
 # -------------------------------------------------------------- schema read --
-def live_columns_postgres(dsn: str, schema: str) -> dict[str, list[dict]]:
+def live_columns_postgres(src: dict, schema: str) -> dict[str, list[dict]]:
     """The same reflection, in the other engine's spelling.
 
     Read live rather than taken from the dataset module for the same reason as
     Fabric: the catalog should describe what the database HAS, not what a seed
     intended it to have.
-    """
-    import psycopg
 
+    Opened through `c.connect_source` rather than from `src["dsn"]`, because a
+    source with a `credential` keeps its password in the vault and its DSN
+    therefore has none. Reading the DSN worked until that became true, and then
+    failed here as `fe_sendauth: no password supplied` -- in the seed, four
+    steps away from the setting that had changed.
+    """
     out: dict[str, list[dict]] = {}
-    with psycopg.connect(dsn, connect_timeout=20) as conn, conn.cursor() as cur:
+    with c.connect_source(src) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT table_name, column_name, data_type, character_maximum_length, "
             "numeric_precision, numeric_scale FROM information_schema.columns "
@@ -339,7 +343,7 @@ def govern(dataset: str) -> dict:
 
     # 4. tables from the live schema, with descriptions, keys and term tags
     if engine == "postgres":
-        live = live_columns_postgres(src["dsn"], ds.SCHEMA)
+        live = live_columns_postgres(src, ds.SCHEMA)
     else:
         conn = c.tds_connect(st["sql_server"], st["sql_database"])
         live = live_columns(conn, ds.SCHEMA)
