@@ -1893,13 +1893,72 @@ def phase16() -> None:
 
 
 # ---------------------------------------------------------------- quality --
+def lint_stages(makefile: str) -> tuple[list[str], list[str]]:
+    """The stages of `make lint`, and any recipe line this cannot classify.
+
+    Read from the Makefile rather than restated, so widening the target widens
+    what the quality witness must account for. The labels come from the
+    `@echo "== name"` each stage already prints for humans, used here so the
+    two lists cannot be edited apart.
+
+    It FAILS CLOSED, which is the whole point. A parser that skipped a line it
+    did not recognise would make an unrecognised stage an INVISIBLE one --
+    neither run nor excused, and therefore nothing to fail on. That is the
+    same defect this function exists to catch, one level up and much harder to
+    see, because a derivation reads as authoritative. So every non-blank
+    recipe line must either yield a stage or match `CONTINUATIONS`; anything
+    else comes back as unclassified and the witness goes red naming it.
+    """
+    # Lines that are deliberately part of the stage above them rather than a
+    # stage of their own. Listed by the command they run, so a NEW bare line
+    # does not inherit an old line's exemption.
+    CONTINUATIONS = (r"\$\(TERRAFORM\) init .*&& \$\(TERRAFORM\) validate",)
+
+    body: list[str] = []
+    inside = False
+    for line in makefile.splitlines():
+        if line.startswith("lint:"):
+            inside = True
+            continue
+        if inside:
+            if line and not line.startswith("\t"):
+                break
+            body.append(line)
+
+    stages, unclassified = [], []
+    for line in body:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        named = re.match(r'@echo "== ([^"]+)"', stripped)
+        if named:
+            stages.append(named.group(1))
+            continue
+        if any(re.search(pattern, stripped) for pattern in CONTINUATIONS):
+            continue
+        unclassified.append(stripped[:70])
+    return stages, unclassified
+
+
 def quality() -> None:
     """The lint and type gates, asserted by RUNNING them.
 
     A witness that only proves a config file exists is decoration —
-    `check_prod_paths` and `check-discipline.sh` set that precedent. These run
-    the same commands `make lint` runs, so a witness cannot pass while the gate
-    would fail.
+    `check_prod_paths` and `check-discipline.sh` set that precedent.
+
+    **This does not run all of `make lint`, and says which parts it skips.**
+    An earlier version of this docstring claimed it ran "the same commands
+    `make lint` runs". It ran three of twelve stages. That is worse than
+    running three and saying so: a witness that covers less is recoverable,
+    but one that DOCUMENTS coverage it does not have tells the next person not
+    to look. Two commits widened `make lint` without widening this, by two
+    different people, neither of whom knew this copy existed.
+
+    So the stage list is DERIVED from the Makefile rather than restated here,
+    and held against `RUNS_HERE` and `EXCUSED` below. A stage in neither fails
+    this witness by name. Running every stage is not possible — terraform and
+    the Go toolchain are not in this container — but a stage can never again
+    be missing merely because nobody noticed it appear.
     """
     import subprocess
 
@@ -1908,12 +1967,69 @@ def quality() -> None:
         tail = ((out.stdout or "") + (out.stderr or "")).strip().splitlines()
         check("quality", name, out.returncode == 0, (tail[-1] if tail else "")[:90])
 
+    # Every stage of `make lint`, read from the Makefile's own recipe. The
+    # labels are the `@echo "== name"` prefixes the target already prints, so
+    # this is the gate's list rather than a second copy of it.
+    stages, unclassified = lint_stages(pathlib.Path("Makefile").read_text())
+
+    # What this container can actually run, mapped to the check it reports.
+    RUNS_HERE = {
+        "ruff (python lint)": "python lints clean (ruff)",
+        "ruff (python format)": "python formatting is clean (ruff format)",
+        "ty (python types)": "python type-checks clean (ty)",
+        "annotations vs bodies": "every annotation agrees with its body",
+        "witness totals in prose": "every witness total in prose matches the manifest",
+        "no emulator-only paths": "no emulator-only code path",
+        "no dev-only paths": "no unexplained development-only path",
+    }
+    # What it cannot, each with the reason and where the stage IS enforced.
+    EXCUSED = {
+        "terraform (infra)": "no terraform binary here; `make lint` and the infra CI job own it",
+        "golangci-lint (go)": "no Go toolchain here; `make lint` and the Go CI job own it",
+        "pull cmds vs newest tag": "needs the tags, which this checkout does not fetch; "
+        "`make lint` and the quality CI job own it",
+        # It reads `git ls-files` rather than the filesystem ON PURPOSE -- that
+        # is what makes it catch a sidebar entry pointing at a page nobody
+        # committed, which took the docs site down once. There is no git binary
+        # in this container, and giving it one to satisfy a witness would be
+        # the tail wagging the dog.
+        "docs nav vs docs/": "no git binary here, and the check needs `git ls-files` by design; "
+        "`make lint` and the quality CI job own it",
+    }
+    check(
+        "quality",
+        "every line of the `make lint` recipe is a stage this can name",
+        not unclassified and bool(stages),
+        "; ".join(unclassified) or f"{len(stages)} stages, every recipe line classified",
+    )
+    unaccounted = [s_ for s_ in stages if s_ not in RUNS_HERE and s_ not in EXCUSED]
+    check(
+        "quality",
+        "every stage of `make lint` is either run here or excused by name",
+        not unaccounted and bool(stages),
+        ", ".join(unaccounted)
+        or f"{len(RUNS_HERE)} run, {len(EXCUSED)} excused, {len(stages)} in the target",
+    )
+
     gate("python lints clean (ruff)", [sys.executable, "-m", "ruff", "check", "."])
     gate(
         "python formatting is clean (ruff format)",
         [sys.executable, "-m", "ruff", "format", "--check", "."],
     )
     gate("python type-checks clean (ty)", [sys.executable, "-m", "ty", "check"])
+    gate(
+        "every annotation agrees with its body",
+        [sys.executable, "-m", "scripts.check_annotations"],
+    )
+    gate(
+        "every witness total in prose matches the manifest",
+        [sys.executable, "-m", "scripts.check_counts"],
+    )
+    gate("no emulator-only code path", ["sh", "scripts/check-discipline.sh"])
+    gate(
+        "no unexplained development-only path",
+        [sys.executable, "-m", "scripts.check_prod_paths", "--strict"],
+    )
 
     # The Go toolchain is not in this container; the gate that owns it is
     # `make lint`. What can be asserted here is that its configuration is
