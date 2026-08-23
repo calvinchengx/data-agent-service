@@ -28,7 +28,7 @@ same check has been watched passing against a real tenant.
 | A source's password lives in Key Vault, not in its DSN; both executors resolve it | 🟢 | `e2e.run` quality, unit tests both languages | not yet |
 | A published data product is queryable as a source, config only, both executors | 🟢 | manual run against `fabric-platform-notebook-pipelines`: 474,044 sale_lines and 129,341,157.67 revenue, per-role withholding applied | not yet |
 | …and its tables are discoverable in the same catalog as ours | 🟢 | same run: `search_metadata` returns the product's FQN beside ours | not yet |
-| The same, for a Databricks product | 🟠 credential path only | manual run against `databricks-platform-jobs`; rows blocked by `upstream-issues.md` 12 | not yet |
+| The same, for a Databricks product | 🟠 credential path only — **both executors** now have an adapter (Phase D3), so what is missing is the witness rather than the code | manual run against `databricks-platform-jobs`; rows blocked by `upstream-issues.md` 12 | not yet |
 | Managed identity (App Service protocol) | 🟢 | `e2e.run` phase3 | not yet |
 | Infrastructure definition parses, and declares what the runbook copies | 🟢 | `e2e.run` phase11, `terraform validate` | not yet |
 | App registration, exposed scope and federated credential are declared | 🟢 | `terraform validate` | not yet — and the emulator cannot witness the federated path at all (upstream #6) |

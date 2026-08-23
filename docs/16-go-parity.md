@@ -13,10 +13,16 @@ drifted without anyone noticing for two phases.
 | Fabric / Azure SQL / Synapse (TDS) | ✅ | ✅ | — |
 | PostgreSQL | ✅ | ✅ | — |
 | DuckDB | ✅ | ✅ opt-in, `-tags duckdb` — decided, not pending | see D1 |
-| Databricks | ✅ unwitnessed | ❌ | adapter. A PAT is configurable in both since `credential` covers SQL sources, and the credential path IS witnessed against a real product stack — see below. The adapter's row decoding is not, and cannot be here: `docs/upstream-issues.md` 12 |
+| Databricks | ✅ unwitnessed | ✅ unwitnessed | a witness, not an adapter. Both speak the Statement Execution API; neither is witnessed against a real warehouse (`docs/upstream-issues.md` 12). The credential path IS witnessed against a real product stack — see below |
 | HTTP surface (`list_operations`, `describe_operation`, `call_operation`) | ✅ | ✅ | — |
 | REST adapter | ✅ | ✅ | — |
 | SQL guard | parser-backed | parser-backed | — |
+
+**Every row is now at parity**, which was the point of the document. Two carry
+a qualifier rather than a gap: DuckDB is opt-in in Go by decision (D1), and
+Databricks is unwitnessed in BOTH — the same blocked witness, not a difference
+between them. What is left of this plan is Phase C's fuzzing and keeping the
+mechanisms honest, not more adapters.
 
 The last row is the one that matters. Everything above it is work; the guard
 is a design difference, and it is the reason the only authorization bypass this
@@ -282,8 +288,36 @@ same sentence. The contract now runs those checks against both executors on
 every build, and the surface is no longer optional: it was excused because the
 Go executor had no REST adapter, which stopped being true here.
 
-**Still to do: D3 (Databricks).** Not started. `databricks-sql-go` builds with
-`CGO_ENABLED=0`, so unlike DuckDB it costs the image nothing.
+**D3 is done, and cost the image nothing.** `sources_databricks.go` speaks the
+Statement Execution API over HTTP, which is the surface Databricks documents
+for exactly this — run a statement, get rows back. No driver, no ODBC, no cgo:
+`databricks-sql-go` was never needed, and the executor image is byte-for-byte
+the same size as before.
+
+The caller's token reaches the workspace, so Unity Catalog applies that
+person's grants rather than the service's, and the test reads the
+Authorization header off the wire rather than trusting the code that sets it.
+
+Two distinctions the adapter is careful about, because an agent acts on them
+differently: a statement that did not FINISH is an error rather than an empty
+result — rows that never arrived must not read as a table with nothing in it —
+and 401/403 is the workspace saying this person may not, where anything else
+is a failure they cannot act on.
+
+**Neither implementation is witnessed against a real warehouse**, and that is
+unchanged by this: `docs/upstream-issues.md` 12 is why. What is now true is
+that both are written, so the gap is one missing witness rather than one
+missing adapter.
+
+Porting it found a bug in the PYTHON adapter, which is the second time this
+week the port has been the thing that noticed. An empty schema allow-list
+built `WHERE table_schema IN ()` — a syntax error, so a misconfigured source
+failed with the warehouse's parser message instead of its own empty list. Both
+return nothing now: an empty allow-list means nothing is allowed, not that the
+question is unrestricted.
+
+**Phase D is complete.** D1 DuckDB (opt-in, behind a build tag), D2 the HTTP
+surface and REST adapter, D3 Databricks.
 
 ## Phase E — the contract runs against both, always
 
@@ -333,6 +367,6 @@ means:
 | C | divergence nobody thought to test | 1 day |
 | D1 DuckDB | an adapter | ½ day |
 | D2 HTTP + REST | a surface and an adapter | **done** |
-| D3 Databricks | an adapter, when witnessable | ½ day |
+| D3 Databricks | an adapter, when witnessable | **done** — the witness is still blocked |
 
 A, B and E first — they are what make the rest *stay* true.
