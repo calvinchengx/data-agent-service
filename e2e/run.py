@@ -1516,6 +1516,7 @@ def phase16() -> None:
     # could publish would mean the OBO chain was not reaching Fabric at all.
     viewer = identity.token_for("carol@entraemulator.dev")
     from publisher import fabric as pfab
+    from publisher.targets import powerbi as _powerbi
 
     refused = ""
     try:
@@ -1525,7 +1526,7 @@ def phase16() -> None:
             "SemanticModel",
             "witness_viewer_denied",
             "should not exist",
-            [publish.part("model.bim", tmsl)],
+            [_powerbi.part("model.bim", tmsl)],
             pfab.on_behalf_of(viewer, pfab.FABRIC_AUDIENCE, "witness"),
         )
     except Exception as e:  # noqa: BLE001 — the refusal IS the assertion
@@ -1600,20 +1601,32 @@ def phase16() -> None:
         payload = json.loads(text)["result"]
         return json.loads(payload["content"][0]["text"])["rows"]
 
+    # The target is resolved the way run.py resolves it -- from configuration
+    # and the seeded state -- so this witnesses the seam, not a hand-built
+    # Power BI object that run.py would never construct.
+    from publisher import targets as _targets
+
+    [pbi] = [t for t in _targets.configured(c.CFG, state) if t.kind == "powerbi"]
+    check(
+        "phase16",
+        "the Power BI target says WHY it cannot take a postgres candidate",
+        "Direct Lake" in (pbi.accepts({**candidate, "source": "contoso_support"}, state) or ""),
+        pbi.accepts({**candidate, "source": "contoso_support"}, state) or "no reason given",
+    )
     done = publish.publish(
         candidate,
+        target=pbi,
         user_token=publisher,
-        workspace=workspace,
-        warehouse=warehouse,
         columns=columns,
         names={"revenue_usd": "Net Revenue"},
         run_sql=run_sql,
     )
+    model_id, report_id = done.artefact.ids["semanticModel"], done.artefact.ids["report"]
     check(
         "phase16",
         "the semantic model and the report are both created in Fabric",
-        bool(done.semantic_model_id) and bool(done.report_id),
-        f"model {done.semantic_model_id[:8]} · report {done.report_id[:8]}",
+        bool(model_id) and bool(report_id),
+        f"model {model_id[:8]} · report {report_id[:8]}",
     )
     check(
         "phase16",
@@ -1626,7 +1639,7 @@ def phase16() -> None:
     # because a dashboard nobody can trust is worse than one that never
     # shipped -- people stop checking after the first week.
     disagreeing, _note = publish.compare(
-        done.rows_dax, [[*row[:-1], float(row[-1]) + 1] for row in done.rows_sql]
+        done.rows_target, [[*row[:-1], float(row[-1]) + 1] for row in done.rows_sql]
     )
     check(
         "phase16",
@@ -1648,7 +1661,7 @@ def phase16() -> None:
     )
 
     if done.agrees:
-        publish.record_lineage(done, candidate)
+        publish.record_lineage(done, candidate, pbi, owner="erin@entraemulator.dev")
     dash = om(
         "GET",
         f"/dashboards/name/das_dashboards.{done.title.replace(' ', '_')}",

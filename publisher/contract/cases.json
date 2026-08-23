@@ -1,0 +1,306 @@
+{
+  "cases": [
+    {
+      "candidate": {
+        "dialect": "tsql",
+        "dimensions": [
+          "t0.country"
+        ],
+        "measures": [
+          "sum(t0.revenue_usd)"
+        ],
+        "slot_columns": [
+          "fiscal_year_label"
+        ],
+        "source": "contoso_warehouse",
+        "tables": [
+          "dbo.fct_revenue_summary"
+        ],
+        "template_sql": "SELECT t0.country, SUM(t0.revenue_usd) AS c1 FROM dbo.fct_revenue_summary AS t0 WHERE t0.fiscal_year_label = ? GROUP BY t0.country",
+        "title": "Net Revenue by Country, filtered by Fiscal Year Label"
+      },
+      "columns": {
+        "dbo.fct_revenue_summary": [
+          {
+            "dataType": "string",
+            "name": "country"
+          },
+          {
+            "dataType": "string",
+            "name": "fiscal_year_label"
+          },
+          {
+            "dataType": "double",
+            "name": "revenue_usd"
+          }
+        ]
+      },
+      "name": "one_dimension_one_slot",
+      "names": {
+        "country": "Country",
+        "revenue_usd": "Net Revenue"
+      },
+      "plan": {
+        "columns": {
+          "dbo.fct_revenue_summary": [
+            {
+              "dataType": "string",
+              "name": "country"
+            },
+            {
+              "dataType": "string",
+              "name": "fiscal_year_label"
+            },
+            {
+              "dataType": "double",
+              "name": "revenue_usd"
+            }
+          ]
+        },
+        "comparisonSql": "SELECT t0.country, SUM(t0.revenue_usd) AS c1 FROM dbo.fct_revenue_summary AS t0 GROUP BY t0.country",
+        "dimensions": [
+          [
+            "fct_revenue_summary",
+            "country"
+          ]
+        ],
+        "measures": [
+          {
+            "column": "revenue_usd",
+            "function": "SUM",
+            "name": "Net Revenue",
+            "table": "dbo.fct_revenue_summary"
+          }
+        ],
+        "name": "Net_Revenue_by_Country__filtered_by_Fiscal_Year_Label",
+        "slicers": [
+          [
+            "fct_revenue_summary",
+            "fiscal_year_label"
+          ]
+        ],
+        "source": "contoso_warehouse",
+        "tables": [
+          "dbo.fct_revenue_summary"
+        ],
+        "title": "Net Revenue by Country, filtered by Fiscal Year Label",
+        "visual": "bar"
+      },
+      "targets": {
+        "powerbi": {
+          "definition.pbir": "{\"datasetReference\":{\"byPath\":{\"path\":\"../Net_Revenue_by_Country__filtered_by_Fiscal_Year_Label.SemanticModel\"}},\"version\":\"1.0\"}",
+          "model.bim": "{\"compatibilityLevel\":1604,\"model\":{\"culture\":\"en-US\",\"expressions\":[{\"expression\":\"let\\n    Source = AzureStorage.DataLake(\\\"https://onelake.dfs.fabric.microsoft.com/00000000-0000-4000-8000-0000000000ws/00000000-0000-4000-8000-0000000000wh\\\")\\nin\\n    Source\",\"kind\":\"m\",\"name\":\"SourceWarehouse\"}],\"tables\":[{\"columns\":[{\"dataType\":\"string\",\"name\":\"country\",\"sourceColumn\":\"country\"},{\"dataType\":\"string\",\"name\":\"fiscal_year_label\",\"sourceColumn\":\"fiscal_year_label\"},{\"dataType\":\"double\",\"name\":\"revenue_usd\",\"sourceColumn\":\"revenue_usd\"}],\"measures\":[{\"expression\":\"SUM('fct_revenue_summary'[revenue_usd])\",\"name\":\"Net Revenue\"}],\"name\":\"fct_revenue_summary\",\"partitions\":[{\"mode\":\"directLake\",\"name\":\"fct_revenue_summary\",\"source\":{\"entityName\":\"fct_revenue_summary\",\"expressionSource\":\"SourceWarehouse\",\"schemaName\":\"dbo\",\"type\":\"entity\"}}]}]},\"name\":\"Net_Revenue_by_Country__filtered_by_Fiscal_Year_Label\"}",
+          "query.dax": "{\"dax\":\"EVALUATE SUMMARIZECOLUMNS('fct_revenue_summary'[country], \\\"Net Revenue\\\", [Net Revenue])\"}",
+          "report.json": "{\"$schema\":\"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/report/1.0.0/schema.json\",\"sections\":[{\"displayName\":\"Net Revenue by Country, filtered by Fiscal Year Label\",\"height\":720,\"name\":\"page1\",\"visualContainers\":[{\"config\":{\"name\":\"answer\",\"singleVisual\":{\"projections\":{\"Category\":[{\"field\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Entity\":\"fct_revenue_summary\"}},\"Property\":\"country\"}},\"queryRef\":\"fct_revenue_summary.country\"}],\"Y\":[{\"field\":{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Entity\":\"fct_revenue_summary\"}},\"Property\":\"Net Revenue\"}},\"queryRef\":\"fct_revenue_summary.Net Revenue\"}]},\"visualType\":\"barChart\"},\"title\":\"Net Revenue by Country, filtered by Fiscal Year Label\"},\"height\":480,\"width\":960,\"x\":0,\"y\":0},{\"config\":{\"name\":\"slicer-fiscal_year_label\",\"singleVisual\":{\"projections\":{\"Values\":[{\"field\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Entity\":\"fct_revenue_summary\"}},\"Property\":\"fiscal_year_label\"}},\"queryRef\":\"fct_revenue_summary.fiscal_year_label\"}]},\"visualType\":\"slicer\"}},\"height\":100,\"width\":320,\"x\":0,\"y\":480}],\"width\":1280}]}"
+        }
+      },
+      "why": "the common shape: a bar chart with one slicer that opens unset"
+    },
+    {
+      "candidate": {
+        "dialect": "tsql",
+        "dimensions": [],
+        "measures": [
+          "count(*)"
+        ],
+        "slot_columns": [],
+        "source": "contoso_warehouse",
+        "tables": [
+          "dbo.fct_tickets"
+        ],
+        "template_sql": "SELECT COUNT(*) AS c0 FROM dbo.fct_tickets AS t0",
+        "title": "Ticket Count"
+      },
+      "columns": {
+        "dbo.fct_tickets": [
+          {
+            "dataType": "int64",
+            "name": "ticket_id"
+          },
+          {
+            "dataType": "string",
+            "name": "status"
+          }
+        ]
+      },
+      "name": "no_dimension_card",
+      "names": {},
+      "plan": {
+        "columns": {
+          "dbo.fct_tickets": [
+            {
+              "dataType": "int64",
+              "name": "ticket_id"
+            },
+            {
+              "dataType": "string",
+              "name": "status"
+            }
+          ]
+        },
+        "comparisonSql": "SELECT COUNT(*) AS c0 FROM dbo.fct_tickets AS t0",
+        "dimensions": [],
+        "measures": [
+          {
+            "column": "",
+            "function": "COUNTROWS",
+            "name": "Rows",
+            "table": "dbo.fct_tickets"
+          }
+        ],
+        "name": "Ticket_Count",
+        "slicers": [],
+        "source": "contoso_warehouse",
+        "tables": [
+          "dbo.fct_tickets"
+        ],
+        "title": "Ticket Count",
+        "visual": "card"
+      },
+      "targets": {
+        "powerbi": {
+          "definition.pbir": "{\"datasetReference\":{\"byPath\":{\"path\":\"../Ticket_Count.SemanticModel\"}},\"version\":\"1.0\"}",
+          "model.bim": "{\"compatibilityLevel\":1604,\"model\":{\"culture\":\"en-US\",\"expressions\":[{\"expression\":\"let\\n    Source = AzureStorage.DataLake(\\\"https://onelake.dfs.fabric.microsoft.com/00000000-0000-4000-8000-0000000000ws/00000000-0000-4000-8000-0000000000wh\\\")\\nin\\n    Source\",\"kind\":\"m\",\"name\":\"SourceWarehouse\"}],\"tables\":[{\"columns\":[{\"dataType\":\"int64\",\"name\":\"ticket_id\",\"sourceColumn\":\"ticket_id\"},{\"dataType\":\"string\",\"name\":\"status\",\"sourceColumn\":\"status\"}],\"measures\":[{\"expression\":\"COUNTROWS('fct_tickets')\",\"name\":\"Rows\"}],\"name\":\"fct_tickets\",\"partitions\":[{\"mode\":\"directLake\",\"name\":\"fct_tickets\",\"source\":{\"entityName\":\"fct_tickets\",\"expressionSource\":\"SourceWarehouse\",\"schemaName\":\"dbo\",\"type\":\"entity\"}}]}]},\"name\":\"Ticket_Count\"}",
+          "query.dax": "{\"dax\":\"EVALUATE SUMMARIZECOLUMNS(\\\"Rows\\\", [Rows])\"}",
+          "report.json": "{\"$schema\":\"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/report/1.0.0/schema.json\",\"sections\":[{\"displayName\":\"Ticket Count\",\"height\":720,\"name\":\"page1\",\"visualContainers\":[{\"config\":{\"name\":\"answer\",\"singleVisual\":{\"projections\":{\"Category\":[],\"Y\":[{\"field\":{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Entity\":\"fct_tickets\"}},\"Property\":\"Rows\"}},\"queryRef\":\"fct_tickets.Rows\"}]},\"visualType\":\"card\"},\"title\":\"Ticket Count\"},\"height\":480,\"width\":960,\"x\":0,\"y\":0}],\"width\":1280}]}"
+        }
+      },
+      "why": "no grouping is a card, and COUNT(*) is a row count not a column count"
+    },
+    {
+      "candidate": {
+        "dialect": "tsql",
+        "dimensions": [
+          "t1.team",
+          "t0.status"
+        ],
+        "measures": [
+          "avg(t0.resolution_minutes)"
+        ],
+        "slot_columns": [
+          "opened_on"
+        ],
+        "source": "contoso_warehouse",
+        "tables": [
+          "dbo.fct_tickets",
+          "dbo.dim_agents"
+        ],
+        "template_sql": "SELECT t1.team, t0.status, AVG(t0.resolution_minutes) AS c2 FROM dbo.fct_tickets AS t0 JOIN dbo.dim_agents AS t1 ON t1.agent_id = t0.agent_id WHERE t0.opened_on >= ? GROUP BY t1.team, t0.status",
+        "title": "Resolution Time by Support Team and Status"
+      },
+      "columns": {
+        "dbo.dim_agents": [
+          {
+            "dataType": "int64",
+            "name": "agent_id"
+          },
+          {
+            "dataType": "string",
+            "name": "team"
+          }
+        ],
+        "dbo.fct_tickets": [
+          {
+            "dataType": "int64",
+            "name": "agent_id"
+          },
+          {
+            "dataType": "dateTime",
+            "name": "opened_on"
+          },
+          {
+            "dataType": "double",
+            "name": "resolution_minutes"
+          },
+          {
+            "dataType": "string",
+            "name": "status"
+          }
+        ]
+      },
+      "name": "two_tables_two_dimensions",
+      "names": {
+        "resolution_minutes": "Resolution Time",
+        "team": "Support Team"
+      },
+      "plan": {
+        "columns": {
+          "dbo.dim_agents": [
+            {
+              "dataType": "int64",
+              "name": "agent_id"
+            },
+            {
+              "dataType": "string",
+              "name": "team"
+            }
+          ],
+          "dbo.fct_tickets": [
+            {
+              "dataType": "int64",
+              "name": "agent_id"
+            },
+            {
+              "dataType": "dateTime",
+              "name": "opened_on"
+            },
+            {
+              "dataType": "double",
+              "name": "resolution_minutes"
+            },
+            {
+              "dataType": "string",
+              "name": "status"
+            }
+          ]
+        },
+        "comparisonSql": "SELECT t1.team, t0.status, AVG(t0.resolution_minutes) AS c2 FROM dbo.fct_tickets AS t0 JOIN dbo.dim_agents AS t1 ON t1.agent_id = t0.agent_id GROUP BY t1.team, t0.status",
+        "dimensions": [
+          [
+            "dim_agents",
+            "team"
+          ],
+          [
+            "fct_tickets",
+            "status"
+          ]
+        ],
+        "measures": [
+          {
+            "column": "resolution_minutes",
+            "function": "AVERAGE",
+            "name": "Resolution Time",
+            "table": "dbo.fct_tickets"
+          }
+        ],
+        "name": "Resolution_Time_by_Support_Team_and_Status",
+        "slicers": [
+          [
+            "fct_tickets",
+            "opened_on"
+          ]
+        ],
+        "source": "contoso_warehouse",
+        "tables": [
+          "dbo.fct_tickets",
+          "dbo.dim_agents"
+        ],
+        "title": "Resolution Time by Support Team and Status",
+        "visual": "table"
+      },
+      "targets": {
+        "powerbi": {
+          "definition.pbir": "{\"datasetReference\":{\"byPath\":{\"path\":\"../Resolution_Time_by_Support_Team_and_Status.SemanticModel\"}},\"version\":\"1.0\"}",
+          "model.bim": "{\"compatibilityLevel\":1604,\"model\":{\"culture\":\"en-US\",\"expressions\":[{\"expression\":\"let\\n    Source = AzureStorage.DataLake(\\\"https://onelake.dfs.fabric.microsoft.com/00000000-0000-4000-8000-0000000000ws/00000000-0000-4000-8000-0000000000wh\\\")\\nin\\n    Source\",\"kind\":\"m\",\"name\":\"SourceWarehouse\"}],\"tables\":[{\"columns\":[{\"dataType\":\"int64\",\"name\":\"agent_id\",\"sourceColumn\":\"agent_id\"},{\"dataType\":\"string\",\"name\":\"team\",\"sourceColumn\":\"team\"}],\"measures\":[],\"name\":\"dim_agents\",\"partitions\":[{\"mode\":\"directLake\",\"name\":\"dim_agents\",\"source\":{\"entityName\":\"dim_agents\",\"expressionSource\":\"SourceWarehouse\",\"schemaName\":\"dbo\",\"type\":\"entity\"}}]},{\"columns\":[{\"dataType\":\"int64\",\"name\":\"agent_id\",\"sourceColumn\":\"agent_id\"},{\"dataType\":\"dateTime\",\"name\":\"opened_on\",\"sourceColumn\":\"opened_on\"},{\"dataType\":\"double\",\"name\":\"resolution_minutes\",\"sourceColumn\":\"resolution_minutes\"},{\"dataType\":\"string\",\"name\":\"status\",\"sourceColumn\":\"status\"}],\"measures\":[{\"expression\":\"AVERAGE('fct_tickets'[resolution_minutes])\",\"name\":\"Resolution Time\"}],\"name\":\"fct_tickets\",\"partitions\":[{\"mode\":\"directLake\",\"name\":\"fct_tickets\",\"source\":{\"entityName\":\"fct_tickets\",\"expressionSource\":\"SourceWarehouse\",\"schemaName\":\"dbo\",\"type\":\"entity\"}}]}]},\"name\":\"Resolution_Time_by_Support_Team_and_Status\"}",
+          "query.dax": "{\"dax\":\"EVALUATE SUMMARIZECOLUMNS('dim_agents'[team], 'fct_tickets'[status], \\\"Resolution Time\\\", [Resolution Time])\"}",
+          "report.json": "{\"$schema\":\"https://developer.microsoft.com/json-schemas/fabric/item/report/definition/report/1.0.0/schema.json\",\"sections\":[{\"displayName\":\"Resolution Time by Support Team and Status\",\"height\":720,\"name\":\"page1\",\"visualContainers\":[{\"config\":{\"name\":\"answer\",\"singleVisual\":{\"projections\":{\"Category\":[{\"field\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Entity\":\"dim_agents\"}},\"Property\":\"team\"}},\"queryRef\":\"dim_agents.team\"},{\"field\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Entity\":\"fct_tickets\"}},\"Property\":\"status\"}},\"queryRef\":\"fct_tickets.status\"}],\"Y\":[{\"field\":{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Entity\":\"fct_tickets\"}},\"Property\":\"Resolution Time\"}},\"queryRef\":\"fct_tickets.Resolution Time\"}]},\"visualType\":\"tableEx\"},\"title\":\"Resolution Time by Support Team and Status\"},\"height\":480,\"width\":960,\"x\":0,\"y\":0},{\"config\":{\"name\":\"slicer-opened_on\",\"singleVisual\":{\"projections\":{\"Values\":[{\"field\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Entity\":\"fct_tickets\"}},\"Property\":\"opened_on\"}},\"queryRef\":\"fct_tickets.opened_on\"}]},\"visualType\":\"slicer\"}},\"height\":100,\"width\":320,\"x\":0,\"y\":480}],\"width\":1280}]}"
+        }
+      },
+      "why": "a join: the measure binds to one table, each dimension to its own, and the result is a table"
+    }
+  ],
+  "settings": {
+    "warehouse": "00000000-0000-4000-8000-0000000000wh",
+    "workspace": "00000000-0000-4000-8000-0000000000ws"
+  }
+}

@@ -12,6 +12,7 @@ Python and Go -- would be a third place for it to drift.
 
 from __future__ import annotations
 
+import functools
 import json
 import pathlib
 import sys
@@ -27,7 +28,16 @@ FABRIC = c.FABRIC
 PBI_AUDIENCE = "https://analysis.windows.net/powerbi/api"
 FABRIC_AUDIENCE = c.CFG.get("DAS_FABRIC_AUDIENCE", "https://api.fabric.microsoft.com")
 
-_CRED = Credential(Settings.from_env())
+
+# Built on first use, not at import. A module that mints a Credential when it
+# is imported cannot be imported by anything that has no identity to configure
+# -- and the artefact generators, which are pure functions of the Plan and
+# need no identity at all, sit in a package that imports this one. The cost of
+# getting this wrong is a contract generator that fails in CI on a missing
+# secret rather than on a difference in the bytes it exists to compare.
+@functools.cache
+def credential() -> Credential:
+    return Credential(Settings.from_env())
 
 
 def on_behalf_of(user_token: str, audience: str, who: str) -> str:
@@ -40,7 +50,7 @@ def on_behalf_of(user_token: str, audience: str, who: str) -> str:
     so reads like a typo in the string instead of a missing registration on
     the resource app -- seed/apps.py exposes each of them.
     """
-    return _CRED.on_behalf_of(
+    return credential().on_behalf_of(
         user_token, f"{audience}/user_impersonation", cache_key=f"{who}:{audience}"
     )
 

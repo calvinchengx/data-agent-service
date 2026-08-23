@@ -16,12 +16,14 @@ from __future__ import annotations
 SCHEMA = "https://developer.microsoft.com/json-schemas/fabric/item/report/definition"
 
 
+# The Plan's visual, spelled as PBIR names it.
+VISUAL_TYPES = {"card": "card", "bar": "barChart", "table": "tableEx"}
+
+
 def visual_type(dimensions: tuple[str, ...]) -> str:
-    if not dimensions:
-        return "card"
-    if len(dimensions) == 1:
-        return "barChart"
-    return "tableEx"
+    from publisher.plan import visual_for
+
+    return VISUAL_TYPES[visual_for(dimensions)]
 
 
 def binding(model_name: str) -> dict:
@@ -51,9 +53,10 @@ def layout(
     measures: list,
     dimensions: list[tuple[str, str]],
     slicers: list[tuple[str, str]],
+    visual: str | None = None,
 ) -> dict:
     """report.json -- one page, one visual, a slicer per slot."""
-    visual = visual_type(tuple(d[1] for d in dimensions))
+    visual = VISUAL_TYPES[visual] if visual else visual_type(tuple(d[1] for d in dimensions))
     containers = [
         {
             "x": 0,

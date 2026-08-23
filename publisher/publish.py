@@ -1,30 +1,29 @@
 """Publish a promoted candidate, and refuse to publish one that disagrees.
 
-The order matters. The model and the report are created first, then the DAX
-measure is evaluated and compared against the SQL the template came from, and
-only a dashboard whose two answers agree is recorded in the catalog. A report
-that quietly disagrees with the query it was promoted from is worse than no
-report: people stop checking a dashboard after the first week.
+The order matters, and it belongs to no target. The dashboard is created
+first, then the target's own engine is asked the question and its answer is
+compared against the SQL the template came from, and only a dashboard whose
+two answers agree is recorded in the catalog. A report that quietly disagrees
+with the query it was promoted from is worse than no report: people stop
+checking a dashboard after the first week.
 """
 
 from __future__ import annotations
 
-import base64
 import dataclasses
-import json
 
-from publisher import fabric, model, report
+from publisher import plan as _plan
+from publisher.targets import Artefact, DashboardTarget
 from seed import common as c
 
 
 @dataclasses.dataclass
 class Published:
     title: str
-    semantic_model_id: str
-    report_id: str
-    dax: str
+    target: str
+    artefact: Artefact
     sql: str
-    rows_dax: list[dict]
+    rows_target: list[dict]
     rows_sql: list[list]
     agrees: bool
     note: str = ""
@@ -32,21 +31,12 @@ class Published:
     def as_dict(self) -> dict:
         return {
             "title": self.title,
-            "semanticModelId": self.semantic_model_id,
-            "reportId": self.report_id,
-            "dax": self.dax,
+            "target": self.target,
+            "artefact": self.artefact.as_dict(),
             "sql": self.sql,
             "agrees": self.agrees,
             "note": self.note,
         }
-
-
-def part(path: str, payload: dict) -> dict:
-    return {
-        "path": path,
-        "payload": base64.b64encode(json.dumps(payload).encode()).decode(),
-        "payloadType": "InlineBase64",
-    }
 
 
 def _numbers(value) -> float | None:
@@ -56,27 +46,27 @@ def _numbers(value) -> float | None:
         return None
 
 
-def compare(rows_dax: list[dict], rows_sql: list[list]) -> tuple[bool, str]:
+def compare(rows_target: list[dict], rows_sql: list[list]) -> tuple[bool, str]:
     """Do the two answers agree?
 
-    Compared as SETS of (label, value), because DAX and SQL have no reason to
-    return rows in the same order and an ordering difference is not a
-    disagreement about the number. Values are rounded to four places: the two
+    Compared as SETS of (label, value), because a dashboard engine and SQL have
+    no reason to return rows in the same order and an ordering difference is
+    not a disagreement about the number. Values are rounded to four places: the two
     engines use different numeric types, and a comparison that fails on the
     fifteenth decimal would be a check nobody keeps.
     """
     # Agreement has to be EVIDENCE of something. Two empty results agree
-    # perfectly and prove nothing: if the DAX ever evaluates to nothing -- an
+    # perfectly and prove nothing: if the target ever evaluates to nothing -- an
     # evaluator change, an error swallowed upstream, a model that builds and
     # answers empty -- and the SQL is empty too, a vacuous True would publish a
     # measure that answers nothing at all. The guard exists to catch a wrong
     # number; an absent one must not slip past it.
-    if not rows_dax and not rows_sql:
+    if not rows_target and not rows_sql:
         return False, "both sides returned no rows, so nothing was verified"
-    if len(rows_dax) != len(rows_sql):
-        return False, f"{len(rows_dax)} rows from DAX, {len(rows_sql)} from SQL"
+    if len(rows_target) != len(rows_sql):
+        return False, f"{len(rows_target)} rows from the dashboard, {len(rows_sql)} from SQL"
 
-    def normalise_dax(row: dict) -> tuple:
+    def normalise_target(row: dict) -> tuple:
         label = tuple(str(v) for k, v in sorted(row.items()) if _numbers(v) is None)
         values = tuple(sorted(n for v in row.values() if (n := _numbers(v)) is not None))
         return label, values
@@ -86,10 +76,10 @@ def compare(rows_dax: list[dict], rows_sql: list[list]) -> tuple[bool, str]:
         values = tuple(sorted(n for v in row if (n := _numbers(v)) is not None))
         return label, values
 
-    left = sorted(normalise_dax(r) for r in rows_dax)
+    left = sorted(normalise_target(r) for r in rows_target)
     right = sorted(normalise_sql(r) for r in rows_sql)
     if left != right:
-        return False, f"DAX {left[:2]} vs SQL {right[:2]}"
+        return False, f"dashboard {left[:2]} vs SQL {right[:2]}"
     # The same argument one level down: rows that carry only labels compare
     # equal without a single measure value having been checked. A dashboard is
     # published for its numbers, so at least one has to have been compared.
@@ -101,123 +91,81 @@ def compare(rows_dax: list[dict], rows_sql: list[list]) -> tuple[bool, str]:
 def publish(
     candidate: dict,
     *,
+    target: DashboardTarget,
     user_token: str,
-    workspace: str,
-    warehouse: str,
     columns: dict[str, list[dict]],
     names: dict[str, str],
     run_sql,
+    who: str = "",
 ) -> Published:
-    """Create the model and the report, then prove they answer the same thing.
+    """Create the dashboard, then prove it answers what the SQL answers.
 
     `run_sql` is passed in rather than imported so the SQL side of the
     comparison goes through the SAME executor a person's question would --
     guard, access rules and all. A verification that queried the database
     directly would be checking a path nobody uses.
     """
-    title = candidate["title"]
-    name = "".join(ch if ch.isalnum() else "_" for ch in title).strip("_")[:60]
-    tables = tuple(candidate["tables"])
-
-    model.COLUMNS_BY_TABLE = {t: tuple(c_["name"] for c_ in cols) for t, cols in columns.items()}
-    measures = model.measures_for(tuple(candidate["measures"]), tables, names)
-    tmsl = model.tmsl(name, workspace, warehouse, columns, measures)
-    dax = model.dax_for(measures, tuple(candidate["dimensions"]), tables)
-
-    fabric_token = fabric.on_behalf_of(user_token, fabric.FABRIC_AUDIENCE, name)
-    dataset_id = fabric.create_or_update(
-        workspace,
-        "semanticModels",
-        "SemanticModel",
-        name,
-        f"Promoted from a recurring question. {title}.",
-        [part("model.bim", tmsl)],
-        fabric_token,
-    )
-
-    entity = measures[0].entity if measures else tables[0].partition(".")[2]
-    dimensions = [
-        (model.table_of(model.bare(d), tables).partition(".")[2], model.bare(d))
-        for d in candidate["dimensions"]
-    ]
-    slicers = [
-        (model.table_of(model.bare(s), tables).partition(".")[2], model.bare(s))
-        for s in candidate.get("slot_columns", [])
-    ]
-    layout = report.layout(title, entity, measures, dimensions, slicers)
-    report_id = fabric.create_or_update(
-        workspace,
-        "reports",
-        "Report",
-        name,
-        title,
-        [part("report.json", layout), part("definition.pbir", report.binding(name))],
-        fabric_token,
-    )
-
-    # The verification. A Power BI token, not the control-plane one.
-    pbi_token = fabric.on_behalf_of(user_token, fabric.PBI_AUDIENCE, name)
-    rows_dax = fabric.evaluate_dax(workspace, dataset_id, dax, pbi_token)
-    sql = model.comparison_sql(candidate["template_sql"], candidate.get("dialect", ""))
-    rows_sql = run_sql(candidate["source"], sql)
-    agrees, note = compare(rows_dax, rows_sql)
-
+    plan = _plan.build(candidate, columns, names)
+    artefact = target.publish(plan, user_token=user_token, who=who or plan.name)
+    rows_target = target.evaluate(artefact, plan, user_token=user_token)
+    rows_sql = run_sql(plan.source, plan.comparison_sql)
+    agrees, note = compare(rows_target, rows_sql)
     return Published(
-        title=title,
-        semantic_model_id=dataset_id,
-        report_id=report_id,
-        dax=dax,
-        sql=sql,
-        rows_dax=rows_dax,
+        title=plan.title,
+        target=target.kind,
+        artefact=artefact,
+        sql=plan.comparison_sql,
+        rows_target=rows_target,
         rows_sql=rows_sql,
         agrees=agrees,
         note=note,
     )
 
 
-def record_lineage(published: Published, candidate: dict, service: str = "das_dashboards") -> str:
+def record_lineage(
+    published: Published,
+    candidate: dict,
+    target: DashboardTarget,
+    service: str | None = None,
+    owner: str = "",
+) -> str:
     """Put the dashboard in the catalog, pointing at what it reads.
 
     A dashboard nobody can trace to its tables is the thing this whole project
     exists to avoid: a number on a screen with no way to ask where it came
-    from.
+    from. One catalog service per target kind, so a question published to two
+    tools is two dashboards with two lineages, each traceable on its own.
+
+    `owner` matters most where the target's `authz_tier` is `service`: the
+    tool did not record who asked, so the catalog has to.
     """
     from seed.govern import om
 
+    service = service or target.catalog_service
+    service_type, connection, source_url = target.catalog(published.artefact)
     om(
         "PUT",
         "/services/dashboardServices",
         {
             "name": service,
-            "serviceType": "PowerBI",
-            "connection": {
-                "config": {
-                    "type": "PowerBI",
-                    "clientId": "das",
-                    "clientSecret": "x",
-                    "tenantId": c.CFG.get("DAS_TENANT_ID", "local"),
-                }
-            },
+            "serviceType": service_type,
+            "connection": {"config": connection},
         },
         ok=(200, 201),
     )
     fqn = f"{service}.{published.title}"
-    dashboard = om(
-        "PUT",
-        "/dashboards",
-        {
-            "name": published.title.replace(" ", "_"),
-            "displayName": published.title,
-            "service": service,
-            "sourceUrl": f"{fabric.FABRIC}/groups/{c.load_state().get('workspace', '')}"
-            f"/reports/{published.report_id}",
-            "description": (
-                "Promoted from a recurring question. The DAX measure was checked "
-                "against the SQL it came from before this was recorded."
-            ),
-        },
-        ok=(200, 201),
-    )
+    body = {
+        "name": published.title.replace(" ", "_"),
+        "displayName": published.title,
+        "service": service,
+        "sourceUrl": source_url,
+        "description": (
+            f"Promoted from a recurring question. The {target.kind} answer was checked "
+            "against the SQL it came from before this was recorded."
+            + (f" Asked for by {owner}." if owner else "")
+        ),
+    }
+    dashboard = om("PUT", "/dashboards", body, ok=(200, 201))
 
     # The edges are the point. A dashboard entity on its own says a report
     # exists; lineage says which tables it reads, which is what someone asks

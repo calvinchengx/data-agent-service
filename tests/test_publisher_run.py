@@ -12,6 +12,9 @@ import json
 import pytest
 
 from publisher import model, publish, run
+from publisher.targets import Artefact, powerbi
+
+PBI = powerbi.PowerBITarget(workspace="ws", warehouse="wh", warehouse_name="contoso_warehouse")
 
 
 @pytest.mark.parametrize(
@@ -134,7 +137,7 @@ def test_the_comparison_sql_drops_only_the_filter():
 def test_a_part_is_base64_and_names_its_path():
     import base64
 
-    part = publish.part("model.bim", {"name": "m"})
+    part = powerbi.part("model.bim", {"name": "m"})
     assert part["path"] == "model.bim"
     assert part["payloadType"] == "InlineBase64"
     assert json.loads(base64.b64decode(part["payload"]))["name"] == "m"
@@ -151,10 +154,10 @@ def test_publish_creates_both_items_verifies_and_reports(monkeypatch):
         calls.append((collection, item_type, name, [p["path"] for p in parts]))
         return f"{item_type.lower()}-id"
 
-    monkeypatch.setattr(publish.fabric, "create_or_update", fake_create)
-    monkeypatch.setattr(publish.fabric, "on_behalf_of", lambda *_a, **_k: "obo")
+    monkeypatch.setattr(powerbi.fabric, "create_or_update", fake_create)
+    monkeypatch.setattr(powerbi.fabric, "on_behalf_of", lambda *_a, **_k: "obo")
     monkeypatch.setattr(
-        publish.fabric,
+        powerbi.fabric,
         "evaluate_dax",
         lambda *_a, **_k: [{"agents[team]": "Billing", "[Resolution Time]": 210.0}],
     )
@@ -179,9 +182,8 @@ def test_publish_creates_both_items_verifies_and_reports(monkeypatch):
     }
     done = publish.publish(
         candidate,
+        target=PBI,
         user_token="user",
-        workspace="ws",
-        warehouse="wh",
         columns={
             "support.tickets": [
                 {"name": "resolution_minutes", "dataType": "double"},
@@ -198,17 +200,17 @@ def test_publish_creates_both_items_verifies_and_reports(monkeypatch):
     assert calls[0][3] == ["model.bim"]
     assert calls[1][3] == ["report.json", "definition.pbir"]
     assert done.agrees, done.note
-    assert done.semantic_model_id and done.report_id
-    assert "SUMMARIZECOLUMNS" in done.dax
+    assert done.artefact.ids["semanticModel"] and done.artefact.ids["report"]
+    assert "SUMMARIZECOLUMNS" in done.artefact.query
     # The SQL it was checked against has no filter, because the slicer opens unset.
     assert "WHERE" not in done.sql.upper()
 
 
 def test_publish_reports_disagreement_rather_than_raising(monkeypatch):
-    monkeypatch.setattr(publish.fabric, "create_or_update", lambda *_a, **_k: "id")
-    monkeypatch.setattr(publish.fabric, "on_behalf_of", lambda *_a, **_k: "obo")
+    monkeypatch.setattr(powerbi.fabric, "create_or_update", lambda *_a, **_k: "id")
+    monkeypatch.setattr(powerbi.fabric, "on_behalf_of", lambda *_a, **_k: "obo")
     monkeypatch.setattr(
-        publish.fabric, "evaluate_dax", lambda *_a, **_k: [{"a[c]": "AU", "[m]": 1.0}]
+        powerbi.fabric, "evaluate_dax", lambda *_a, **_k: [{"a[c]": "AU", "[m]": 1.0}]
     )
     model.COLUMNS_BY_TABLE = {"dbo.fct_sales": ("revenue_usd", "country")}
     candidate = {
@@ -223,9 +225,8 @@ def test_publish_reports_disagreement_rather_than_raising(monkeypatch):
     }
     done = publish.publish(
         candidate,
+        target=PBI,
         user_token="u",
-        workspace="ws",
-        warehouse="wh",
         columns={
             "dbo.fct_sales": [
                 {"name": "revenue_usd", "dataType": "double"},
@@ -238,11 +239,11 @@ def test_publish_reports_disagreement_rather_than_raising(monkeypatch):
     assert not done.agrees
     assert done.note
     # It still reports what it made, so an operator can look at the artefacts.
-    assert done.semantic_model_id
+    assert done.artefact.ids["semanticModel"]
 
 
 def test_a_measure_the_evaluator_cannot_express_stops_the_publish(monkeypatch):
-    monkeypatch.setattr(publish.fabric, "on_behalf_of", lambda *_a, **_k: "obo")
+    monkeypatch.setattr(powerbi.fabric, "on_behalf_of", lambda *_a, **_k: "obo")
     model.COLUMNS_BY_TABLE = {"dbo.fct_sales": ("revenue_usd",)}
     with pytest.raises(model.Unsupported, match="not in the set"):
         publish.publish(
@@ -256,9 +257,8 @@ def test_a_measure_the_evaluator_cannot_express_stops_the_publish(monkeypatch):
                 "dimensions": [],
                 "slot_columns": [],
             },
+            target=PBI,
             user_token="u",
-            workspace="ws",
-            warehouse="wh",
             columns={"dbo.fct_sales": [{"name": "revenue_usd"}]},
             names={},
             run_sql=lambda *_a: [],
@@ -268,18 +268,19 @@ def test_a_measure_the_evaluator_cannot_express_stops_the_publish(monkeypatch):
 def test_the_published_dict_is_serialisable_for_a_report():
     done = publish.Published(
         title="T",
-        semantic_model_id="m",
-        report_id="r",
-        dax="EVALUATE X",
+        target="powerbi",
+        artefact=Artefact(
+            kind="powerbi", ids={"semanticModel": "m", "report": "r"}, query="EVALUATE X"
+        ),
         sql="SELECT 1",
-        rows_dax=[],
+        rows_target=[],
         rows_sql=[],
         agrees=True,
         note="1 rows agree",
     )
     payload = done.as_dict()
     assert payload["title"] == "T" and payload["agrees"] is True
-    assert "rows_dax" not in payload, "raw rows are not part of the report"
+    assert "rows_target" not in payload, "raw rows are not part of the report"
 
 
 # ------------------------------------------------------------ the CLI path --
@@ -311,15 +312,16 @@ def _candidate_file(tmp_path, source):
 
 def test_a_candidate_from_another_engine_is_skipped_with_a_reason(monkeypatch, tmp_path, capsys):
     """Direct Lake binds to a Fabric item. A PostgreSQL candidate is not a
-    failure of this generator; it is out of its reach, and saying so is more
-    use than a stack trace."""
+    failure of this target; it is out of its reach, and the target says WHY --
+    a reason a person can act on replaced the silent skip that used to drop
+    every non-Fabric candidate on the floor."""
     path = _candidate_file(tmp_path, "contoso_support")
     monkeypatch.setattr(run.identity, "token_for", lambda *_a, **_k: "tok")
     monkeypatch.setattr(run.c, "load_state", lambda: {"warehouse_name": "contoso_warehouse"})
     monkeypatch.setattr("sys.argv", ["run", "--candidates", str(path)])
     assert run.main() == 1
     out = capsys.readouterr().out
-    assert "skipping" in out and "not this warehouse" in out
+    assert "powerbi cannot take" in out and "not the Fabric warehouse" in out
 
 
 def test_the_cli_publishes_and_records_when_the_answers_agree(monkeypatch, tmp_path, capsys):
@@ -343,10 +345,10 @@ def test_the_cli_publishes_and_records_when_the_answers_agree(monkeypatch, tmp_p
     )
     monkeypatch.setattr(run.catalognames, "for_columns", lambda: {"revenue_usd": "Net Revenue"})
     monkeypatch.setattr(run, "executor_sql", lambda _t: lambda _s, _q: [["AU", 5.0]])
-    monkeypatch.setattr(publish.fabric, "on_behalf_of", lambda *_a, **_k: "obo")
-    monkeypatch.setattr(publish.fabric, "create_or_update", lambda *_a, **_k: "made")
+    monkeypatch.setattr(powerbi.fabric, "on_behalf_of", lambda *_a, **_k: "obo")
+    monkeypatch.setattr(powerbi.fabric, "create_or_update", lambda *_a, **_k: "made")
     monkeypatch.setattr(
-        publish.fabric,
+        powerbi.fabric,
         "evaluate_dax",
         lambda *_a, **_k: [{"fct_revenue_summary[country]": "AU", "[Net Revenue]": 5.0}],
     )
@@ -381,10 +383,10 @@ def test_the_cli_refuses_and_records_nothing_when_they_disagree(monkeypatch, tmp
     )
     monkeypatch.setattr(run.catalognames, "for_columns", dict)
     monkeypatch.setattr(run, "executor_sql", lambda _t: lambda _s, _q: [["AU", 999.0]])
-    monkeypatch.setattr(publish.fabric, "on_behalf_of", lambda *_a, **_k: "obo")
-    monkeypatch.setattr(publish.fabric, "create_or_update", lambda *_a, **_k: "made")
+    monkeypatch.setattr(powerbi.fabric, "on_behalf_of", lambda *_a, **_k: "obo")
+    monkeypatch.setattr(powerbi.fabric, "create_or_update", lambda *_a, **_k: "made")
     monkeypatch.setattr(
-        publish.fabric,
+        powerbi.fabric,
         "evaluate_dax",
         lambda *_a, **_k: [{"fct_revenue_summary[country]": "AU", "[Revenue Usd]": 5.0}],
     )
@@ -424,16 +426,17 @@ def test_lineage_names_the_tables_the_dashboard_reads(monkeypatch):
     )
     done = publish.Published(
         title="Net Revenue by Country",
-        semantic_model_id="m",
-        report_id="r",
-        dax="EVALUATE X",
+        target="powerbi",
+        artefact=Artefact(
+            kind="powerbi", ids={"semanticModel": "m", "report": "r"}, query="EVALUATE X"
+        ),
         sql="SELECT 1",
-        rows_dax=[],
+        rows_target=[],
         rows_sql=[],
         agrees=True,
         note="ok",
     )
-    fqn = publish.record_lineage(done, {"tables": ["dbo.fct_sales"]})
+    fqn = publish.record_lineage(done, {"tables": ["dbo.fct_sales"]}, PBI)
 
     assert fqn.startswith("das_dashboards.")
     paths = [p for _m, p, _b in calls]
@@ -460,15 +463,16 @@ def test_a_table_the_catalog_does_not_know_is_skipped_not_fatal(monkeypatch):
     monkeypatch.setattr(publish.c, "load_state", lambda: {"om_schema_fqn": "svc.db.dbo"})
     done = publish.Published(
         title="T",
-        semantic_model_id="m",
-        report_id="r",
-        dax="d",
+        target="powerbi",
+        artefact=Artefact(
+            kind="powerbi", ids={"semanticModel": "m", "report": "r"}, query="EVALUATE"
+        ),
         sql="s",
-        rows_dax=[],
+        rows_target=[],
         rows_sql=[],
         agrees=True,
     )
-    publish.record_lineage(done, {"tables": ["nowhere.unknown"]})
+    publish.record_lineage(done, {"tables": ["nowhere.unknown"]}, PBI)
     assert "/lineage" not in calls, "an edge was recorded for a table with no id"
 
 

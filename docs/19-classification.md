@@ -46,8 +46,8 @@ sensitive. Labels reach the catalog two ways:
    ```python
    CLASSIFICATIONS = {
        "dim_customer.email": ["PII.Sensitive"],
-       "dim_party.email":    ["PII.Sensitive"],
-       "dim_customer.name":  ["PII.NonSensitive", "Contoso Restricted.Commercially Confidential"],
+       "dim_party.email": ["PII.Sensitive"],
+       "dim_customer.name": ["PII.NonSensitive", "Contoso Restricted.Commercially Confidential"],
    }
    ```
 

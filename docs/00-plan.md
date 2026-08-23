@@ -215,6 +215,7 @@ Emulator numbers are relative (laptop SQL Server sidecar), not Fabric capacity �
 | 15 Promotion ✅ | C16 + 15b catalog gaps + persona-replay eval | promoter fires on seeded recurring template, not on one-offs; no prose in store; title "Resolution Time by Team"; candidates visible only to `DAS_PROMOTE_ROLES` | 8, 14 |
 | 16 Dashboard publish ✅ | C17 | `SemanticModel` + `Report` items created in Fabric via OBO (emulator: definition persisted; rendering prod-only); OM `Dashboard` lineage present; DAX measure == SQL answer | 15 |
 | 18 Catalog-carried rules ✅ | C18 | a column tagged in OpenMetadata is refused by BOTH executors without a settings change; an unresolvable tag fails at startup | 6, 13 |
+| 19a Dashboard targets | `DashboardTarget` + `Plan` + `plan.schema.json`; Power BI extracted; Go generator | phase-16 witnesses pass unchanged; a non-Fabric candidate gets a *reason*; Go and Python artefacts byte-equal | 16 |
 | 12 Stretch ✅ | LLM via APIM (`llm-token-limit`); `DAS_OM_CONTEXT_MODE=native` | 429 after quota; native passes same evals | 11 |
 
 > **Phase 15 was marked complete before it was.** The exit test says candidates
@@ -238,7 +239,8 @@ data-agent-service/
   Makefile README.md LICENSE SECURITY.md docker-compose.yml .env.example
   agent/            cli.py prompt.md context.py skills/<name>/SKILL.md
   promoter/         canonical.py score.py tool.py
-  publisher/        tmdl.py pbir.py fabric_publish.py om_lineage.py
+  publisher/        plan.py publish.py run.py targets/{powerbi,…}.py contract/{plan.schema.json,cases.json}
+  publisher-go/     the Plan→artefacts generator, held to contract/cases.json
   services/contract/openapi.json   services/conformance/
   services/warehouse-query-py/     services/warehouse-query-go/
   seed/             provision.py govern.py authz.py apim.py policies/*.xml data/

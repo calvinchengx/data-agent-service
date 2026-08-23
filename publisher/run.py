@@ -2,8 +2,10 @@
 
     python -m publisher.run --user carol@entraemulator.dev
 
-Reads the promoter's candidates, publishes the highest-scoring one that this
-generator can express, verifies it, and records it in the catalog.
+Reads the promoter's candidates, offers the highest-scoring one to every
+target `DAS_DASHBOARD_TARGETS` names, publishes it to each that accepts it,
+verifies each, and records each in the catalog. A target that cannot take the
+candidate says why, because "skipped" on its own tells nobody what to change.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ import pathlib
 import sys
 
 from agent import identity
-from publisher import catalognames, model, publish
+from publisher import catalognames, plan, publish, targets
 from seed import common as c
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -108,44 +110,52 @@ def main() -> int:
 
     token = identity.token_for(a.user)
     state = c.load_state()
-    workspace, warehouse = state.get("workspace", ""), state.get("warehouse", "")
+    live = targets.configured(c.CFG, state)
 
     for candidate in released:
-        # Direct Lake binds to a Fabric item. A candidate from another engine
-        # is not a failure of this generator; it is out of its reach, and
-        # saying so is more useful than a stack trace.
-        if candidate["source"] != state.get("warehouse_name"):
-            print(f"skipping {candidate['title']!r}: {candidate['source']} is not this warehouse")
+        title = candidate["title"]
+        accepting = []
+        for target in live:
+            reason = target.accepts(candidate, state)
+            if reason:
+                print(f"{target.kind} cannot take {title!r}: {reason}")
+            else:
+                accepting.append(target)
+        if not accepting:
             continue
+
         try:
             columns = describe(token, candidate["source"], candidate["tables"])
             names = catalognames.for_columns()
+            plan.build(candidate, columns, names)
+        except plan.Unsupported as e:
+            print(f"skipping {title!r}: {e}")
+            continue
+
+        all_agree = True
+        for target in accepting:
             done = publish.publish(
                 candidate,
+                target=target,
                 user_token=token,
-                workspace=workspace,
-                warehouse=warehouse,
                 columns=columns,
                 names=names,
                 run_sql=executor_sql(token),
+                who=a.user,
             )
-        except model.Unsupported as e:
-            print(f"skipping {candidate['title']!r}: {e}")
-            continue
+            if done.agrees:
+                publish.record_lineage(done, candidate, target, owner=a.user)
+            all_agree = all_agree and done.agrees
+            ids = " · ".join(f"{k} {v}" for k, v in done.artefact.ids.items())
+            print(
+                json.dumps(done.as_dict(), indent=2)
+                if a.json
+                else f"{'published' if done.agrees else 'REFUSED'} to {target.kind}: "
+                f"{done.title}\n  {ids}\n  {done.note}"
+            )
+        return 0 if all_agree else 2
 
-        if done.agrees:
-            publish.record_lineage(done, candidate)
-        out = done.as_dict()
-        print(
-            json.dumps(out, indent=2)
-            if a.json
-            else f"{'published' if done.agrees else 'REFUSED'}: {done.title}\n"
-            f"  model {done.semantic_model_id} · report {done.report_id}\n"
-            f"  {done.note}"
-        )
-        return 0 if done.agrees else 2
-
-    print("no released candidate could be expressed as a dashboard")
+    print("no released candidate could be taken by any configured target")
     return 1
 
 

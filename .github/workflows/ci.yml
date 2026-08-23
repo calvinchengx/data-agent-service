@@ -52,7 +52,7 @@ jobs:
         # does not need one to measure unit coverage.
         run: >
           uv run pytest tests -q
-          --cov=agent --cov=promoter --cov=services/warehouse-query-py
+          --cov=agent --cov=promoter --cov=publisher --cov=services/warehouse-query-py
           --cov-report=term-missing --cov-fail-under=90
 
       # Discipline rule 2, mechanically: no emulator-only code path, and no
@@ -107,6 +107,37 @@ jobs:
           uv run python services/contract/gen_guard_corpus.py
           diff /tmp/guard_corpus.json services/contract/guard_corpus.json \
             && echo "the recorded verdicts are the Python guard's"
+
+  publisher-contract:
+    name: Publisher contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: publisher-go/go.mod
+          cache-dependency-path: publisher-go/go.mod
+      - uses: astral-sh/setup-uv@v7
+      # The recorded artefacts are only worth anything if they still describe
+      # the Python generator, so regenerate and diff first -- a change to
+      # model.py or report.py that moves a byte fails here rather than
+      # silently making the Go side wrong about what it is held to.
+      - name: the recorded artefacts still describe the Python generator
+        run: |
+          uv run python publisher/contract/gen_cases.py
+          git diff --exit-code -- publisher/contract/cases.json \
+            && echo "the recorded artefacts are the Python generator's"
+      - name: go vet
+        working-directory: publisher-go
+        run: go vet ./...
+      - name: the Go generator produces the same bytes
+        working-directory: publisher-go
+        run: |
+          go test ./... -coverprofile=cover.out
+          go tool cover -func=cover.out | tail -1
+          pct=$(go tool cover -func=cover.out | tail -1 | awk '{gsub(/%/,"",$NF); print $NF}')
+          awk -v p="$pct" 'BEGIN { if (p+0 < 90) { printf "publisher-go coverage %s%% is below the 90%% floor\n", p; exit 1 } }'
 
   infra:
     name: Infrastructure compiles

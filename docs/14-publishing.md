@@ -1,10 +1,16 @@
 # Publishing a dashboard
 
 The end of the promotion path. A candidate the promoter released (see
-[12-promotion](12-promotion.md)) becomes a Power BI semantic model and report
-in Fabric, created under the identity of the person who asked, checked against
-the query it came from, and recorded in OpenMetadata with lineage to the tables
-it reads.
+[12-promotion](12-promotion.md)) becomes a dashboard in every tool
+`DAS_DASHBOARD_TARGETS` names — created under the identity of the person who
+asked where the tool can carry it, checked against the query it came from, and
+recorded in OpenMetadata with lineage to the tables it reads.
+
+Power BI is the first target and for a long time it was the only one, which is
+why most of this page is about TMSL and PBIR. What is *not* Power BI's is the
+order — build, create, evaluate, compare, record — and the `Plan` that order
+operates on. See [15-adding-a-dashboard-target](15-adding-a-dashboard-target.md)
+for the seam, and §20 of [00-plan](00-plan.md) for why it exists.
 
 ```bash
 python -m promoter.run --from compose      # what keeps being asked
@@ -115,3 +121,49 @@ Rendering. The emulator persists a report definition byte-for-byte and does not
 interpret it — deliberately, since an emulator that parsed a report definition
 would be claiming knowledge of a format whose renderer it does not have. That
 the report *draws* correctly is prod-only, and `docs/parity.md` says so.
+
+
+## Why this is a job, and the executor is a service
+
+They look similar — both speak to a governed system on a user's behalf, both
+have an adapter seam, both refuse rather than guess. They are not the same
+kind of thing, and the difference decides how much machinery each deserves.
+
+| | Executor | Publisher |
+|---|---|---|
+| Shape | a **service** on the hot path of every question | a **job**, run by a person or a schedule |
+| Load | concurrent, latency-bound, measured by k6 | one candidate, a few REST calls, seconds |
+| Identity | the on-behalf-of hop, every user, every call | one exchange per publication |
+| Adapter | `SourceBackend` — read *from* an engine | `DashboardTarget` — write *to* a tool, then read back to verify |
+| Contract | `services/contract/openapi.json` + the conformance suite | `publisher/contract/plan.schema.json` + recorded artefacts |
+
+The Go executor exists for **two** reasons: to answer a performance question
+(§4, row 4 of the plan), and to prove the MCP contract is specifiable rather
+than being "whatever the Python does". That is why `access.go`, `tagindex.go`
+and `vaultref.go` all had to be ported — they sit *inside* the service.
+
+The publisher has no load to compare, so the first reason does not apply, and
+one Python implementation is all it needs. `publisher-go/` exists for the
+**second** reason alone. §18 claims the definitions are deterministic
+functions of the template and the catalog; a sentence is not a check. A second
+generator, held to the same recorded bytes, is what turns that claim into one.
+Where the two disagree, the contract was underspecified — which is the
+finding, and the reason to have built it.
+
+Only the pure part is ported. The REST plumbing — Fabric, on-behalf-of,
+Superset's login, the catalog writes — stays Python: a second implementation
+of that would have nothing to disagree about.
+
+## The contract
+
+```bash
+uv run python publisher/contract/gen_cases.py   # re-record
+make publisher-contract                          # regenerate, diff, hold Go to the bytes
+```
+
+`publisher/contract/cases.json` records, for each case, the candidate, the
+executor's column lists, the `Plan` built from them, and every artefact each
+target emits — canonically serialised, so two generators either match to the
+byte or name the line they disagree on. CI regenerates and diffs it, so the
+file cannot drift from the Python it describes; the same discipline as
+`services/contract/guard_corpus.json`.
