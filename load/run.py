@@ -12,7 +12,7 @@ twice:
 
   * **query** — MCP tool calls through the gateway to the executor: sign-in
     on-behalf-of, guard, TDS, back again.
-  * **catalog** — the passthrough to OpenMetadata with the bot swap.
+  * **catalog** — OpenMetadata through the gateway and the executor, as the role bot.
   * **the gateway's cost** — the same query scenario aimed straight at the
     executor. The difference between the two p95s is what API Management costs
     on this path, which is a number worth knowing before choosing where to put

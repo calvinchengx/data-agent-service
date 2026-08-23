@@ -159,6 +159,17 @@ resource "azurerm_container_app" "executor" {
         name  = "DAS_TAG_REFRESH_S"
         value = tostring(var.tag_refresh_seconds)
       }
+      # The catalog's MCP server, proxied at /om/mcp as the read-only bot for
+      # the caller's role. Most permissive role first; a caller holding none of
+      # the listed roles reaches no bot. References, never tokens.
+      env {
+        name  = "DAS_OM_MCP_URL"
+        value = "${var.openmetadata_url}/mcp"
+      }
+      env {
+        name  = "DAS_OM_ROLE_BOTS"
+        value = join(",", [for role, secret in var.om_role_bots : "${role}=keyvault:${secret}"])
+      }
       # The identity the platform injects; azure-identity and this service's
       # own credential module both discover it the same way.
       env {

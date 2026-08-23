@@ -9,13 +9,13 @@ the question it actually owns.
 | What role do they hold? | Entra — **application role assignments or security-group membership**, whichever `DAS_ROLE_SOURCE` names | the claim (`roles` / `groups`), or a cached Graph lookup where the tenant omits it |
 | May they reach this source at all? | the source (Fabric workspace roles) | the warehouse itself, via the on-behalf-of token |
 | May this role read this table / column? | `DAS_ACCESS_RULES` | `access.py` in the executor, checked against the parsed query |
-| What may they see in the catalog? | OpenMetadata policies on a per-role bot | OpenMetadata |
+| What may they see in the catalog? | OpenMetadata policies on a per-role bot; the executor presents the catalog as the bot for the role it resolved | OpenMetadata — at **table** granularity, see below |
 
 ## Personas seeded by `seed/authz.py`
 
 | User | App role | Workspace role | Result |
 |---|---|---|---|
-| `alice` | `Data.Analyst` | Viewer | reads the business tables; customer contact columns are withheld and are not even described |
+| `alice` | `Data.Analyst` | Viewer | reads the business tables; customer contact columns are withheld and `describe_table` does not list them (the catalog still does — see [What the catalog shows each role](#what-the-catalog-shows-each-role)) |
 | `carol` | `Data.Finance` | Viewer | reads everything, personal data included |
 | `bob` | — | none | refused by the warehouse itself at login |
 
@@ -153,6 +153,51 @@ still has to name the rest. Both mechanisms coexist for that reason.
 Both executors resolve identically, and the conformance suite runs against
 each — a rule source only one of them read would be the same defect this
 project keeps finding in a new place.
+
+## What the catalog shows each role
+
+The catalog's MCP server is reached through the executor (`/om/mcp`), which
+presents it as the read-only bot for the caller's role:
+
+```bash
+DAS_OM_ROLE_BOTS=Data.Finance=keyvault:om-bot-das-finance,Data.Analyst=keyvault:om-bot-das-analyst
+```
+
+Most permissive first; a caller holding several listed roles is presented as
+the first. A caller holding **none** of them reaches no bot at all — not a
+general reader. `seed.authz` writes this line from the policies it creates,
+ordering by how few denials each carries, so adding a role cannot silently
+outrank another.
+
+Why the executor and not the gateway: the role is only known once the token
+is validated and, where the token omits it (every delegated token from the
+pinned entra-emulator does — upstream #9), the directory is asked. That is
+the executor's `RoleResolver`, and the data path already depends on it. A
+gateway `<choose>` on the claim would have no fallback, and under upstream #7
+would be picking a credential from a token it had not validated. Resolving
+the role once also means catalog reach and data reach cannot disagree.
+
+What the executor does **not** do is decide what the bot may see. Every tool
+OpenMetadata exposes goes through, write tools included, and the catalog
+refuses the ones the bot's policy denies — so a misconfigured proxy cannot
+grant what the policy withholds. Phase 6 witnesses a write attempt refused by
+the catalog, not by this service.
+
+**Reach is table-grained.** OpenMetadata evaluates a policy's `matchAnyTag`
+against the entity's own tags. A table tagged `PII.Sensitive` is hidden from
+the analyst's bot and not the finance one; a table whose *column* carries the
+tag is shown whole — column name, description and tag included — because a
+column is not an authorisable entity in the open-source release. Phase 6
+tags a table inside the witness, checks both bots, untags, and separately
+pins that a column tag alone hides nothing there, so the boundary cannot be
+re-claimed by accident. Column withholding is the data path's job, and the
+executor's own `describe_table` does it (the "not even described" row in the
+personas table is about that tool, not about the catalog). A steward who
+needs a whole table out of a role's catalog tags the table.
+
+Audit: OpenMetadata's own log names the bot. The executor's audit line names
+the human, their `oid`, the role chosen and the status — it is the only
+record that ties the two together.
 
 ## Why a refusal's origin matters
 

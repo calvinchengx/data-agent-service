@@ -346,6 +346,12 @@ services:
       DAS_OM_URL: "${DAS_OM_URL:-http://openmetadata:8585}"
       DAS_OM_BOT_TOKEN: "keyvault:om-bot-das-reader"
       DAS_TAG_REFRESH_S: "${DAS_TAG_REFRESH_S:-300}"
+      # The catalog's MCP server, proxied at /om/mcp as the bot matching the
+      # caller's role. The role -> bot table is written by seed.authz from the
+      # policies it creates (most permissive first); a caller holding no
+      # listed role reaches no bot at all.
+      DAS_OM_MCP_URL: "${DAS_OM_MCP_URL:-http://openmetadata:8585/mcp}"
+      DAS_OM_ROLE_BOTS: "${DAS_OM_ROLE_BOTS:-}"
     # No healthcheck here on purpose: DAS_EXECUTOR picks the image, and the two
     # implementations ship different runtimes (the Go one is distroless — no
     # shell, no python). Each Dockerfile declares its own HEALTHCHECK, so the

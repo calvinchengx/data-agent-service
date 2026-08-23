@@ -324,6 +324,14 @@ def om_role_bots() -> dict[str, str]:
             g.store_secret(f"om-bot-{name}", token)
             out[role] = name
         c.log(f"catalog bot {name} for {role} ({len(deny_tags)} tag denials)")
+    # The executor's table, in the order it chooses from: most permissive
+    # FIRST, and "permissive" is read off the policies (fewest denials) rather
+    # than typed, so adding a role here cannot silently outrank another. Only
+    # vault REFERENCES reach the settings file; write_env refuses a secret.
+    ordered = sorted(out, key=lambda r: len(OM_ROLE_BOTS[r].deny_tags))
+    c.write_env(
+        DAS_OM_ROLE_BOTS=",".join(f"{role}=keyvault:om-bot-{out[role]}" for role in ordered)
+    )
     return out
 
 

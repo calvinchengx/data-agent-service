@@ -90,7 +90,7 @@ func configure() error {
 			allowedClients[id] = true
 		}
 	}
-	return nil
+	return configureCatalog()
 }
 
 // routes is the service's URL surface, in one place so the tests drive the
@@ -104,6 +104,8 @@ func routes() *http.ServeMux {
 	mux.HandleFunc("POST /query", handleQuery)
 	mux.HandleFunc("POST /mcp", handleMCP)
 	mux.HandleFunc("GET /mcp", handleMCPStream)
+	mux.HandleFunc("POST /om/mcp", handleCatalogMCP)
+	mux.HandleFunc("GET /om/mcp", handleCatalogMCPStream)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", handleProtectedResource)
 	return mux
 }

@@ -53,8 +53,8 @@ Consequences already applied: MCP OAuth discovery endpoints are served by our ow
 
 ```
 user NL ──► agent (Claude Agent SDK; any MCP client) ──MCP/Streamable HTTP──► apim-emulator :8446
-                                                                               ├─ /om/mcp         type=mcp passthrough → openmetadata:8585/mcp
-                                                                               │    validate-jwt → rate-limit-by-key(sub) → choose(role) → set-header OM bot token (KV named value) + X-Forwarded-User
+                                                                               ├─ /om/mcp         type=mcp passthrough → warehouse-query:8090/om/mcp → openmetadata:8585/mcp
+                                                                               │    validate-jwt → rate-limit-by-key(sub) → pass user token; the EXECUTOR resolves the role and presents the catalog as that role's bot
                                                                                ├─ /warehouse/mcp  type=mcp REST→MCP     → warehouse-query:8090 (py | go)
                                                                                │    validate-jwt → rate-limit-by-key(sub) → pass user token
                                                                                │         warehouse-query: MI (/msi/token) → FIC client_assertion → OBO → database.windows.net token → TDS :1433 (fabric-emulator)
@@ -73,12 +73,12 @@ Agent workflow (prompt encodes the *workflow*, never a table name): find glossar
 |---|---|---|---|
 | D1 | OM version | **1.13.2** / build `main` | 1.13.2; `DAS_OM_CONTEXT_MODE=base|native` seam |
 | D2 | LLM | **Anthropic API direct** / via APIM | Direct for MVP; APIM route in stretch |
-| D3 | OM credential at gateway | **bot-token swap + `X-Forwarded-User`** / per-user OM OAuth | Swap |
+| D3 | OM credential | **bot chosen in the executor by resolved role** / gateway `<choose>` on the claim / per-user OM OAuth | Executor — the claim is absent from a delegated token under entra #9 and unverified under apim #7; the executor has the Graph fallback and validates the token. The gateway holds no catalog credential. |
 | D4 | Repo name | **`data-agent-service`** (decided) | multi-source; avoids clash with Microsoft "Fabric Data Agent" |
 | D5 | Service identity | **`ManagedIdentityCredential` via entra `/msi/token`** | Same code locally and in Azure |
 | D6 | LLM-judge for prose answers | **yes, tracked metric, not gate** / no | Tracked |
 | D7 | Go SQL guard strategy | conservative tokenizer+deny-list / T-SQL parser lib | Spike in Phase 9 |
-| D8 | MVP OM authz | **role-mapped bot tokens (`om-bot-<role>`) via APIM `<choose>`** / per-user OM SSO | Role-mapped bots; per-user SSO post-MVP |
+| D8 | MVP OM authz | **role-mapped bot tokens (`om-bot-<role>`), chosen by the executor** / per-user OM SSO | Role-mapped bots; per-user SSO post-MVP. Reach is **table-grained**: OM evaluates `matchAnyTag` on the entity's own tags, so a column tag hides nothing in the catalog (witnessed, phase6) |
 
 ---
 
@@ -123,7 +123,7 @@ Agent workflow (prompt encodes the *workflow*, never a table name): find glossar
 | Skills | `DAS_SKILLS` (list; default `om-grounded-sql,result-presentation` + per-source dialect) | | |
 | Promotion | `DAS_PROMOTE_ENABLED`, `DAS_PROMOTE_MIN_USERS=3`, `DAS_PROMOTE_MIN_RUNS=10`, `DAS_PROMOTE_WINDOW_DAYS=30`, `DAS_PROMOTE_ROLES` (who may see candidates) | | |
 | Publishing | `DAS_PUBLISH_ENABLED`, `DAS_PUBLISH_WORKSPACE_ID`, `DAS_PUBLISH_MODE=directlake|directquery` | | |
-| Secrets | `om-bot-<role>` tokens | keyvault-emulator → APIM named values | Key Vault |
+| Secrets | `om-bot-<role>` tokens | keyvault-emulator → executor, by `keyvault:` reference | Key Vault |
 
 Generalization rule: **the only Contoso-specific code is under `seed/` and `evals/usecases/contoso/`; nothing in `services/`, `agent/`, or `policies/` imports it.** Multi-warehouse: `run_query(warehouse=…)`; OM table FQN is the join key between semantic layer and executor. Other engines = additional `SourceBackend` adapters (`kind`); REST APIs and existing MCP servers need **no code** — register in APIM (REST→MCP or passthrough). See §15.
 
@@ -149,7 +149,7 @@ Generalization rule: **the only Contoso-specific code is under `seed/` and `eval
 |---|---|---|---|
 | User → agent | auth-code + PKCE (public) / device code | `api://data-agent-service` | alice |
 | Agent → APIM | Bearer; `validate-jwt` | `api://data-agent-service` | alice |
-| APIM → OM `/mcp` | `<choose>` on `roles` → `set-header` `om-bot-<role>`; `X-Forwarded-User` | OM-issued | role bot (alice in audit header) |
+| APIM → executor `/om/mcp` → OM `/mcp` | pass user token; executor resolves role → `om-bot-<role>` | OM-issued | role bot (alice in the executor's audit line; OM's own audit names the bot) |
 | APIM → executor | pass user token | `api://data-agent-service` | alice |
 | Executor → entra | MI (`/msi/token`) → FIC `client_assertion` → **OBO** | `https://database.windows.net` | alice |
 | Executor → TDS | FedAuth attr 1256 | `https://database.windows.net` | alice |

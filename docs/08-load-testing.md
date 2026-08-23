@@ -17,7 +17,7 @@ so there is one answer to "where does this run" rather than two.
 |---|---|---|
 | `query` | MCP `describe_table` + `run_query` through the gateway — sign-in on-behalf-of, guard, TDS, back | p95 under the threshold, <1% HTTP failures, <1% tool refusals |
 | `query-direct` | the same calls straight at the executor | same |
-| `catalog` | catalog search through the gateway (passthrough + bot swap) | p95 under threshold |
+| `catalog` | catalog search through the gateway and the executor, as the role bot | p95 under threshold |
 | `ratelimit` | one caller deliberately exceeding the allowance | the excess **must** be refused (`throttled > 0`) |
 
 A tool call answers HTTP 200 with `isError` inside the payload, so the scripts

@@ -40,7 +40,8 @@ same check has been watched passing against a real tenant.
 | MCP tools published through the gateway | 🟢 | `e2e.run` phase4 | not yet |
 | SQL guard refuses writes, escapes, cross-database reads | 🟢 | phase4, `test_sqlguard.py`, `sqlguard_test.go`, conformance | not yet |
 | The **source** refuses a user with no role | 🟢 | phase4, phase6 | not yet |
-| Catalog reachable through the gateway with a role-mapped bot | 🟢 | `e2e.run` phase5 | not yet |
+| Catalog reachable through the gateway as the caller's role bot; unmapped role reaches none | 🟢 | `e2e.run` phase5, phase6 | not yet |
+| A table-level tag hides the table from the analyst's catalog and not the finance one; a column tag alone hides nothing there | 🟢 | `e2e.run` phase6 (tags and untags within the witness) | not yet |
 | Role-based column withholding | 🟢 | `e2e.run` phase6, conformance | not yet |
 | Gateway validates the token it is told to | 🟠 off locally (upstream #7) | — | not yet — expected to work; `DAS_APIM_VALIDATE_JWT=true` |
 | Rate limit refuses the excess | 🟢 | `load.run` ratelimit, phase8 | not yet |

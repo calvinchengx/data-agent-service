@@ -123,6 +123,15 @@ variable "om_bot_secret_name" {
   default     = "om-bot-das-reader"
 }
 
+variable "om_role_bots" {
+  description = "Role -> Key Vault entry holding that role's read-only catalog bot token, most permissive first. Written by seed.authz locally; here it is declared."
+  type        = map(string)
+  default = {
+    "Data.Finance" = "om-bot-das-finance"
+    "Data.Analyst" = "om-bot-das-analyst"
+  }
+}
+
 variable "tag_refresh_seconds" {
   description = "How soon a newly tagged column starts being refused."
   type        = number

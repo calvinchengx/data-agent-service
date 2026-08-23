@@ -19,7 +19,7 @@ make client-config ARGS="--auth token"    # embed a bearer instead of OAuth
 | **Generated configuration** | a README that names a URL which stopped being true |
 
 Both MCP endpoints are covered: `/warehouse/mcp` (our executor, proxied) and
-`/om/mcp` (OpenMetadata's own server, proxied with a read-only bot).
+`/om/mcp` (OpenMetadata's own server, proxied by the executor as the read-only bot for your role).
 
 ## Two ways a client authenticates
 

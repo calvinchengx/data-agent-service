@@ -452,17 +452,98 @@ def phase6() -> None:
         text[:70],
     )
 
-    kv = c.CFG["DAS_KEYVAULT_URL"].rstrip("/")
-    have = []
-    for bot in ("das-analyst", "das-finance"):
-        st, _, _ = c.http(
-            "GET",
-            f"{kv}/secrets/om-bot-{bot}?api-version=7.5",
-            headers=c.bearer("https://vault.azure.net"),
-        )
-        have.append(st == 200)
+    # The catalog, as each role sees it. The executor presents OpenMetadata as
+    # the bot for the caller's resolved role; what that bot may see is the
+    # catalog's own policy. A witness here tags a table ITSELF, asks, and
+    # untags -- it does not assume a previous run left the catalog in any
+    # particular state.
+    from seed import govern as g
+
+    key = c.load_state().get("apim", {}).get("om_subscription_key", "")
+    om_extra = {"Ocp-Apim-Subscription-Key": key} if key else {}
+
+    def catalog(tool: str, args: dict, token: str):
+        st, b = rpc("tools/call", {"name": tool, "arguments": args}, token, "/om/mcp", om_extra)
+        if st != 200:
+            return st, b[:160]
+        _err, text = tool_result(b)
+        return st, text
+
+    st, text = catalog("search_metadata", {"query": "revenue", "entity_type": "table"}, bob)
     check(
-        "phase6", "the catalog has a read-only bot per role", all(have), "das-analyst, das-finance"
+        "phase6",
+        "a caller with no catalog role reaches no catalog bot at all",
+        st == 403 and "no catalog access" in text,
+        f"status {st}",
+    )
+
+    table_fqn = "fabric_contoso.contoso_warehouse.dbo.dim_party"
+    table = g.om("GET", f"/tables/name/{table_fqn}?fields=tags")
+    g.om(
+        "PATCH",
+        f"/tables/{table['id']}",
+        [
+            {
+                "op": "add",
+                "path": "/tags/-",
+                "value": {
+                    "tagFQN": "PII.Sensitive",
+                    "source": "Classification",
+                    "labelType": "Manual",
+                    "state": "Confirmed",
+                },
+            }
+        ],
+        ctype="application/json-patch+json",
+    )
+    try:
+        details = {"entityType": "table", "fqn": table_fqn}
+        _st, text_alice = catalog("get_entity_details", details, alice)
+        _st, text_carol = catalog("get_entity_details", details, carol)
+    finally:
+        table = g.om("GET", f"/tables/name/{table_fqn}?fields=tags")
+        for i in reversed(
+            [i for i, t in enumerate(table.get("tags", [])) if t["tagFQN"] == "PII.Sensitive"]
+        ):
+            g.om(
+                "PATCH",
+                f"/tables/{table['id']}",
+                [{"op": "remove", "path": f"/tags/{i}"}],
+                ctype="application/json-patch+json",
+            )
+    check(
+        "phase6",
+        "a table tagged as personal data is hidden from the analyst's catalog and not the finance one",
+        "denied by role DasAnalyst" in text_alice and "dim_party" in text_carol,
+        f"alice: {text_alice[:60]}",
+    )
+
+    # The boundary, pinned so it is not re-claimed: a COLUMN tag does not hide
+    # its table. OpenMetadata's matchAnyTag reads the entity's own tags, and a
+    # column is not an authorisable entity in the open-source release. Column
+    # withholding is the data path's job -- the describe_table witness above.
+    _st, text = catalog(
+        "get_entity_details",
+        {"entityType": "table", "fqn": "fabric_contoso.contoso_warehouse.dbo.dim_customer"},
+        alice,
+    )
+    check(
+        "phase6",
+        "catalog reach is table-grained: a column tag alone hides nothing there",
+        "email" in text and "PII.Sensitive" in text,
+        "dim_customer.email visible to the analyst bot, tag and all",
+    )
+
+    st, text = catalog(
+        "create_glossary",
+        {"name": "das-witness-should-not-exist", "description": "written through the proxy"},
+        carol,
+    )
+    check(
+        "phase6",
+        "the catalog's write tools go through and the catalog refuses them",
+        st == 200 and ("denied" in text.lower() or "403" in text),
+        text[:70],
     )
 
     # Roles can be held as application role assignments or as security-group

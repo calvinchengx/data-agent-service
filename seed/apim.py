@@ -9,9 +9,12 @@ Two APIs, both `type: mcp`, so any MCP client sees one endpoint per concern:
     own OpenAPI. Policies: validate-jwt (issuer, audience, scope), rate limit
     per caller, and the user's token forwarded so the executor can act on their
     behalf.
-  * **om** — passthrough to OpenMetadata's own MCP server, with the user's token
-    swapped for the read-only bot's JWT (a Key Vault-backed named value), the
-    caller recorded in `X-Forwarded-User`.
+  * **om** — passthrough to the executor's `/om/mcp`, which proxies
+    OpenMetadata's own MCP server as the read-only bot matching the caller's
+    role. The bot is chosen in the executor, not here: the role is only known
+    once the token is validated and, where the token omits it, the directory
+    asked -- a gateway `<choose>` on the claim has neither. The gateway holds
+    no catalog credential at all.
 
 Everything is created through the ARM management plane exactly as `az apim`
 would; policy documents are the same XML a portal paste would contain.
@@ -41,7 +44,10 @@ EXECUTOR = c.CFG.get("DAS_EXECUTOR_URL", "http://warehouse-query:8090")
 # also how Azure documents putting API Management in front of your own MCP
 # server. The REST surface stays published for non-MCP clients and load tests.
 EXECUTOR_MCP = c.CFG.get("DAS_EXECUTOR_MCP_URL", EXECUTOR.rstrip("/") + "/mcp")
-OM_MCP = c.CFG.get("DAS_OM_MCP_URL", c.CFG["DAS_OM_URL"].rstrip("/") + "/mcp")
+# The catalog route's backend is the EXECUTOR, which chooses the bot by the
+# caller's resolved role and forwards to OpenMetadata (DAS_OM_MCP_URL is the
+# executor's setting, not this one's).
+EXECUTOR_OM_MCP = c.CFG.get("DAS_EXECUTOR_OM_MCP_URL", EXECUTOR.rstrip("/") + "/om/mcp")
 AUDIENCE = c.CFG["DAS_AGENT_AUDIENCE"]
 SCOPE = c.CFG.get("DAS_REQUIRED_SCOPE", "access_as_user")
 RATE_CALLS = c.CFG.get("DAS_RATE_CALLS", "60")
@@ -118,16 +124,6 @@ def jwt_policy(extra_inbound: str = "") -> str:
 </policies>"""
 
 
-OM_SWAP = """<!-- The user is authenticated above; OpenMetadata is then reached as the
-         read-only bot, with the caller recorded for audit. -->
-    <set-header name="Authorization" exists-action="override">
-      <value>Bearer {{om-bot-token}}</value>
-    </set-header>
-    <set-header name="X-Forwarded-User" exists-action="override">
-      <value>@(context.Request.Headers.GetValueOrDefault(&quot;X-Forwarded-User&quot;,&quot;unknown&quot;))</value>
-    </set-header>"""
-
-
 # ------------------------------------------------------------------- apis --
 def put_api(
     name: str,
@@ -191,19 +187,6 @@ def named_value(name: str, value: str, secret=True) -> None:
     c.log(f"named value {name} set")
 
 
-def om_bot_token() -> str:
-    kv = c.CFG.get("DAS_KEYVAULT_URL", "").rstrip("/")
-    bot = c.load_state().get("om_reader_bot", "das-reader")
-    st, _, b = c.http(
-        "GET",
-        f"{kv}/secrets/om-bot-{bot}?api-version=7.5",
-        headers=c.bearer("https://vault.azure.net"),
-    )
-    if st != 200:
-        raise SystemExit(f"OM bot token not in Key Vault (run seed.govern): {st}")
-    return json.loads(b)["value"]
-
-
 # The vault entry the subscription key lives in -- a NAME, and the only part
 # of it that reaches a settings file.
 #
@@ -247,7 +230,7 @@ def set_rate_limit(calls: int) -> None:
     RATE_CALLS = str(calls)
     put_policy("apis/warehouse", jwt_policy())
     put_policy("apis/warehouse-rest", jwt_policy())
-    put_policy("apis/om", jwt_policy(OM_SWAP))
+    put_policy("apis/om", jwt_policy())
     c.log(f"rate limit now {calls} calls / {RATE_WINDOW}s")
 
 
@@ -452,22 +435,23 @@ def main() -> dict:
     put_policy("apis/warehouse-rest", jwt_policy())
     c.log("warehouse-rest: 4 REST operations published")
 
-    # 2. OpenMetadata's own MCP server, proxied, with the read-only bot swap
-    named_value("om-bot-token", om_bot_token())
-    # The OpenMetadata route applies its OWN credential at the gateway (the
-    # read-only bot), so it must not be reachable unauthenticated. With
-    # gateway-side JWT validation available that is the gate; without it, an
-    # APIM subscription key is — standard APIM authentication either way.
+    # 2. OpenMetadata's own MCP server, via the executor, which presents it as
+    # the bot for the caller's role. The caller's bearer is forwarded exactly
+    # as on the warehouse route, and the executor validates it. The
+    # subscription requirement predates this: it was the gate while the
+    # gateway applied the catalog credential itself. It no longer does, so the
+    # key is now redundant with the bearer; it is kept until the agent and
+    # client configs stop sending it, then removed in one change.
     put_api(
         "om",
         "Business context (OpenMetadata)",
         "om",
-        OM_MCP,
+        EXECUTOR_OM_MCP,
         mcp_mode="passthrough",
         subscription_required=not VALIDATE_JWT,
     )
-    put_policy("apis/om", jwt_policy(OM_SWAP))
-    c.log("om: passthrough with read-only bot swap")
+    put_policy("apis/om", jwt_policy())
+    c.log("om: passthrough to the executor, bot chosen there by role")
 
     publish_discovery()
     publish_llm()

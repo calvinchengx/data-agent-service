@@ -35,6 +35,7 @@ from fastapi.responses import JSONResponse, Response
 from jwt import PyJWKSet
 
 import access
+import catalog
 import httpguard
 import mcp as mcpproto
 import vaultref
@@ -80,6 +81,8 @@ SOURCES = load_sources()
 CRED = Credential(Settings.from_env())
 RULES = access.Rules()
 ROLES = access.RoleResolver(lambda: CRED.managed_identity_token(access.GRAPH_AUDIENCE))
+CATALOG_BOTS = catalog.RoleBots()
+CATALOG_MCP = os.environ.get(catalog.UPSTREAM_VAR, "").strip()
 app = FastAPI(
     title="warehouse-query",
     version="0.1.0",
@@ -1090,6 +1093,56 @@ async def mcp_endpoint(request: Request, authorization: str | None = Header(defa
 def mcp_stream():
     """This server initiates no messages, so the server-to-client stream is
     declined rather than held open for something that will never arrive."""
+    return JSONResponse(
+        {"error": "this server sends no unsolicited messages"},
+        status_code=405,
+        headers={"Allow": "POST"},
+    )
+
+
+# ------------------------------------------------------------ catalog MCP --
+@app.post("/om/mcp", include_in_schema=False)
+async def catalog_mcp(request: Request, authorization: str | None = Header(default=None)):
+    """OpenMetadata's own MCP server, reached as the bot for the caller's role.
+
+    The role is resolved here exactly as it is for a query (claim, else the
+    directory), and the catalog is then asked as that role's bot. What the bot
+    may see or do is OpenMetadata's decision (see catalog.py) -- every tool
+    goes through, and the catalog refuses the ones the bot may not use.
+    """
+    p = principal(authorization)
+    if not CATALOG_MCP or not CATALOG_BOTS.configured:
+        audit(
+            op="catalog",
+            user=p.name,
+            oid=p.oid,
+            verdict="unavailable",
+            reason="no catalog bots configured",
+        )
+        raise HTTPException(503, "the catalog is not configured for this service")
+    try:
+        role, credential = CATALOG_BOTS.choose(p.roles)
+    except catalog.NoCatalogRole as e:
+        audit(op="catalog", user=p.name, oid=p.oid, roles=p.roles, verdict="denied", reason=str(e))
+        raise HTTPException(403, str(e)) from None
+    except Exception as e:  # noqa: BLE001 -- the vault, not the caller, is the problem
+        audit(
+            op="catalog", user=p.name, oid=p.oid, verdict="error", reason=f"{type(e).__name__}: {e}"
+        )
+        raise HTTPException(503, "the catalog credential could not be obtained") from None
+    body = await request.body()
+    status, headers, payload = catalog.forward(CATALOG_MCP, credential, body, dict(request.headers))
+    # The human is recorded HERE. OpenMetadata's own audit names the bot; the
+    # only log that ties the two together is this one.
+    audit(op="catalog", user=p.name, oid=p.oid, role=role, status=status, bytes=len(payload))
+    return Response(content=payload, status_code=status, headers=headers)
+
+
+@app.get("/om/mcp", include_in_schema=False)
+def catalog_mcp_stream():
+    """The catalog's server-initiated stream is not proxied: nothing this
+    service fronts sends unsolicited messages, and holding a connection open
+    to the catalog per caller would be a cost with no reader."""
     return JSONResponse(
         {"error": "this server sends no unsolicited messages"},
         status_code=405,

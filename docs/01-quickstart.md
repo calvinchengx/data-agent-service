@@ -44,7 +44,7 @@ The agent-facing surface is two MCP endpoints on the gateway:
 | Endpoint | What it is | Tools |
 |---|---|---|
 | `/warehouse/mcp` | our executor, proxied (`mcpMode: passthrough`) | `list_sources`, `list_tables`, `describe_table`, `run_query` |
-| `/om/mcp` | OpenMetadata's own MCP server, proxied with a read-only bot | the catalog's 17 tools (`search_metadata`, `get_entity_details`, …) |
+| `/om/mcp` | OpenMetadata's own MCP server, proxied by the executor as the read-only bot for your role | the catalog's 17 tools (`search_metadata`, `get_entity_details`, …) |
 
 Every call carries the user's bearer. The executor validates it, exchanges it
 on-behalf-of for a data-plane token, and the warehouse applies that user's own

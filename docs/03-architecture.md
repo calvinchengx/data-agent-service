@@ -5,7 +5,7 @@
         │  Bearer: the USER's token (api://data-agent-service / access_as_user)
         ▼
   API Management ── /warehouse/mcp ──► warehouse-query        (mcpMode: passthrough)
-                 └─ /om/mcp        ──► OpenMetadata /mcp      (passthrough + read-only bot swap)
+                 └─ /om/mcp        ──► warehouse-query /om/mcp ──► OpenMetadata /mcp   (passthrough; the executor picks the role's bot)
                     /warehouse-rest ─► warehouse-query        (REST, for non-MCP clients & load tests)
         │
         ▼
@@ -61,7 +61,7 @@ stripped from retrieved documents exactly as it is from warehouse columns.
 | Read-only SQL, schema scope, row ceiling | `sqlguard.py`, in the executor process | a guard beside the cursor cannot be routed around |
 | Safe methods, declared parameters, item and body ceilings | `httpguard.py`, same process | the HTTP counterpart; an API call has no parse tree, so every property was translated rather than ported |
 | Who may see which rows | the data source itself, via the OBO token — **except where the engine has no identity**, see below | the database is the authority, not our code, wherever it can be |
-| Catalog writes | OpenMetadata's own policy on the read-only bot | the catalog decides what its bot may do |
+| Catalog reach and catalog writes | OpenMetadata's own policy on the bot matching the caller's role | the catalog decides what its bot may see and do; the executor only chooses which bot, by the role it resolved for the data path |
 
 ## The engines that cannot be the authority
 
@@ -102,7 +102,8 @@ a fourth SQL dialect at almost no cost.
 | gateway → executor | passthrough forwards every header | the user |
 | executor → tenant | managed identity (App Service protocol) → OBO | the user, for `database.windows.net` |
 | executor → warehouse | TDS with that token | the user |
-| gateway → OpenMetadata | read-only bot JWT from Key Vault, `X-Forwarded-User` | the bot (caller recorded) |
+| gateway → executor `/om/mcp` | passthrough forwards every header | the user |
+| executor → OpenMetadata | the read-only bot for the caller's role, its JWT read from Key Vault | the role bot — OpenMetadata's audit names the bot; the executor's audit line names the human and the bot together |
 
 The executor holds no secret in its environment: its managed identity reads
 what it needs from Key Vault.
