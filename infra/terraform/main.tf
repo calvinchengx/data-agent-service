@@ -148,6 +148,17 @@ resource "azurerm_container_app" "executor" {
         name  = "DAS_OM_URL"
         value = var.openmetadata_url
       }
+      # Rules that deny by catalog tag (docs/00-plan.md §19). The bot token is
+      # a reference the app resolves with its own managed identity, so the
+      # secret is in the vault and its NAME is in the deployment.
+      env {
+        name  = "DAS_OM_BOT_TOKEN"
+        value = "keyvault:${var.om_bot_secret_name}"
+      }
+      env {
+        name  = "DAS_TAG_REFRESH_S"
+        value = tostring(var.tag_refresh_seconds)
+      }
       # The identity the platform injects; azure-identity and this service's
       # own credential module both discover it the same way.
       env {

@@ -367,6 +367,17 @@ Therefore:
 | How often tags are re-read | `DAS_TAG_REFRESH_S` | A tag added at 09:00 should deny before the next deploy |
 | What happens when the catalog is unreachable | `DAS_TAG_FAILURE` (`closed` or `last-known`) | An availability-versus-security trade a deployment makes, not us |
 
+**Decided, because the default would otherwise be whichever container started
+first.** With `deny_tagged` configured and no successfully-read tag set, the
+executor REFUSES TO SERVE. `last-known` may only apply after a set has been
+read once; it is not a licence to start empty. Serving with fewer denials than
+configured is a silent security downgrade that looks like a healthy service,
+and a catalog outage should be a visible startup failure instead.
+
+The refresh is a background loop, never a per-request fetch. The catalog is
+now in the executor's availability path, which it was not before, and a
+catalog hiccup must not become query latency.
+
 The seeded datasets get their PII columns tagged so the local stack exercises
 this, but the seeding is dataset config (`semantics.py`), not executor code —
 the same boundary that keeps business meaning out of prompts.

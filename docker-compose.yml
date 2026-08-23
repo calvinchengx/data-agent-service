@@ -331,6 +331,16 @@ services:
       # path, so this is what makes the 401 challenge name a URL the gateway
       # actually serves (seed/apim.py publishes the scoped operation).
       DAS_PUBLIC_BASE_URL: "${DAS_APIM_BASE:-https://apim-emulator:8445}/warehouse/mcp"
+      # The catalog, for rules that deny by tag (docs/00-plan.md §19). Read
+      # with the read-only bot's token, resolved from the vault by this
+      # service's own managed identity -- never a literal.
+      #
+      # Acquiring the dependency is opt-in: with no `deny_tagged` in
+      # DAS_ACCESS_RULES the executor never builds a TagIndex and never calls
+      # OpenMetadata, which is how it behaved before this existed.
+      DAS_OM_URL: "${DAS_OM_URL:-http://openmetadata:8585}"
+      DAS_OM_BOT_TOKEN: "keyvault:om-bot-das-reader"
+      DAS_TAG_REFRESH_S: "${DAS_TAG_REFRESH_S:-300}"
     # No healthcheck here on purpose: DAS_EXECUTOR picks the image, and the two
     # implementations ship different runtimes (the Go one is distroless — no
     # shell, no python). Each Dockerfile declares its own HEALTHCHECK, so the

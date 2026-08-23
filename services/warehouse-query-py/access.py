@@ -58,16 +58,188 @@ def _ssl_context() -> ssl.SSLContext:
 _SSL = _ssl_context()
 
 
+class TagsUnavailable(Exception):
+    """The catalog could not be read and no tag set has ever been read.
+
+    Distinct from "no columns carry that tag", which is a legitimate answer.
+    This one means the executor does not KNOW, and a service that does not know
+    what to withhold must not answer questions.
+    """
+
+
+class TagIndex:
+    """Which columns carry which tag, according to the catalog.
+
+    The executor has never needed OpenMetadata before — the agent reads it, the
+    harnesses read it, this service only ever read its own configuration. A
+    rule that denies by tag changes that, so the cost is stated rather than
+    discovered: the catalog is now in this service's availability path.
+
+    Two consequences follow, and both are deliberate:
+
+    * the refresh is a BACKGROUND loop, never a per-request fetch, so a slow
+      catalog cannot become query latency;
+    * a first read that fails is fatal to serving, not survivable. See
+      `resolve`.
+    """
+
+    def __init__(
+        self,
+        base_url: str = "",
+        token: str = "",
+        refresh_s: int = 0,
+        insecure: bool | None = None,
+    ):
+        self.base = (base_url or os.environ.get("DAS_OM_URL", "")).rstrip("/")
+        self._token = token
+        self.refresh_s = refresh_s or int(os.environ.get("DAS_TAG_REFRESH_S", "300"))
+        self.insecure = (
+            insecure
+            if insecure is not None
+            else os.environ.get("DAS_ENTRA_TLS_INSECURE", "false").lower() in ("1", "true", "yes")
+        )
+        self._by_tag: dict[str, set[str]] = {}
+        self._read_once = False
+        self._at = 0.0
+        self._lock = threading.Lock()
+
+    def token(self) -> str:
+        """The catalog bot's token, resolved from wherever it is kept.
+
+        `keyvault:<name>` is expanded with this service's own managed identity;
+        a literal is used as-is, because a deployment may inject one directly.
+        """
+        raw = self._token or os.environ.get("DAS_OM_BOT_TOKEN", "")
+        if not raw:
+            return ""
+        import vaultref
+
+        return vaultref.resolve(raw)
+
+    def _fetch(self) -> dict[str, set[str]]:
+        """COLUMN tags only.
+
+        OpenMetadata also tags tables, and propagates tags through lineage. A
+        table tag would withhold every column of that table, which is a much
+        larger blast radius than the syntax suggests — so it is a separate
+        decision with its own witness rather than a silent consequence of this
+        one.
+        """
+        token = self.token()
+        if not self.base or not token:
+            raise TagsUnavailable("no catalog configured (DAS_OM_URL / DAS_OM_BOT_TOKEN)")
+        url = f"{self.base}/api/v1/tables?limit=1000&fields=columns,tags"
+        request = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
+        try:
+            with urllib.request.urlopen(
+                request, timeout=30, context=_ssl_context() if self.insecure else None
+            ) as response:
+                payload = json.loads(response.read().decode())
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+            raise TagsUnavailable(f"cannot read the catalog at {self.base}: {e}") from None
+        return index_columns_by_tag(payload)
+
+    def refresh(self) -> None:
+        found = self._fetch()
+        with self._lock:
+            self._by_tag = found
+            self._read_once = True
+            self._at = time.time()
+
+    def resolve(self, tags: tuple[str, ...]) -> list[str]:
+        """The columns those tags withhold.
+
+        Refuses rather than returns an empty list when the catalog has never
+        been read. Answering with no denials would be a silent downgrade that
+        looks like a healthy service; a startup failure is at least visible.
+        """
+        if not tags:
+            return []
+        stale = time.time() - self._at > self.refresh_s
+        if not self._read_once or stale:
+            try:
+                self.refresh()
+            except TagsUnavailable:
+                if not self._read_once:
+                    raise
+                # A set HAS been read; serving the last known one is the
+                # documented `last-known` behaviour and is never reached on a
+                # cold start.
+                LOG.warning("catalog unreachable; using the last tag set read")
+        with self._lock:
+            out: set[str] = set()
+            for tag in tags:
+                out |= self._by_tag.get(tag, set())
+            return sorted(out)
+
+    def known_tags(self) -> set[str]:
+        with self._lock:
+            return set(self._by_tag)
+
+
+def index_columns_by_tag(payload: dict) -> dict[str, set[str]]:
+    """`{tag FQN: {schema.table.column}}` from a `/tables` listing.
+
+    Pure, so the shape can be asserted without a catalog. The column key
+    matches what the SQL guard reports, which is what makes the result usable
+    as a `deny_columns` entry without further translation.
+    """
+    by_tag: dict[str, set[str]] = {}
+    for table in payload.get("data", []) or []:
+        fqn = table.get("fullyQualifiedName", "")
+        # service.database.schema.table -> schema.table, which is how a query
+        # names it and therefore how a rule must.
+        parts = fqn.split(".")
+        short = ".".join(parts[-2:]) if len(parts) >= 2 else fqn
+        for column in table.get("columns", []) or []:
+            name = column.get("name", "")
+            if not name:
+                continue
+            for label in column.get("tags", []) or []:
+                tag = label.get("tagFQN")
+                if tag:
+                    by_tag.setdefault(tag, set()).add(f"{short}.{name}".lower())
+    return by_tag
+
+
 class Denied(Exception):
     """Refusal, phrased for the model: it names the column or table and the
     role, so an agent can choose different columns instead of retrying."""
 
 
 class Rules:
-    def __init__(self, raw: list[dict] | None = None):
+    def __init__(self, raw: list[dict] | None = None, tags: TagIndex | None = None):
         self.rules = (
             raw if raw is not None else json.loads(os.environ.get("DAS_ACCESS_RULES", "[]"))
         )
+        # Injected so the rules can be reasoned about without a catalog. A
+        # deployment with no `deny_tagged` anywhere never builds one and never
+        # acquires the dependency.
+        self.tags = tags if tags is not None else (TagIndex() if self.uses_tags() else None)
+
+    def uses_tags(self) -> bool:
+        return any(rule.get("deny_tagged") for rule in self.rules)
+
+    def verify_tags(self) -> set[str]:
+        """Every tag the rules name, checked against the catalog. Startup only.
+
+        A tag that matches nothing is an ERROR rather than an empty denial: the
+        difference between "no column carries this" and "you typed it wrong" is
+        invisible at query time, and the second one silently withholds nothing
+        while looking exactly like success.
+        """
+        named = {t for rule in self.rules for t in rule.get("deny_tagged", [])}
+        if not named or self.tags is None:
+            return set()
+        known = self.tags.known_tags() or (self.tags.refresh() or self.tags.known_tags())
+        missing = {t for t in named if t not in known}
+        if missing:
+            raise TagsUnavailable(
+                "these tags are named in DAS_ACCESS_RULES but no column carries them: "
+                + ", ".join(sorted(missing))
+                + " — a tag that withholds nothing is indistinguishable from a typo"
+            )
+        return named
 
     def for_roles(self, roles: tuple[str, ...]) -> dict:
         """The union of every rule that applies. Allowances add; denials are
@@ -83,6 +255,13 @@ class Rules:
                 matched = True
             allow += rule.get("allow_tables", [])
             deny += rule.get("deny_columns", [])
+            # Tag-derived denials become ordinary column denials, which is why
+            # `check()` needs no change: the star-expansion rule and the
+            # ambiguity-fails-closed rule keep working, and their witnesses
+            # keep proving them.
+            tagged = rule.get("deny_tagged", [])
+            if tagged and self.tags is not None:
+                deny += self.tags.resolve(tuple(tagged))
         if not matched:
             # Only the catch-all applied.
             fallback = [r for r in self.rules if r.get("role") == "*"]

@@ -115,3 +115,16 @@ variable "api_app_client_id" {
     error_message = "api_app_client_id must be a GUID, or empty."
   }
 }
+
+
+variable "om_bot_secret_name" {
+  description = "Key Vault entry holding the catalog's read-only bot token, for tag-derived access rules."
+  type        = string
+  default     = "om-bot-das-reader"
+}
+
+variable "tag_refresh_seconds" {
+  description = "How soon a newly tagged column starts being refused."
+  type        = number
+  default     = 300
+}
