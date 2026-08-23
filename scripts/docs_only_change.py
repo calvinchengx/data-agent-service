@@ -95,8 +95,25 @@ def documents_read() -> dict[str, set[str]]:
             # and a checker that reports its own prose is noise.
             if path.resolve() == pathlib.Path(__file__).resolve():
                 continue
+            body = path.read_text(errors="replace")
+            # FILE scope, not line scope. A checker names its documents as
+            # module-level constants -- `README = ROOT / "README.md"` on one
+            # line, `README.read_text()` two hundred lines later -- and a
+            # line-scoped match sees neither. Measured: against
+            # entra-emulator this reported NO documents read while
+            # check_docs_links.py globbed every page in docs/. A miss is the
+            # unsafe direction, so the test is now "does this file name a
+            # document ANYWHERE, and read something ANYWHERE".
+            reads_anything = any(o in body for o in OPENS) or any(o in body for o in GO_OPENS)
+            if not reads_anything:
+                continue
+            # A glob over the docs tree means EVERY page is read. Nothing is
+            # skippable then, and the honest answer is to say so rather than
+            # to enumerate a set that is really "all of them".
+            if re.search(r'(?:DOCS|docs)[^\n]{0,40}\.glob\(|glob\(["\']docs/', body):
+                found.setdefault("docs/*.md", set()).add(str(path.relative_to(ROOT)))
             go = path.suffix == ".go"
-            for line in path.read_text(errors="replace").splitlines():
+            for line in body.splitlines():
                 if go:
                     if not any(o in line for o in GO_OPENS):
                         continue
@@ -164,6 +181,18 @@ def explain() -> int:
     for doc in sorted(read):
         print(f"  {doc}  <- {', '.join(sorted(read[doc]))}")
     print("\nAny delete or rename runs everything, whatever the paths say.")
+    print(
+        "\nBEFORE PORTING THIS, READ: the decision that matters is JOB-level, not\n"
+        "path-level. A checker that GLOBS the docs tree reads every page, so no\n"
+        "page is skippable for the job it runs in -- fabric-emulator handles that\n"
+        "by leaving its `witnesses` job ungated, and this repository by running\n"
+        "the same guards again in docs-site.yml, which the classifier never gates.\n"
+        "Gate a job only when nothing it runs reads a document.\n"
+        "\nThe list above is a HEURISTIC and misses shapes it has already been\n"
+        "caught missing: a path built from a module constant, and a glob spelled\n"
+        "`ROOT.glob(pattern)` rather than naming docs/. Use it to find candidates,\n"
+        "not to conclude there are none."
+    )
     return 0
 
 
