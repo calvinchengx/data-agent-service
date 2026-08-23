@@ -37,6 +37,7 @@ export default defineConfig({
           label: 'Using it',
           items: [
             { slug: '09-mcp-clients' },
+            { slug: '20-ask-service' },
             { slug: '05-authorization' },
             { slug: '19-classification' },
             { slug: '09-adding-a-source' },
