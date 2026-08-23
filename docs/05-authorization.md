@@ -93,51 +93,66 @@ Two properties worth stating, because they are easy to get wrong:
 * **Ambiguity fails closed.** An unqualified column name with several tables in
   scope is attributed to all of them, so a denial anywhere applies.
 
-## Planned: rules the catalog carries (§19 of the plan)
+## Rules the catalog carries
 
-Everything above names columns literally, which means the list has to track a
-catalog it never reads. A steward who classifies a new column as personal data
-protects nothing until somebody edits JSON. The catalog already knows.
-
-The planned addition lets a rule name a **tag**:
+`deny_columns` names columns literally, which means the list has to track a
+catalog it never reads. A rule may instead name a **tag**:
 
 ```json
 [{"role": "Data.Analyst",
-  "allow_tables": ["dbo.*"],
-  "deny_columns": ["dbo.dim_party.email"],
-  "deny_tagged":  ["PII.Sensitive", "Contoso Restricted.Under NDA"]}]
+  "allow_tables": ["dbo.*", "support.*"],
+  "deny_tagged": ["PII.Sensitive", "Contoso Restricted.Commercially Confidential"],
+  "deny_columns": ["Glossaries.listGlossaries.data.owners"]}]
 ```
 
-**The vocabulary is yours, not ours.** OpenMetadata ships `PII`,
-`PersonalData`, `Tier` and `Certification` as system classifications, and a
-deployment can create its own — checked against a running instance, not
-assumed: a user-provided classification takes tags, the tags apply to columns,
-and they read back through the same API as the built-ins. So a rule names a
-tag **fully-qualified name**, and no classification is privileged in code.
-`Contoso Restricted.Under NDA` is as first-class as `PII.Sensitive`.
+That is the rule this repo ships. It names **no PII column at all**, and alice
+is still refused `dim_customer.email`, `dim_party.email`, `agents.email` and
+`customers.email` — across two engines, because the catalog says what those
+columns are. A steward who classifies a new column protects it without this
+file changing.
 
-Four things that will be configuration rather than code:
+**The vocabulary is yours.** OpenMetadata ships `PII`, `PersonalData`, `Tier`
+and `Certification`; a deployment can create its own, and the seed creates
+`Contoso Restricted` to prove it. A rule names a tag **fully-qualified name**
+and no classification is privileged in code — `Contoso Restricted.Commercially
+Confidential` is as first-class as `PII.Sensitive`.
 
-| Setting | Decides |
+### Seeing where a denial came from
+
+`list_sources` reports `yourRestrictions`:
+
+```
+deniedByRule  Glossaries.listGlossaries.data.owners, Tables.listTables.data.owners
+deniedByTag   PII.Sensitive: dbo.dim_customer.email, dbo.dim_party.email,
+                             support.agents.email, support.customers.email
+deniedByTag   Contoso Restricted.Commercially Confidential: dbo.dim_customer.name
+```
+
+A tag denial is invisible in the settings file — the rule names a tag, not a
+column — so without this the only way to answer "why can Alice not read that"
+is to reproduce the resolution by hand. It also says who to talk to: a literal
+denial is something a person wrote and can edit; a tag denial is something a
+**steward** changes without touching this deployment.
+
+### What tags do not reach
+
+Those two literal denials are fields of a **REST source**, which has no table
+in the catalog to carry a tag. Tags reach what the catalog describes; a rule
+still has to name the rest. Both mechanisms coexist for that reason.
+
+### The rules that keep this safe
+
+| | |
 |---|---|
-| `deny_tagged` per role | which tags withhold a column |
-| `DAS_TAG_REFRESH_S` | how soon a newly tagged column starts being refused |
-| `DAS_TAG_FAILURE` | `closed` or `last-known` when the catalog is unreachable |
-| the tag FQNs themselves | your classification scheme, whatever it is |
+| **Fail closed on first boot** | With `deny_tagged` configured and no tag set ever read, the executor refuses to serve. `last-known` applies only after a successful read — it is not a licence to start empty. Serving fewer denials than configured is a silent downgrade that looks healthy. |
+| **Column tags only** | OpenMetadata also tags tables and propagates through lineage. A table tag withholds every column, a far larger blast radius than the syntax suggests, so it is a separate decision with its own witness. |
+| **An unknown tag fails at startup** | At query time a typo and "no column carries this" are indistinguishable, and the typo withholds nothing while looking exactly like success. |
+| **The catalog is now a dependency** | Only if you ask: with no `deny_tagged` anywhere, no index is built and no call is made. Where you do ask, the executor waits for the catalog to be healthy — fail-closed without dependency ordering is a crash loop, not a safety property. |
+| **Refresh is a background interval** | `DAS_TAG_REFRESH_S`. Never per-request: a slow catalog must not become query latency. |
 
-And three rules that will be stated rather than discovered:
-
-* **Column tags only at first.** OpenMetadata also tags tables and propagates
-  tags through lineage; a table tag denies far more than it appears to, so
-  that is a separate decision with its own witness.
-* **An unresolvable tag fails at startup.** A typo in `deny_tagged` that
-  silently denied nothing would look exactly like success.
-* **You can see what was derived.** The resolved denials are reportable per
-  role, with each one marked as coming from a literal rule or from a tag —
-  "the catalog said so" is not reviewable unless you can read what it said.
-
-This narrows like every other rule: it cannot grant, and the source's own
-permissions still apply underneath.
+Both executors resolve identically, and the conformance suite runs against
+each — a rule source only one of them read would be the same defect this
+project keeps finding in a new place.
 
 ## Why a refusal's origin matters
 

@@ -28,6 +28,10 @@ same check has been watched passing against a real tenant.
 | Managed identity (App Service protocol) | 🟢 | `e2e.run` phase3 | not yet |
 | Infrastructure definition parses, and declares what the runbook copies | 🟢 | `e2e.run` phase11, `terraform validate` | not yet |
 | App registration, exposed scope and federated credential are declared | 🟢 | `terraform validate` | not yet — and the emulator cannot witness the federated path at all (upstream #6) |
+| A rule that names only a catalog TAG withholds the right columns, on both engines | 🟢 | `e2e.run` phase18, conformance | not yet |
+| An organisation's own classification is not a second-class vocabulary | 🟢 | `e2e.run` phase18 | not yet |
+| The executor refuses to serve when tags are configured and the catalog has never been read | 🟢 | `tests/test_access_tags.py`, `tagindex_test.go` | not yet — and a real tenant is where a slow or throttled catalog would actually be met |
+| A denial can be traced to the rule or the tag that caused it | 🟢 | `list_sources` → `yourRestrictions` | not yet |
 | A promoted dashboard is published under the asker's identity, and a viewer cannot | 🟢 | `e2e.run` phase16 | not yet |
 | The DAX measure answers what the SQL it was promoted from answers | 🟢 | `e2e.run` phase16 | not yet |
 | The published report **renders** | ⬜ | none, and there cannot be one here — the emulator persists a report definition and does not interpret it, deliberately | not yet |
