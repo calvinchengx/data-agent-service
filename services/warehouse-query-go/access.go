@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/url"
 	"os"
@@ -18,9 +19,60 @@ type AccessRule struct {
 	Role        string   `json:"role"`
 	AllowTables []string `json:"allow_tables"`
 	DenyColumns []string `json:"deny_columns"`
+	// A rule may withhold by catalog TAG as well as by column name. The
+	// vocabulary is the catalog's -- OpenMetadata's own PII.*, or a
+	// classification this organisation invented -- so nothing here privileges
+	// one over another.
+	DenyTagged []string `json:"deny_tagged"`
 }
 
-type Rules struct{ rules []AccessRule }
+type Rules struct {
+	rules []AccessRule
+	tags  *TagIndex
+}
+
+// UsesTags reports whether any rule denies by tag. A deployment with none
+// never builds an index and never calls the catalog, which is how this service
+// behaved before tags existed -- the dependency is asked for, not inherited.
+func (r *Rules) UsesTags() bool {
+	for _, rule := range r.rules {
+		if len(rule.DenyTagged) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// VerifyTags checks every tag the rules name against the catalog. Startup only.
+//
+// A tag that matches nothing is an ERROR rather than an empty denial: at query
+// time "no column carries this" and "you typed it wrong" are indistinguishable,
+// and the second withholds nothing while looking exactly like success.
+func (r *Rules) VerifyTags() error {
+	if !r.UsesTags() || r.tags == nil {
+		return nil
+	}
+	if err := r.tags.Refresh(); err != nil {
+		return err
+	}
+	known := r.tags.KnownTags()
+	var missing []string
+	for _, rule := range r.rules {
+		for _, tag := range rule.DenyTagged {
+			if !known[tag] {
+				missing = append(missing, tag)
+			}
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf(
+			"%w: these tags are named in DAS_ACCESS_RULES but no column carries them: %s"+
+				" — a tag that withholds nothing is indistinguishable from a typo",
+			ErrTagsUnavailable, strings.Join(missing, ", "))
+	}
+	return nil
+}
 
 func LoadRules() *Rules {
 	var rules []AccessRule
@@ -30,7 +82,11 @@ func LoadRules() *Rules {
 			slog.Warn("DAS_ACCESS_RULES is not valid JSON; no rule will be applied", "err", err)
 		}
 	}
-	return &Rules{rules: rules}
+	out := &Rules{rules: rules}
+	if out.UsesTags() {
+		out.tags = NewTagIndex()
+	}
+	return out
 }
 
 type effective struct {
@@ -38,7 +94,7 @@ type effective struct {
 	denyColumns []string
 }
 
-func (r *Rules) forRoles(roles []string) effective {
+func (r *Rules) forRoles(roles []string) (effective, error) {
 	held := map[string]bool{}
 	for _, role := range roles {
 		held[role] = true
@@ -54,6 +110,16 @@ func (r *Rules) forRoles(roles []string) effective {
 		}
 		out.allowTables = append(out.allowTables, rule.AllowTables...)
 		out.denyColumns = append(out.denyColumns, rule.DenyColumns...)
+		// Tag-derived denials become ordinary column denials here, which is
+		// why Check needs no change: the star-expansion rule keeps working and
+		// its witnesses keep proving it.
+		if len(rule.DenyTagged) > 0 && r.tags != nil {
+			tagged, err := r.tags.Resolve(rule.DenyTagged)
+			if err != nil {
+				return out, err
+			}
+			out.denyColumns = append(out.denyColumns, tagged...)
+		}
 	}
 	if !matched {
 		var fallback []string
@@ -69,14 +135,17 @@ func (r *Rules) forRoles(roles []string) effective {
 	if len(out.allowTables) == 0 {
 		out.allowTables = []string{"*"}
 	}
-	return out
+	return out, nil
 }
 
 // Check refuses a table or column the caller's roles may not read. The message
 // names the role and the column so an agent can choose different columns
 // rather than retry the same one.
 func (r *Rules) Check(roles, tables, columns []string) error {
-	eff := r.forRoles(roles)
+	eff, err := r.forRoles(roles)
+	if err != nil {
+		return err
+	}
 	who := "your account"
 	if len(roles) > 0 {
 		who = strings.Join(roles, ", ")
