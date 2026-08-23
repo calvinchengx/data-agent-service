@@ -686,6 +686,55 @@ def query_as(token: str) -> tuple[int, str]:
     return status, body
 
 
+def phase6_grounding() -> None:
+    """§21's prefetched schema cannot widen what the gateway withheld.
+
+    The prefetch exists to remove model TURNS, not tool calls: it makes the
+    same `list_tables` / `describe_table` calls the model would have made,
+    through the same gateway, under the same caller. So the interesting claim
+    is not that it is fast -- it is that it is exactly as narrow. A prefetch
+    that read the catalog with a service credential would put columns in front
+    of a person phase 6 has just finished proving cannot see them, and it
+    would do it in the SYSTEM PROMPT, where nothing downstream inspects it.
+
+    Both schemas are fetched here, in this function, from the running gateway.
+    """
+    from agent import agent as _agent
+    from agent import grounding as _grounding
+    from agent import identity as _identity
+
+    seen = {}
+    for who in ("carol", "alice"):
+        _grounding.clear()
+        token = _identity.token_for(f"{who}@entraemulator.dev")
+        seen[who] = _grounding.schema_text(
+            _agent.build_toolbox(token, om=True), subject=_agent.identity_of(token)
+        )
+
+    check(
+        "phase6",
+        "the prefetched schema is real, and read through the gateway",
+        bool(seen["carol"]) and "support.agents" in seen["carol"],
+        f"{len(seen['carol'])} chars for carol",
+    )
+    # alice is denied the columns carrying personal data; the prefetch must
+    # inherit that rather than restate it.
+    leaked = [c for c in ("email",) if c in seen["alice"]]
+    check(
+        "phase6",
+        "a column withheld from a caller is absent from that caller's prompt",
+        not leaked and "email" in seen["carol"],
+        f"carol {len(seen['carol'])} chars, alice {len(seen['alice'])} chars"
+        + (f", LEAKED {leaked}" if leaked else ""),
+    )
+    check(
+        "phase6",
+        "two callers do not share one prefetched schema",
+        seen["carol"] != seen["alice"],
+        "different by " + str(abs(len(seen["carol"]) - len(seen["alice"]))) + " chars",
+    )
+
+
 def phase6_clients() -> None:
     """Which APPLICATION may act for a user, not only which user it is.
 
@@ -3017,6 +3066,7 @@ PHASES = {
     "phase4": phase4,
     "phase5": phase5,
     "phase6": phase6,
+    "phase6-grounding": phase6_grounding,
     "phase6-clients": phase6_clients,
     "phase7": phase7,
     "phase8": phase8,

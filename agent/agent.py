@@ -23,6 +23,7 @@ from typing import Any
 
 import anthropic
 
+from agent import grounding
 from agent import skills as skills_mod
 from agent.mcp_client import McpServer, Toolbox
 
@@ -278,6 +279,26 @@ def milestone_for(call: ToolCall) -> dict | None:
     }
 
 
+def identity_of(token: str) -> str:
+    """The `oid` a token carries, for keying a per-caller cache.
+
+    Read rather than trusted: this only ever selects a cache entry, and the
+    executor -- not this -- decides what the caller may see. A token whose
+    claims cannot be read keys its own entry rather than sharing one, because
+    two unreadable tokens are not evidence of the same person.
+    """
+    try:
+        import base64
+        import json as _json
+
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        claims = _json.loads(base64.urlsafe_b64decode(payload))
+        return str(claims.get("oid") or claims.get("sub") or "") or token[-24:]
+    except (IndexError, ValueError, TypeError):
+        return token[-24:]
+
+
 def system_prompt(loaded: list[skills_mod.Skill] | None = None) -> str:
     """The method prompt, plus whatever skills this configuration loads.
 
@@ -370,6 +391,17 @@ def ask(
     # one on the newest tool result so the transcript is read incrementally
     # rather than from the top on each hop.
     system = [{"type": "text", "text": system_prompt(), "cache_control": {"type": "ephemeral"}}]
+    # The schema goes in a SECOND block with its own breakpoint, never
+    # appended to the first. The method prompt is identical for everyone and
+    # caches across callers; the schema is what THIS caller may see and does
+    # not. Concatenating them would make the shared prefix per-user and every
+    # caller would pay to write a cache entry nobody else can read.
+    if grounding.enabled():
+        prefetched = grounding.schema_text(toolbox, subject=identity_of(token))
+        if prefetched:
+            system.append(
+                {"type": "text", "text": prefetched, "cache_control": {"type": "ephemeral"}}
+            )
     client = client or model_client()
     messages: list[dict] = [*(history or []), {"role": "user", "content": question}]
     calls: list[ToolCall] = []
