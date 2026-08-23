@@ -45,6 +45,10 @@ POLICIES = {
         dialect="tsql", allowed_schemas=("dbo",), max_rows=500, database="contoso_warehouse"
     ),
     "duckdb": Policy(dialect="duckdb", allowed_schemas=("main",), max_rows=500),
+    # PostgreSQL was absent until a fuzzed differential found a divergence the
+    # corpus could not have caught: the service has had a PostgreSQL adapter
+    # since Phase D, and not one case here exercised it.
+    "postgres": Policy(dialect="postgres", allowed_schemas=("public",), max_rows=500),
 }
 
 # The keys a case carries, in the order they are written, so a regenerated

@@ -52,6 +52,11 @@ func TestTheTwoGuardsAgree(t *testing.T) {
 			MaxLength: 20000, Database: "contoso_warehouse"},
 		"duckdb": {Dialect: "duckdb", AllowedSchemas: []string{"main"}, MaxRows: 500,
 			MaxLength: 20000},
+		// PostgreSQL was absent until a fuzzed differential found a divergence
+		// the corpus could not have caught. The adapter has existed since
+		// Phase D; nothing here exercised its dialect.
+		"postgres": {Dialect: "postgres", AllowedSchemas: []string{"public"}, MaxRows: 500,
+			MaxLength: 20000},
 	}
 
 	for _, c := range corpus.Cases {

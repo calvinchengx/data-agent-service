@@ -35,12 +35,12 @@ CORPUS = json.loads(
     ).read_text()
 )["cases"]
 
-POLICIES = {
-    "tsql": Policy(
-        dialect="tsql", allowed_schemas=("dbo",), max_rows=500, database="contoso_warehouse"
-    ),
-    "duckdb": Policy(dialect="duckdb", allowed_schemas=("main",), max_rows=500),
-}
+# Imported, not restated. This was a third copy of the same map -- the
+# generator has one and guard_parity_test.go has one -- and adding a dialect to
+# two of the three left this suite failing with a bare KeyError on the name it
+# had never heard of. The generator's copy is the one the recorded verdicts
+# were produced with, so it is the one that decides.
+from services.contract.gen_guard_corpus import POLICIES  # noqa: E402
 
 # The T-SQL policy, for the hand-written cases below.
 P = POLICIES["tsql"]
@@ -86,11 +86,17 @@ def test_refused(case):
     assert str(raised.value) == case["verdict"]["reason"]
 
 
-def test_the_corpus_covers_both_engines():
-    """A corpus that only exercised one dialect would prove half of what it
-    claims: for a DuckDB source this guard is the only authority there is."""
+def test_the_corpus_covers_every_engine_the_guard_serves():
+    """A corpus that exercised fewer dialects than the service serves would
+    prove less than it claims: for a DuckDB source this guard is the only
+    authority there is.
+
+    Held to POLICIES rather than to a written-down set, so adding an engine
+    without adding a case for it FAILS here. PostgreSQL had an adapter since
+    Phase D and not one case in this corpus; a hardcoded {tsql, duckdb} is
+    what let that sit."""
     dialects = {c["dialect"] for c in CORPUS}
-    assert dialects == {"tsql", "duckdb"}, dialects
+    assert dialects == set(POLICIES), (dialects, set(POLICIES))
     assert sum(1 for c in CORPUS if c["contract"]) >= 20
 
 

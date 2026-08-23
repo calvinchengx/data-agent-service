@@ -22,6 +22,25 @@
   },
   {
    "dialect": "duckdb",
+   "sql": "SELECT AVG(CAST(minutes AS numeric)) FROM main.tickets",
+   "expect": "permitted",
+   "fragment": "",
+   "why": "DuckDB reads a bare `numeric` as DECIMAL(18, 3) at parse time. Leaving it unparameterised sent the engine a different CAST from the one the Python executor sends -- inside a division, a different NUMBER rather than a different spelling.",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT AVG(CAST(minutes AS DECIMAL(18, 3))) FROM main.tickets LIMIT 500",
+    "tables": [
+     "main.tickets"
+    ],
+    "columns": [
+     "main.tickets.minutes"
+    ],
+    "row_limit": 500
+   }
+  },
+  {
+   "dialect": "duckdb",
    "sql": "SELECT t.team FROM main.tickets t JOIN main.agents a ON a.team = t.team",
    "expect": "permitted",
    "fragment": "",
@@ -261,6 +280,25 @@
    }
   },
   {
+   "dialect": "postgres",
+   "sql": "SELECT region FROM public.fct_sales WHERE region IS NOT NULL",
+   "expect": "permitted",
+   "fragment": "",
+   "why": "the other half of the same rule: PostgreSQL is the dialect that does record it on the Is node, so both shapes are pinned.",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT region FROM public.fct_sales WHERE region IS NOT NULL LIMIT 500",
+    "tables": [
+     "public.fct_sales"
+    ],
+    "columns": [
+     "public.fct_sales.region"
+    ],
+    "row_limit": 500
+   }
+  },
+  {
    "dialect": "tsql",
    "sql": "SELECT * FROM contoso_warehouse.dbo.dim_country",
    "expect": "permitted",
@@ -441,6 +479,25 @@
     "columns": [
      "dbo.fct_revenue_summary.fiscal_year_label",
      "dbo.fct_revenue_summary.revenue_usd"
+    ],
+    "row_limit": 500
+   }
+  },
+  {
+   "dialect": "tsql",
+   "sql": "SELECT region FROM dbo.fct_sales WHERE region IS NOT NULL",
+   "expect": "permitted",
+   "fragment": "",
+   "why": "IS NOT NULL has two tree shapes -- Not(Is(..)) everywhere but PostgreSQL, which records the negation on the Is node. The port used PostgreSQL's in every dialect, so the two guards saw different trees for a predicate in almost every real query, and nothing here exercised it.",
+   "contract": false,
+   "verdict": {
+    "permitted": true,
+    "rewritten": "SELECT TOP 500 region FROM dbo.fct_sales WHERE NOT region IS NULL",
+    "tables": [
+     "dbo.fct_sales"
+    ],
+    "columns": [
+     "dbo.fct_sales.region"
     ],
     "row_limit": 500
    }
