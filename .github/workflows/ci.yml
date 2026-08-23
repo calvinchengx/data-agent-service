@@ -186,14 +186,23 @@ jobs:
         with:
           version: v2.13.1
           working-directory: services/warehouse-query-go
-      # The Go guard is held to the Python guard's recorded verdicts. Those
-      # records are only worth anything if they still describe the guard, so
-      # regenerate them and diff: a Python change that moves a verdict without
-      # the Go side following it fails here rather than in production.
-      # The HTTP guard's corpus, held the same way as the SQL one: regenerate
-      # and diff, so a Python change that moves a verdict without the Go side
-      # following it fails here rather than in production.
+      # The Go guard is held to the Python guard's recorded verdicts, for SQL
+      # and for HTTP alike. Those records are only worth anything if they still
+      # describe the guard, so both are regenerated and diffed: a Python change
+      # that moves a verdict without the Go side following it fails here rather
+      # than in production.
+      #
+      # uv is installed once, as its own step, rather than inside one of them.
+      # It used to be installed inside the SQL diff, so adding the HTTP diff
+      # ABOVE it gave that step no uv and exit 127 -- a setup step that is a
+      # side effect of another step works right up until something is put in
+      # front of it.
+      - name: uv, for the two verdict diffs
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        working-directory: .
+        run: pipx install uv || pip install uv
       - name: the recorded HTTP verdicts still describe the Python guard
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         working-directory: .
         run: |
           cp services/contract/http_corpus.json /tmp/http_corpus.json
@@ -204,7 +213,6 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         working-directory: .
         run: |
-          pipx install uv || pip install uv
           cp services/contract/guard_corpus.json /tmp/guard_corpus.json
           uv run python services/contract/gen_guard_corpus.py
           diff /tmp/guard_corpus.json services/contract/guard_corpus.json \

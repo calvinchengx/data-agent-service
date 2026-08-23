@@ -230,7 +230,7 @@ def conform(base: str) -> None:
         ]
         check(
             "each operation carries its id, qualified name and method",
-            operations and not shaped,
+            bool(operations) and not shaped,
             str(shaped[:2]) if shaped else f"{len(operations)} rows",
         )
 
