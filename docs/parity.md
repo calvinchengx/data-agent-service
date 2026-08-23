@@ -38,6 +38,30 @@ same check has been watched passing against a real tenant.
 | A promoted dashboard reaches a SECOND tool with no per-user identity, bounded by the template | 🟢 | `e2e.run` phase19 (Superset) | not yet |
 | The Tableau **workbook generator** — `.twb`, the VDS query, the connected-app token | 🟢 | `e2e.run` phase20, `publisher/contract/cases.json` | not yet |
 | A Tableau workbook actually **publishes and answers** on a real site | 🔴 **no tenant** — no container exists and none has been created | needs a [Tableau Developer sandbox](https://www.tableau.com/developer/get-site); `TableauTarget.publish` refuses by name until then | not yet |
+
+> **Turning that row green.** It needs a Tableau site, which only a person can
+> create — account sign-up is not something this repo automates.
+>
+> 1. Create a free site: <https://www.tableau.com/developer/get-site>. It is a
+>    real Tableau Cloud site with admin rights and one Creator licence.
+> 2. In the site: **Settings → Connected Apps → New Connected App → Direct
+>    Trust**. Name it, **Create**, then **Enable** it from the actions menu —
+>    an app that is created and not enabled refuses tokens in a way that reads
+>    as a bad secret.
+> 3. Copy three values, which cannot be recovered once the page closes: the
+>    **Client ID** (beside the app name), then **Generate New Secret** for the
+>    **Secret ID** and **Secret Value**.
+> 4. Put the secret in the vault, never in `.env`:
+>    `store_secret("tableau-connected-app", "<secret value>")`, and set
+>    `DAS_TABLEAU_SECRET=keyvault:tableau-connected-app`. The other settings —
+>    `DAS_TABLEAU_URL`, `_SITE`, `_CLIENT_ID`, `_SECRET_ID`, `_PROJECT` — are
+>    already in `.env.example`, empty.
+> 5. `make tableau-check`. It signs a connected-app token for the asking user
+>    and asks the site to accept it, reporting Tableau's own words if not.
+>
+> That proves the trust relationship, which is the first hop of 19d. This row
+> stays 🔴 until a workbook publishes and VizQL Data Service answers from it.
+
 | The DAX measure answers what the SQL it was promoted from answers | 🟢 | `e2e.run` phase16 | not yet |
 | The published report **renders** | ⬜ | none, and there cannot be one here — the emulator persists a report definition and does not interpret it, deliberately | not yet |
 | On-behalf-of carries the **user** to the data plane | 🟢 | `e2e.run` phase3 | not yet |
