@@ -60,11 +60,40 @@ passes the shared refusal corpus and the contract against both executors.
 
 **Status.** The tokenizer is complete and verified against the reference token
 for token — type, text, line, column, offsets, attached comments — over the
-whole corpus. Its keyword and dialect tables are generated from the pinned
-reference rather than transcribed, and CI regenerates and diffs them. Unlike
-the parser, the tokenizer has no gap tier: a statement it cannot lex is one the
-parser above it cannot see at all, so anything the reference lexes, the port
-must lex the same way. Next is the expression core and the SELECT grammar.
+whole corpus. Its keyword, dialect, parser and function tables are all
+generated from the pinned reference rather than transcribed, and CI regenerates
+and diffs them.
+
+The parser reads **620 of sqlglot's 2,171 fixture statements** identically to
+the reference, with **zero divergences**: anything outside the grammar is
+refused, never guessed. That number understates what matters, because most of
+what it still cannot read is dialect exotica no data agent will emit.
+
+So the port carries a **second measurement**, extracted read-only from this
+repository: the gold answers in `evals/usecases/*/questions.jsonl`, the
+statements `tests/test_sqlguard.py` and `services/conformance/run.py` permit,
+and the ones the adversarial corpus requires be refused for a named reason.
+That corpus is 145 statements in four categories, and **all four are now
+complete**:
+
+| Category | | What a gap would mean |
+|---|---|---|
+| `must_parse` | 105/105 | a question the agent answers today would start being refused |
+| `must_parse_to_refuse` | 26/26 | still refused, but for the wrong reason — and conformance checks the reason |
+| `must_name_the_statement` | 12/12 | a write refused as unreadable rather than as a write |
+| `may_refuse_unparsed` | 1/1 | — |
+
+That is the condition for the switchover. `make service` in the port
+regenerates it; nothing in it is authored there.
+
+Two consequences worth recording. Recognising DDL and DML "far enough to
+refuse" turned out to mean a **typed error naming the statement** rather than a
+tree — `ErrNotAQuery: DROP` — because nothing in the port will ever execute
+one, and the guard only needs the kind. And `SELECT … INTO` is the exception
+that proves it: a query that writes, where only the tree says so, so it is
+parsed.
+
+Next: the generator, so the guard can emit the statement it rewrote.
 
 ### Tier 2 — everything a SELECT can contain
 
