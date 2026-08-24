@@ -70,14 +70,14 @@ whole corpus. Its keyword, dialect, parser and function tables are all
 generated from the pinned reference rather than transcribed, and CI regenerates
 and diffs them.
 
-The parser reads **2,181 of sqlglot's 4,506 fixture statements** identically to
-the reference and writes **2,080** of them back byte for byte, with **zero
+The parser reads **2,536 of sqlglot's 4,506 fixture statements** identically to
+the reference and writes **2,406** of them back byte for byte, with **zero
 divergences and nothing written wrongly**: anything outside the grammar is
 refused, never guessed. That number understates what matters, because most of
 what it still cannot read is dialect exotica no data agent will emit.
 
-Per dialect: DuckDB 58.9%, neutral 47.4%, Databricks 40.8%, PostgreSQL 39.9%,
-T-SQL 38.8%. Every one of those was measured by the differential in CI, and
+Per dialect: DuckDB 68.6%, neutral 52.4%, Databricks 51.1%, PostgreSQL 46.9%,
+T-SQL 46.0%. Every one of those was measured by the differential in CI, and
 every increment that moved them was green with `wrong` and `mismatched` at
 zero -- which is the only reason the numbers mean anything.
 
@@ -221,8 +221,12 @@ port records why it refuses each one it cannot read:
 
 ```
 at the start of A1   1,465 / 4,506 parsed   3,041 refused   0 divergent
-now                  2,181 / 4,506 parsed   2,325 refused   0 divergent
+when A1..A5 closed   2,181 / 4,506 parsed   2,325 refused   0 divergent
+now                  2,536 / 4,506 parsed   1,970 refused   0 divergent
 ```
+
+Of the 1,970 still refused, **848 are DDL/DML** and out of Target A by the
+argument below, so the in-scope gap is about 1,120.
 
 | cluster | refusals | share |
 |---|---:|---:|
@@ -317,8 +321,9 @@ grammar that closes them; the remaining ~848 belong to Target B.
 | **B5** | The remaining 29 dialects | ~14,000 |
 | **B6** | `executor`, `planner`, `lineage`, `diff`, `jsonpath`, `anonymize` | ~4,900 |
 
-For scale: sqlglot is 80,434 lines of Python; the port is 4,188 hand-written
-Go plus 18,461 generated. The optimizer alone is more than twice the port's
+For scale: sqlglot is 80,434 lines of Python; the port is 8,367 hand-written
+Go plus 24,949 generated, with 3,867 lines of tests and 4,910 of Python
+harness. The optimizer alone is more than twice the port's
 hand-written size. Target B is multi-quarter work, and that is worth saying
 plainly before anyone plans around the name `sqlglot-go`.
 
@@ -337,9 +342,9 @@ The first is time-FORMAT translation -- `sqlglot/time.py`, a set of per-dialect
 mapping tables -- and has nothing to do with the annotator. The second needs
 `simplify`, which is B4. The statements genuinely waiting on `annotate_types`
 number about two. The reference's own annotator fixture is recorded in
-`sqlglot-go` at `testdata/annotate.json` (71 cases, 28 of them in our dialects
-and needing no column resolved) so the gate exists whenever B1 comes; it should
-not come next.
+`sqlglot-go` at `testdata/annotate.json` so the gate exists whenever B1 comes;
+it should not come next. (That file has since grown from 28 cases to 113 --
+see "What B1 was worth" below.)
 
 **B0 -- time formats** takes its place: 69 statements, the largest remaining
 non-DDL bucket, and it is tables rather than an algorithm, which is the idiom
@@ -349,12 +354,75 @@ this port already runs on. So the sequence is:
 A1..A5, B0, B2 (all done) -> [DuckDB oracle] -> B4 simplify -> B1 -> B3 -> B5 -> B6
 ```
 
-**Everything named is now closed.** What is left has no cluster in it: 81
-generator refusals spread across singletons, 48 subscripts that need
-`simplify`, 848 DDL/DML statements belonging to Target B, and the rest of
-sqlglot's dialect surface. The next structural step is the execution oracle,
-because B4 is the first phase that rewrites trees and no harness here can tell
-a wrong rewrite from a right one.
+**The named CLUSTERS were closed; Target A was not.** This section used to say
+"everything named is now closed", and that was too strong. A3 and A4 were named
+as phases and never appear in the ledger above, and their statements are still
+refused today -- `no-paren function MAP` (18), `ESCAPE` (13), `INTERVAL type`
+(12). Target A's own definition is that the four dialect suites round-trip, and
+they do not.
+
+What was true is that no CLUSTER was left. Everything since has been won a
+mechanism at a time, and that has been worth more than the clusters were: 355
+further statements, none of them from a list anyone had written down.
+
+The next structural step is the execution oracle, because B4 is the first phase
+that rewrites trees and no harness here can tell a wrong rewrite from a right
+one.
+
+### Where the sequence actually got to
+
+The order above was followed exactly, and the oracle-before-B4 call was the
+best one in this document. What each phase has reached:
+
+| phase | state | measured by |
+|---|---|---|
+| **execution oracle** | **done**, and extended twice | 329 statements executed and compared, 7 known divergences |
+| **B4** `simplify` | **started** | 224 of the reference's 480-pair contract |
+| **B1** `annotate_types` | **started** | 48 of 113 scope-free cases, 0 wrong |
+| B3, B5, B6 | not started | -- |
+
+The oracle grew past what was planned for it, and each step paid:
+
+* **DuckDB**, which embeds and needs no container.
+* **PostgreSQL**, which CI supplies as a service container. It found five
+  divergences on its first run.
+* **Fixture tables**, because most of the corpus says `SELECT x FROM t` and
+  never creates `t`. The tables have ROWS on purpose: an empty one is worse
+  than none, since two different queries over nothing both return nothing and
+  would agree.
+* **Simplify output**, which is the whole reason the oracle exists.
+
+**It has found seven bugs in sqlglot itself**, recorded in the port's
+`docs/upstream-issues.md` and reproduced rather than worked around. Two of them
+RUN and return a wrong answer -- `SELECT 0b1010` becomes `SELECT b'1010'`, an
+integer into a bit string; DuckDB's reversing slice `[:-:-1]` becomes a
+one-element slice. No tree or string comparison against sqlglot could ever have
+found either, because the port agrees with sqlglot exactly and both are wrong.
+
+Two harnesses were added that the plan did not anticipate, both because a
+rewrite can be wrong in ways a corpus diff cannot see:
+
+* **A rewrite must survive being written down.** The simplifier writes its
+  output, reads it back, and requires the same tree -- up to the associativity
+  of AND and OR. It caught `A AND (A OR B)` being flattened to `A AND A OR B`,
+  which re-associates and asks a different question. The execution oracle could
+  not have: most of the simplify contract is bare predicates over undefined
+  columns, which never run.
+* **Never write what the parser would refuse to read.** The generator now
+  applies the parser's own refusal condition before choosing a spelling.
+
+### What B1 was worth, against what this document predicted
+
+It said the statements genuinely waiting on `annotate_types` "number about
+two". That was right in isolation and wrong in effect: **B1 and B4 together
+cleared the 44 subscripts**, because shifting `a[1]` to `a[0]` needs a type to
+decide whether to shift at all AND a simplifier to do the arithmetic. The
+document treated them as separable and they are not.
+
+It also undercounted the annotator's contract fourfold -- 28 cases, it said,
+from `annotate_types.sql`. The larger half is `annotate_functions.sql`: 1,932
+pairs, 293 in our dialects, and it is where the port's type-dependent refusals
+actually waited. The contract now stands at 113 scope-free cases.
 
 The lesson is worth more than the re-ordering: a plan that names a dependency
 is still a guess until something counts it. Every other ordering call in this
@@ -474,7 +542,7 @@ writing them.
 | corpus harvest — sqlglot's whole dialect contract | ~40 | a day | **done** — 31 divergent trees |
 | 2 / Target A — full SELECT for four dialects | ~2,500 lines, mostly probes | **done** | measured, not guessed |
 | B0 / B2 — time formats, booleans, quantifier | ~600 | **done** | counted first, which reordered them |
-| 3 / Target B — the rest of sqlglot | ~30,000 | multi-quarter | **after the execution oracle** |
+| 3 / Target B — the rest of sqlglot | ~30,000 | multi-quarter | **oracle done; B4 and B1 both started** |
 
 Tier 1 first, with the harness before any parser code — so the first parser
 commit is already measured against the reference.
