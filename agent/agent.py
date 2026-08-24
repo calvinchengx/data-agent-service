@@ -24,8 +24,10 @@ from typing import Any
 import anthropic
 
 from agent import caller, grounding
+from agent import model as mdl
 from agent import skills as skills_mod
 from agent.mcp_client import McpServer, Toolbox
+from agent.models.anthropic import AnthropicBackend
 
 HERE = pathlib.Path(__file__).resolve().parent
 DEFAULT_MODEL = os.environ.get("DAS_MODEL", "claude-opus-5")
@@ -68,6 +70,13 @@ class Hop:
     input_tokens: int
     output_tokens: int
     cache_read_tokens: int
+    #: What the model backend could not do, on the hop it could not do it.
+    #: Empty for a backend that supports everything this service asks for.
+    #: Recorded per hop rather than once per run because that is where the
+    #: cost lands: without prompt caching the shared prefix is paid for on
+    #: EVERY hop, and a number that only appears in a startup log is a number
+    #: nobody correlates with a bill.
+    degraded: tuple[str, ...] = ()
 
     def as_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -81,8 +90,15 @@ def _hop_phase(calls: list[ToolCall]) -> str:
     return seen.pop() if len(seen) == 1 else "mixed"
 
 
-def _hop(index: int, calls: list[ToolCall], model_ms: int, usage: Any, phase: str = "") -> Hop:
-    """One turn's record, built from the response's own usage.
+def _hop(
+    index: int,
+    calls: list[ToolCall],
+    model_ms: int,
+    usage: mdl.Usage,
+    phase: str = "",
+    degraded: tuple[str, ...] = (),
+) -> Hop:
+    """One turn's record, built from the turn's own usage.
 
     Module level rather than a closure in the loop: a nested function reading
     `model_ms` from the enclosing iteration is correct only while it is called
@@ -94,9 +110,10 @@ def _hop(index: int, calls: list[ToolCall], model_ms: int, usage: Any, phase: st
         model_ms=model_ms,
         tool_ms=sum(c.ms for c in calls),
         tools=tuple(c.name for c in calls),
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-        cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+        input_tokens=usage.input,
+        output_tokens=usage.output,
+        cache_read_tokens=usage.cache_read,
+        degraded=degraded,
     )
 
 
@@ -349,6 +366,25 @@ def build_toolbox(token: str, *, om: bool = True) -> Toolbox:
     return Toolbox(servers)
 
 
+ACCEPT_DEGRADED = os.environ.get("DAS_LLM_ACCEPT_DEGRADED", "").lower() in ("1", "true", "yes")
+
+
+def backend_for(client: Any = None) -> mdl.ModelBackend:
+    """The model backend this deployment is configured for.
+
+    One protocol today; `DAS_LLM_PROTOCOL` chooses between them once there is
+    more than one. `client` is an escape hatch for a caller that has already
+    built an SDK client -- the tests do, and so does anything that wants to
+    control retries or timeouts itself.
+    """
+    return AnthropicBackend(client or model_client(), headers=_gateway_headers())
+
+
+def _gateway_headers() -> dict[str, str]:
+    """Headers every model call carries, whatever the question."""
+    return {}
+
+
 def model_client() -> Any:
     """The model, reached directly or through the gateway.
 
@@ -381,11 +417,17 @@ def ask(
     effort: str = DEFAULT_EFFORT,
     on_step: Callable[[str], None] | None = None,
     client: Any = None,
+    backend: mdl.ModelBackend | None = None,
     history: list[dict] | None = None,
     on_event: Callable[[dict], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> Answer:
     """Answer one question.
+
+    `backend` is the model, as a protocol rather than a vendor (agent/model.py);
+    `client` is the older escape hatch and still means an Anthropic SDK client,
+    which is wrapped in the Anthropic backend. Passing neither reads the
+    deployment's configuration.
 
     `history` is the conversation so far -- prior user/assistant turns, as the
     caller kept them -- so a follow-up can say "that team". `on_event` receives
@@ -416,8 +458,22 @@ def ask(
             system.append(
                 {"type": "text", "text": prefetched, "cache_control": {"type": "ephemeral"}}
             )
-    client = client or model_client()
-    messages: list[dict] = [*(history or []), {"role": "user", "content": question}]
+    backend = backend or backend_for(client)
+    conversation = backend.start(
+        system=system,
+        tools=tools,
+        model=model,
+        effort=effort,
+        # WHO this call is for, as a keyed per-window pseudonym. Neither the
+        # header a gateway meters on nor the metadata a provider records
+        # carries the person: see agent/caller.py.
+        user=caller.label(subject),
+        history=history,
+    )
+    # Refused HERE, before any model call: a backend that cannot call tools
+    # cannot serve this product, and one that quietly does without prompt
+    # caching should be a decision rather than a discovery.
+    degraded = mdl.require(backend.capabilities, accept_degraded=ACCEPT_DEGRADED)
     calls: list[ToolCall] = []
     hop_detail: list[Hop] = []
     started = time.time()
@@ -438,68 +494,49 @@ def ask(
             hop_detail,
         )
 
-    # WHO this call is for, as a keyed per-window pseudonym -- the header a
-    # gateway meters on, and the `metadata.user_id` a provider records. Both
-    # carry the same value and neither carries the person: see agent/caller.py
-    # for why the `oid` itself must not leave the building.
-    caller_headers = caller.headers(subject)
-    caller_label = caller_headers.get(caller.HEADER, "")
+    def account(turn, model_ms: int, turn_calls: list[ToolCall], phase: str = "") -> None:
+        nonlocal tokens_in, tokens_out, cache_read, cache_write, hops, stop_reason
+        hops += 1
+        tokens_in += turn.usage.input
+        tokens_out += turn.usage.output
+        cache_read += turn.usage.cache_read
+        cache_write += turn.usage.cache_write
+        stop_reason = turn.raw_stop_reason or turn.stop_reason
+        hop_detail.append(_hop(hops, turn_calls, model_ms, turn.usage, phase, degraded))
 
+    pending: list[mdl.ToolResult] | None = None
     for _ in range(MAX_STEPS):
         if cancelled and cancelled():
             return finish("(cancelled)", "cancelled")
         hop_t0 = time.time()
-        response = client.beta.messages.create(
-            model=model,
-            max_tokens=16000,
-            system=system,
-            output_config={"effort": effort},
-            tools=tools,
-            messages=messages,
-            extra_headers=caller_headers,
-            **({"metadata": {"user_id": caller_label}} if caller_label else {}),
-            # Safety classifiers can decline a request; routing by refusal
-            # category means one declined question never takes the run down.
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-        )
+        turn = conversation.ask(question) if pending is None else conversation.give(pending)
+        pending = []
         model_ms = int((time.time() - hop_t0) * 1000)
-        hops += 1
-        tokens_in += response.usage.input_tokens
-        tokens_out += response.usage.output_tokens
-        cache_read += getattr(response.usage, "cache_read_input_tokens", 0) or 0
-        cache_write += getattr(response.usage, "cache_creation_input_tokens", 0) or 0
-        stop_reason = response.stop_reason or ""
 
         # Both of these turns cost model time, and neither reaches the two
         # places below that record one. Left unrecorded, a run that paused
         # twice would report its remaining hops as the whole cost and the
         # phase ranking would be drawn from a total that never happened.
-        if stop_reason == "refusal":
-            hop_detail.append(_hop(hops, [], model_ms, response.usage, phase="refused"))
+        if turn.stop_reason == mdl.REFUSED:
+            account(turn, model_ms, [], phase="refused")
             return finish("(the model declined to answer this question)", stop_reason)
-        if stop_reason == "pause_turn":
-            hop_detail.append(_hop(hops, [], model_ms, response.usage, phase="paused"))
-            messages.append({"role": "assistant", "content": response.content})
+        if turn.stop_reason == mdl.PAUSED:
+            account(turn, model_ms, [], phase="paused")
             continue
+        if turn.stop_reason == mdl.ANSWER:
+            account(turn, model_ms, [])
+            return finish(turn.text, stop_reason)
 
-        uses = [b for b in response.content if b.type == "tool_use"]
-        if not uses:
-            hop_detail.append(_hop(hops, [], model_ms, response.usage))
-            text = "".join(b.text for b in response.content if b.type == "text")
-            return finish(text.strip(), stop_reason)
-
-        messages.append({"role": "assistant", "content": response.content})
-        results = []
-        turn: list[ToolCall] = []
-        for use in uses:
+        results: list[mdl.ToolResult] = []
+        turn_calls: list[ToolCall] = []
+        for use in turn.tool_uses:
             t0 = time.time()
-            text, is_error = toolbox.call(use.name, dict(use.input))
+            text, is_error = toolbox.call(use.name, dict(use.arguments))
             call = ToolCall(
-                use.name, dict(use.input), text, is_error, int((time.time() - t0) * 1000)
+                use.name, dict(use.arguments), text, is_error, int((time.time() - t0) * 1000)
             )
             calls.append(call)
-            turn.append(call)
+            turn_calls.append(call)
             if on_step:
                 on_step(_describe(call))
             if on_event:
@@ -515,27 +552,9 @@ def ask(
                 milestone = milestone_for(call)
                 if milestone:
                     on_event({"type": "milestone", **milestone})
-            results.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": use.id,
-                    "content": text[:20000] or "(no output)",
-                    # A refusal is a RESULT, not a transport failure:
-                    # the model must read it and change course.
-                    "is_error": is_error,
-                }
-            )
-        # The newest result carries the rolling breakpoint; the one before it
-        # is now inside the cached prefix and loses its marker, because the
-        # API allows four and a transcript would otherwise spend them all by
-        # the third hop.
-        for m in messages:
-            if m["role"] == "user" and isinstance(m["content"], list):
-                for block in m["content"]:
-                    block.pop("cache_control", None)
-        results[-1]["cache_control"] = {"type": "ephemeral"}
-        messages.append({"role": "user", "content": results})
-        hop_detail.append(_hop(hops, turn, model_ms, response.usage))
+            results.append(mdl.ToolResult(use.id, use.name, text, is_error))
+        account(turn, model_ms, turn_calls)
+        pending = results
 
     return finish("(gave up: too many steps without an answer)", "max_steps")
 

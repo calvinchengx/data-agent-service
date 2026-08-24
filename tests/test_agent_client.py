@@ -138,7 +138,7 @@ def test_the_toolbox_namespaces_tools_from_several_servers(server):
     # tell them apart, and the executor must receive the bare name.
     assert names == ["warehouse__search", "catalog__search"]
     for tool in box.connect():
-        assert tool["input_schema"]["type"] == "object"
+        assert tool["inputSchema"]["type"] == "object", "MCP's spelling: the backends translate"
 
 
 def test_the_toolbox_routes_a_call_to_the_right_server(server):

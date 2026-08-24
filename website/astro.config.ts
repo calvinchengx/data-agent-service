@@ -58,6 +58,7 @@ export default defineConfig({
             { slug: '10-production' },
             { slug: '18-releases' },
             { slug: '09-llm-governance' },
+            { slug: '21-llm-backends' },
             { slug: '12-promotion' },
             { slug: '14-publishing' },
             { slug: '15-adding-a-dashboard-target' },

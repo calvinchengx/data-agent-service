@@ -123,11 +123,19 @@ class Toolbox:
         self.servers = {s.name: s for s in servers}
 
     def connect(self) -> list[dict]:
+        """The tools, namespaced, in MCP's own shape.
+
+        `inputSchema`, not `input_schema`: this used to hand back Anthropic's
+        spelling, which put one provider's wire format a layer below the model
+        seam and made "any gateway" a claim with a counter-example in it. The
+        backends translate; MCP is the source of truth because it is the one
+        shape that belongs to nobody's provider.
+        """
         return [
             {
                 "name": f"{server.name}{self.SEP}{tool['name']}",
                 "description": tool.get("description", ""),
-                "input_schema": tool.get("inputSchema") or {"type": "object", "properties": {}},
+                "inputSchema": tool.get("inputSchema") or {"type": "object", "properties": {}},
             }
             for server in self.servers.values()
             for tool in server.connect()
