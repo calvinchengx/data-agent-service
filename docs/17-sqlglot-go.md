@@ -70,14 +70,14 @@ whole corpus. Its keyword, dialect, parser and function tables are all
 generated from the pinned reference rather than transcribed, and CI regenerates
 and diffs them.
 
-The parser reads **2,536 of sqlglot's 4,506 fixture statements** identically to
-the reference and writes **2,406** of them back byte for byte, with **zero
+The parser reads **2,672 of sqlglot's 4,506 fixture statements** identically to
+the reference and writes **2,552** of them back byte for byte, with **zero
 divergences and nothing written wrongly**: anything outside the grammar is
 refused, never guessed. That number understates what matters, because most of
 what it still cannot read is dialect exotica no data agent will emit.
 
-Per dialect: DuckDB 68.6%, neutral 52.4%, Databricks 51.1%, PostgreSQL 46.9%,
-T-SQL 46.0%. Every one of those was measured by the differential in CI, and
+Per dialect: DuckDB 74.8%, Databricks 55.7%, neutral 53.0%, PostgreSQL 47.7%,
+T-SQL 46.7%. Every one of those was measured by the differential in CI, and
 every increment that moved them was green with `wrong` and `mismatched` at
 zero -- which is the only reason the numbers mean anything.
 
@@ -220,13 +220,21 @@ statement sqlglot pins for these four dialects in front of the port, and the
 port records why it refuses each one it cannot read:
 
 ```
-at the start of A1   1,465 / 4,506 parsed   3,041 refused   0 divergent
-when A1..A5 closed   2,181 / 4,506 parsed   2,325 refused   0 divergent
-now                  2,536 / 4,506 parsed   1,970 refused   0 divergent
+at the start of A1     1,465 / 4,506 parsed   3,041 refused   0 divergent
+when A1, A2 closed     2,181 / 4,506 parsed   2,325 refused   0 divergent
+before A3/A4           2,536 / 4,506 parsed   1,970 refused   0 divergent
+now                    2,672 / 4,506 parsed   1,834 refused   0 divergent
 ```
 
-Of the 1,970 still refused, **848 are DDL/DML** and out of Target A by the
-argument below, so the in-scope gap is about 1,120.
+Of the 1,834 still refused, **848 are DDL/DML** and out of Target A by the
+argument below, so the in-scope gap is about 986.
+
+Nothing has ever been divergent, and that column is the one that matters: the
+port has never once written a statement back as a DIFFERENT tree. What it
+cannot read, it refuses by name.
+
+The breakdown that ordered the phases, taken at the START of A1 against the
+3,041 refusals standing then:
 
 | cluster | refusals | share |
 |---|---:|---:|
@@ -235,6 +243,20 @@ argument below, so the in-scope gap is about 1,120.
 | grammar the parser stops at — slices, lambdas, `ARRAY<T>`, `N'…'`, `@x` | 781 | 25.7% |
 | named constructs — `INTERVAL`, CTE column lists, `ESCAPE`, `CAST` without `AS` | 465 | 15.3% |
 | no-paren functions — `MAP`, `ANY`, `IF` | 47 | 1.5% |
+
+And what the same labels report NOW, against the 1,834 that remain:
+
+| cluster | refusals |
+|---|---:|
+| DDL/DML — out of scope by the argument below | 848 |
+| trailing tokens — chained subscripts, `a[0][0].b.c[1].d` | 191 |
+| expression | 105 |
+| identifier | 53 |
+| the JSON function family — `JSON_OBJECT`, `JSON_EXTRACT_PATH`, `JSON_QUERY` … | 41 |
+
+Excluding DDL/DML, no single remaining cluster is larger than 191, which is the
+shape a port takes on as it converges: the big structural wins are spent and
+what is left is a long tail.
 
 So the phases, in the order the numbers argue for:
 
@@ -245,8 +267,16 @@ what it was expected to -- the two differ often enough to be worth keeping.
 |---|---|---:|---:|
 | **A1** | Widen `probe_functions`: builders needing a dialect argument, and arguments the probe could not describe | ~901 | 155 |
 | **A2** | `COUNT(DISTINCT)`, arrays, subscripts, windows, `INTERVAL`, lambdas, JSON paths, arity-keyed specs, the `FROM`-syntax functions, struct literals, alias column lists, `FILTER` | ~781 | ~570 |
+| **A3** | The named constructs -- `ESCAPE`, `INTERVAL` as a type, CTE column lists | ~465 | 32 |
+| **A4** | No-paren functions -- `MAP`, `IF`; `ANY` stays refused | ~47 | (with A3) |
 | **B0** | Time formats -- `STRPTIME`, `STRFTIME`, `FORMAT` | 69 | 67 |
 | **B2** | Booleans by position, and the quantifier | ~20 | 18 |
+
+A3 and A4 are the sharpest case of the estimate being wrong: ~512 expected
+between them, 32 cleared. The clusters were named from the refusal LABELS, and
+a label counts every statement that trips it -- most of those 512 trip a second
+refusal immediately behind the first. A cluster's size is an upper bound on
+what closing it can pay, never a forecast.
 
 A1 came in far under its estimate for a reason worth remembering: roughly half
 of what it was meant to unlock turned out to be **unsafe to trust** rather than
@@ -351,18 +381,26 @@ non-DDL bucket, and it is tables rather than an algorithm, which is the idiom
 this port already runs on. So the sequence is:
 
 ```
-A1..A5, B0, B2 (all done) -> [DuckDB oracle] -> B4 simplify -> B1 -> B3 -> B5 -> B6
+A1..A4, B0, B2 (done) -> [DuckDB oracle] -> B4 simplify -> B1 -> B3 -> B5 -> B6
+  (A5 still open -- see the guard divergence above)
 ```
 
 **The named CLUSTERS were closed; Target A was not.** This section used to say
 "everything named is now closed", and that was too strong. A3 and A4 were named
-as phases and never appear in the ledger above, and their statements are still
-refused today -- `no-paren function MAP` (18), `ESCAPE` (13), `INTERVAL type`
-(12). Target A's own definition is that the four dialect suites round-trip, and
-they do not.
+as phases and left out of the ledger above, and their statements were still
+refused long after. They have since been closed: `ESCAPE` and `INTERVAL type`
+no longer appear in the refusal labels at all.
+
+What still carries the A4 labels is a different construct wearing the same
+name. `no-paren function MAP` (9) and `IF` (11) are now only the BRACE-literal
+form -- `MAP {'x': 1}` -- and not the ordinary calls, which parse. `ANY` (6)
+stays refused deliberately: it has a parser in the reference and no signature
+here, so building it as an anonymous call would invent a tree the reference
+never makes. Target A's own definition is that the four dialect suites
+round-trip, and they still do not -- A5 is open, and the long tail is real.
 
 What was true is that no CLUSTER was left. Everything since has been won a
-mechanism at a time, and that has been worth more than the clusters were: 355
+mechanism at a time, and that has been worth more than the clusters were: 491
 further statements, none of them from a list anyone had written down.
 
 The next structural step is the execution oracle, because B4 is the first phase
@@ -376,10 +414,20 @@ best one in this document. What each phase has reached:
 
 | phase | state | measured by |
 |---|---|---|
-| **execution oracle** | **done**, and extended twice | 329 statements executed and compared, 7 known divergences |
+| **Target A** (A1--A4) | **done** | A3/A4 closed last, having been named and skipped once |
+| **A5** statement grammar | **open** | `WITH … INSERT` and `BEGIN TRANSACTION` still refuse; 21 corpus statements |
+| **execution oracle** | **done**, and extended twice | 342 statements executed and compared across 2 engines, 7 known divergences |
 | **B4** `simplify` | **started** | 224 of the reference's 480-pair contract |
 | **B1** `annotate_types` | **started** | 48 of 113 scope-free cases, 0 wrong |
 | B3, B5, B6 | not started | -- |
+
+Alongside the phases, the function-builder probe kept paying after A1 closed.
+Three kinds of builder it could not describe have since been recovered by
+running the reference and reading back what it built: one that picks its class
+from an ARGUMENT'S TYPE (`DATE_TRUNC`), one that supplies a CONSTANT of its own
+(`SHA384`, `LOG10`, DuckDB's two-argument `REGEXP_EXTRACT_ALL`), and one that
+names a lambda parameter with a string. Each was filed under "cannot be
+ported"; none of them was.
 
 The oracle grew past what was planned for it, and each step paid:
 
@@ -427,6 +475,14 @@ actually waited. The contract now stands at 113 scope-free cases.
 The lesson is worth more than the re-ordering: a plan that names a dependency
 is still a guess until something counts it. Every other ordering call in this
 document came from a measurement, and this one did not.
+
+The same guess ran the other way for `DATE_TRUNC`, which reads its class off an
+argument's TYPE and so looked like it had to wait for the annotator. It did
+not. The reference's builder runs at PARSE time, where the only type present is
+one an explicit `CAST` put there -- an annotator has not run and has nothing to
+say yet. Assuming otherwise cost 11 mismatches before the differential said so. A
+named dependency can be missing in both directions, and only running the
+reference settles which.
 
 B4 is more tractable than its size suggests: `tests/fixtures/optimizer/` is
 15,426 lines across 23 files, **one per rule**. Port `simplify`, diff it against
