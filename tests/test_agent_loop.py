@@ -37,6 +37,16 @@ class ScriptedClient:
         return self._responses.pop(0)
 
 
+def _token_with_oid(oid: str) -> str:
+    """A JWT-shaped string whose payload carries an oid. Unsigned: `ask` only
+    READS the claim to key a cache and label a call -- the executor is what
+    validates, and these tests are about the label."""
+    import base64
+
+    payload = base64.urlsafe_b64encode(json.dumps({"oid": oid}).encode()).decode().rstrip("=")
+    return f"header.{payload}.signature"
+
+
 def tool_use(tool_id, name, payload):
     return Response(
         stop_reason="tool_use",
@@ -91,6 +101,45 @@ def test_runs_a_tool_then_answers(patched):
     assert answer.tables == {"dbo.fct_sales"}
     assert not answer.refused
     assert answer.input_tokens == 18 and answer.output_tokens == 17
+
+
+def test_every_hop_carries_the_caller_label_and_never_the_oid(patched, monkeypatch):
+    """The gateway meters on this header. What it must NOT carry is the
+    identifier the directory knows the person by -- see agent/caller.py."""
+    from agent import caller
+
+    oid = "c73d7e0e-0335-4107-abce-e17921ebc8c3"
+    token = _token_with_oid(oid)
+    monkeypatch.setenv(caller.KEY_SECRET, "a-key")
+    monkeypatch.setenv(caller.WINDOW_VAR, "2026-08")
+    toolbox = FakeToolbox([("{}", False)])
+    patched(toolbox)
+    client = ScriptedClient(
+        [tool_use("t1", "warehouse__run_query", {"sql": "SELECT 1"}), final("done")]
+    )
+    agent_mod.ask("q", token, client=client)
+
+    expected = caller.label(oid)
+    assert len(client.requests) == 2, "both hops are metered, not just the first"
+    for request in client.requests:
+        assert request["extra_headers"] == {caller.HEADER: expected}
+        assert request["metadata"] == {"user_id": expected}
+        assert oid not in json.dumps(request, default=str)
+
+
+def test_without_a_key_a_hop_carries_no_caller_at_all(patched, monkeypatch):
+    """Not the oid, not an unkeyed hash: the field is absent."""
+    from agent import caller
+
+    monkeypatch.delenv(caller.KEY_SECRET, raising=False)
+    monkeypatch.setattr(caller, "_warned", False)
+    toolbox = FakeToolbox([])
+    patched(toolbox)
+    client = ScriptedClient([final("done")])
+    agent_mod.ask("q", _token_with_oid("someone"), client=client)
+
+    assert client.requests[0]["extra_headers"] == {}
+    assert "metadata" not in client.requests[0]
 
 
 def test_tool_result_is_returned_with_its_id(patched):

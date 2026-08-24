@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-import hmac
 import re
 from typing import Protocol
 
@@ -24,6 +23,11 @@ import sqlglot
 from sqlglot import exp
 
 from promoter.audit import AuditLine
+
+# Re-exported, not used here: `pseudonym` moved to the root beside vaultref
+# when the agent needed it too, and every caller in the promoter already says
+# `canonical.pseudonym`. One implementation, both import paths.
+from pseudonym import pseudonym  # noqa: F401
 
 # Buckets, not counts: "how many distinct values has this slot seen" is a
 # design question about the dashboard; the exact number edges toward
@@ -260,15 +264,3 @@ def canonicaliser_for(surface: str) -> Canonicaliser:
             f"no canonicaliser for surface {surface!r} "
             f"(built: {', '.join(sorted(CANONICALISERS)) or 'none'})"
         ) from None
-
-
-def pseudonym(subject: str, key: bytes, window: str) -> str:
-    """A per-window pseudonym for a user.
-
-    Keyed, so it cannot be reversed by guessing subjects; per window, so two
-    windows cannot be joined to follow one person over time. Counting distinct
-    askers does not require knowing who they are.
-    """
-    if not key:
-        raise ValueError("pseudonym requires a key — see DAS_PROMOTE_KEY_SECRET")
-    return hmac.new(key, f"{window}|{subject}".encode(), hashlib.sha256).hexdigest()[:16]

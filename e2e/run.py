@@ -1213,23 +1213,45 @@ def phase12() -> None:
     """The model call, governed like every other call.
 
     Witnessed against a stub that reports real token usage, so the gateway's
-    cost controls can be proved without a model credential — a check that only
+    cost controls can be proved without a model credential -- a check that only
     runs where someone is paying is a check that does not run.
+
+    These send what the AGENT sends: a subscription key, because the route
+    carries the deployment's own model credential and must not be an open
+    proxy, and an `X-DAS-Caller` label, because that is what the counter keys
+    on. The earlier version of this witness sent an `Authorization` bearer,
+    which no caller of this route ever sends -- the Anthropic SDK
+    authenticates with `x-api-key`. So it exercised a path nothing uses and
+    passed for as long as the per-caller cap was one shared bucket.
     """
-    from agent import identity
+    import vaultref
 
     gw = GW
-    tok = identity.token_for("carol@entraemulator.dev")
+    key = vaultref.resolve(c.CFG.get("DAS_LLM_SUBSCRIPTION_KEY", ""))
 
-    def call(path: str, token: str):
+    def call(path: str, label: str, with_key: bool = True):
+        headers = {"Content-Type": "application/json"}
+        if with_key and key:
+            headers["Ocp-Apim-Subscription-Key"] = key
+        if label:
+            headers["X-DAS-Caller"] = label
         return c.http(
             "POST",
             gw + path,
-            headers={"Content-Type": "application/json", "Authorization": "Bearer " + token},
+            headers=headers,
             json_body={"model": "stub", "messages": [{"role": "user", "content": "hi"}]},
         )
 
-    st, hd, _ = call("/llm/openai/v1/chat/completions", tok)
+    if key:
+        st, _hd, _ = call("/llm/openai/v1/chat/completions", "anyone", with_key=False)
+        check(
+            "phase12",
+            "the model route is not an open proxy to the deployment's model credential",
+            st == 401,
+            f"status {st}",
+        )
+
+    st, hd, _ = call("/llm/openai/v1/chat/completions", "witness-counted")
     headers = {k.lower(): v for k, v in hd.items()}
     consumed = int(headers.get("x-tokens-consumed") or 0)
     check(
@@ -1239,7 +1261,7 @@ def phase12() -> None:
         f"consumed {consumed}, remaining {headers.get('x-tokens-remaining')}",
     )
 
-    st, hd, _ = call("/llm/anthropic/v1/messages", tok)
+    st, hd, _ = call("/llm/anthropic/v1/messages", "witness-counted")
     headers = {k.lower(): v for k, v in hd.items()}
     check(
         "phase12",
@@ -1249,12 +1271,29 @@ def phase12() -> None:
         "(docs/upstream-issues.md #11)",
     )
 
+    # THE POINT OF THE LABEL. Two callers, one spending; the other's budget
+    # must be untouched. Both labels are created here, so this asserts on
+    # nothing an earlier run left behind.
+    spender, bystander = "witness-spender", "witness-bystander"
+    remaining = []
+    for _ in range(3):
+        _st, hd, _ = call("/llm/openai/v1/chat/completions", spender)
+        remaining.append({k.lower(): v for k, v in hd.items()}.get("x-tokens-remaining"))
+    _st, hd, _ = call("/llm/openai/v1/chat/completions", bystander)
+    theirs = {k.lower(): v for k, v in hd.items()}.get("x-tokens-remaining")
+    budget = int(c.CFG.get("DAS_LLM_TOKENS_PER_MINUTE", "2000"))
+    check(
+        "phase12",
+        "one caller's spend does not come out of another's budget",
+        remaining == [str(budget - 200 * n) for n in (1, 2, 3)] and theirs == str(budget - 200),
+        f"spender {remaining} vs bystander {theirs}",
+    )
+
     # A ceiling nobody has watched refuse a request is a comment in a policy.
-    fresh = identity.token_for("bob@entraemulator.dev")
     served = throttled = 0
     retry_after = ""
     for _ in range(16):
-        st, hd, _ = call("/llm/openai/v1/chat/completions", fresh)
+        st, hd, _ = call("/llm/openai/v1/chat/completions", "witness-ceiling")
         if st == 429:
             throttled += 1
             retry_after = retry_after or {k.lower(): v for k, v in hd.items()}.get(
@@ -1262,13 +1301,24 @@ def phase12() -> None:
             )
         else:
             served += 1
-    budget = int(c.CFG.get("DAS_LLM_TOKENS_PER_MINUTE", "2000"))
-    per_call = 200
     check(
         "phase12",
         "the token ceiling refuses the caller who exceeds it",
-        throttled > 0 and served == budget // per_call,
+        throttled > 0 and served == budget // 200,
         f"{served} served then {throttled} refused, Retry-After {retry_after}",
+    )
+
+    # The label itself: a keyed pseudonym, never the identifier the directory
+    # knows the person by.
+    from agent import caller as caller_mod
+
+    oid = "c73d7e0e-0335-4107-abce-e17921ebc8c3"
+    label = caller_mod.label(oid)
+    check(
+        "phase12",
+        "the caller a model call names is a keyed pseudonym, not the person",
+        bool(label) and oid not in label and label == caller_mod.label(oid),
+        f"{caller_mod.KEY_SECRET} -> {len(label)} chars, stable in window {caller_mod.window()}",
     )
 
 

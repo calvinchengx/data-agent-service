@@ -23,7 +23,7 @@ from typing import Any
 
 import anthropic
 
-from agent import grounding
+from agent import caller, grounding
 from agent import skills as skills_mod
 from agent.mcp_client import McpServer, Toolbox
 
@@ -359,7 +359,17 @@ def model_client() -> Any:
     usage reporting lets the gateway actually enforce.
     """
     base = os.environ.get("DAS_LLM_BASE_URL", "").strip()
-    return anthropic.Anthropic(base_url=base) if base else anthropic.Anthropic()
+    if not base:
+        return anthropic.Anthropic()
+    # The route applies the deployment's model credential at the gateway, so it
+    # is authenticated: a subscription key where gateway-side JWT validation is
+    # unavailable, exactly as the catalog route is. A NAME in the settings
+    # file, resolved here with this service's own managed identity.
+    import vaultref
+
+    key = vaultref.resolve(os.environ.get("DAS_LLM_SUBSCRIPTION_KEY", ""))
+    headers = {"Ocp-Apim-Subscription-Key": key} if key else {}
+    return anthropic.Anthropic(base_url=base, default_headers=headers)
 
 
 def ask(
@@ -390,6 +400,10 @@ def ask(
     # prompt, the skills, and the tool schemas. One breakpoint after it, and
     # one on the newest tool result so the transcript is read incrementally
     # rather than from the top on each hop.
+    # The caller, once: it keys the per-user grounding cache and labels the
+    # model call. Read from the token rather than trusted -- the executor, not
+    # this, decides what the caller may see.
+    subject = identity_of(token)
     system = [{"type": "text", "text": system_prompt(), "cache_control": {"type": "ephemeral"}}]
     # The schema goes in a SECOND block with its own breakpoint, never
     # appended to the first. The method prompt is identical for everyone and
@@ -397,7 +411,7 @@ def ask(
     # not. Concatenating them would make the shared prefix per-user and every
     # caller would pay to write a cache entry nobody else can read.
     if grounding.enabled():
-        prefetched = grounding.schema_text(toolbox, subject=identity_of(token))
+        prefetched = grounding.schema_text(toolbox, subject=subject)
         if prefetched:
             system.append(
                 {"type": "text", "text": prefetched, "cache_control": {"type": "ephemeral"}}
@@ -424,6 +438,13 @@ def ask(
             hop_detail,
         )
 
+    # WHO this call is for, as a keyed per-window pseudonym -- the header a
+    # gateway meters on, and the `metadata.user_id` a provider records. Both
+    # carry the same value and neither carries the person: see agent/caller.py
+    # for why the `oid` itself must not leave the building.
+    caller_headers = caller.headers(subject)
+    caller_label = caller_headers.get(caller.HEADER, "")
+
     for _ in range(MAX_STEPS):
         if cancelled and cancelled():
             return finish("(cancelled)", "cancelled")
@@ -435,6 +456,8 @@ def ask(
             output_config={"effort": effort},
             tools=tools,
             messages=messages,
+            extra_headers=caller_headers,
+            **({"metadata": {"user_id": caller_label}} if caller_label else {}),
             # Safety classifiers can decline a request; routing by refusal
             # category means one declined question never takes the run down.
             betas=["server-side-fallback-2026-07-01"],

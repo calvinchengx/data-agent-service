@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import secrets
 
 from seed import common as c
 
@@ -197,26 +198,74 @@ def named_value(name: str, value: str, secret=True) -> None:
 # alone and followed it to disk, which is a false positive it was right to
 # raise -- a reader would have made the same mistake.
 OM_VAULT_ENTRY = "das-om-subscription-key"
+LLM_VAULT_ENTRY = "das-llm-subscription-key"
+# The key the agent derives a caller label from. Minted here rather than typed:
+# a pseudonym key that ships as a literal in an example file is a pseudonym key
+# every deployment shares, which would let anyone holding one deployment's
+# labels recognise another's.
+CALLER_KEY_ENTRY = "das-llm-caller-key"
 
 
-def om_subscription_key() -> str:
-    """A subscription for the OpenMetadata route, and its key. Standard APIM:
-    the key is only readable through listSecrets, never echoed on create."""
+def subscription_key(name: str, api: str, display: str) -> str:
+    """A subscription scoped to ONE api, and its key. Standard APIM: the key is
+    only readable through listSecrets, never echoed on create.
+
+    One per route rather than one for the service, deliberately. The two routes
+    that carry their own credential -- the catalog's read-only bot and the
+    deployment's model key -- are guarded by different subscriptions, so a
+    leaked catalog key cannot spend the model budget.
+    """
     arm(
         "PUT",
-        f"{BASE}/subscriptions/das-agent",
+        f"{BASE}/subscriptions/{name}",
         {
             "properties": {
-                "displayName": "data-agent-service",
-                "scope": f"{BASE}/apis/om",
+                "displayName": display,
+                "scope": f"{BASE}/apis/{api}",
                 "state": "active",
             }
         },
     )
-    secrets = arm("POST", f"{BASE}/subscriptions/das-agent/listSecrets", {})
+    secrets = arm("POST", f"{BASE}/subscriptions/{name}/listSecrets", {})
     key = secrets.get("primaryKey") or secrets.get("properties", {}).get("primaryKey", "")
-    c.log("om subscription key issued")
+    c.log(f"{api} subscription key issued")
     return key
+
+
+def om_subscription_key() -> str:
+    return subscription_key("das-agent", "om", "data-agent-service")
+
+
+def llm_subscription_key() -> str:
+    return subscription_key("das-agent-llm", "llm", "data-agent-service (model)")
+
+
+def ensure_caller_key() -> None:
+    """A per-deployment key for the caller labels the model route meters on.
+
+    Generated, stored in the vault, and named -- never valued -- in the
+    settings file. Without it the agent sends no caller at all and spend falls
+    back to one bucket for the deployment (agent/caller.py), so the seed makes
+    one rather than leaving governance switched off by default.
+
+    Left alone if the vault already holds one: rotating it silently would
+    detach every label from the history it belongs to, and a budget that
+    resets when someone re-runs the seed is worse than one that never rotates.
+    """
+    kv = c.CFG.get("DAS_KEYVAULT_URL", "").rstrip("/")
+    if not kv:
+        c.log("caller key: no DAS_KEYVAULT_URL, skipped")
+        return
+    st, _hd, _body = c.http(
+        "GET",
+        f"{kv}/secrets/{CALLER_KEY_ENTRY}?api-version=7.5",
+        headers=c.bearer("https://vault.azure.net"),
+    )
+    if st == 200:
+        c.log(f"caller key: {CALLER_KEY_ENTRY} already in Key Vault, left as it is")
+    else:
+        c.store_secret(CALLER_KEY_ENTRY, secrets.token_urlsafe(32))
+    c.write_env(DAS_LLM_CALLER_KEY_SECRET=f"keyvault:{CALLER_KEY_ENTRY}")
 
 
 def set_rate_limit(calls: int) -> None:
@@ -239,10 +288,10 @@ def publish_llm() -> None:
     """The model call, through the gateway.
 
     Putting the model behind the same gateway as the data is what turns "the
-    agent is expensive" into a number somebody owns: the spend is attributed to
-    the caller, capped per caller, and recorded next to the queries that caused
-    it. Two controls, because they answer different questions and have
-    different reach:
+    agent is expensive" into a number somebody owns: the spend is capped and
+    recorded per CALLER -- as a keyed pseudonym, never as the person -- next to
+    the queries that caused it. Two controls, because they answer different
+    questions and have different reach:
 
       * `rate-limit-by-key` caps REQUESTS per caller. It works whatever the
         provider is, because it counts calls rather than reading the answer.
@@ -252,11 +301,35 @@ def publish_llm() -> None:
         looks for. See docs/09-llm-governance.md: this is not the same for every
         provider, and the difference decides which control you actually get.
     """
+    # WHAT KEYS THE COUNTER, and why it is not `Authorization`.
+    #
+    # This route keyed on the Authorization header for as long as it existed,
+    # and the header is never there: the Anthropic SDK authenticates with
+    # `x-api-key` (verified -- `client.auth_headers` is `{'X-Api-Key': ...}`),
+    # so every caller resolved to the SAME literal "anonymous" and the cap was
+    # one bucket for the deployment. The docstring above and
+    # docs/09-llm-governance.md both claimed per-caller, which is the shape of
+    # mistake this repository keeps finding: the claim reads true and the
+    # mechanism disagrees. Setting `ANTHROPIC_AUTH_TOKEN` instead does send an
+    # Authorization header -- the DEPLOYMENT's, so still one bucket.
+    #
+    # The agent now sends `X-DAS-Caller`, a keyed per-window pseudonym of the
+    # asking user (agent/caller.py). A caller with no label falls back to a
+    # shared bucket rather than to no limit at all, and the witness in
+    # `e2e.run` asserts the label is actually there.
     caller = (
-        "@(context.Request.Headers.GetValueOrDefault(&quot;Authorization&quot;,"
-        "&quot;anonymous&quot;))"
+        "@(context.Request.Headers.GetValueOrDefault(&quot;X-DAS-Caller&quot;,"
+        "&quot;unlabelled&quot;))"
     )
-    put_api("llm", "Model", "llm", LLM_BACKEND, mcp_mode=None)
+    # The route applies the DEPLOYMENT's model credential at the backend, so
+    # it must not be reachable unauthenticated -- it was, and anyone who could
+    # reach the gateway could spend the model budget. Same gate as the
+    # OpenMetadata route, for the same reason: with gateway-side JWT
+    # validation available that is the gate, and without it a subscription key
+    # is. Standard API Management authentication either way.
+    put_api(
+        "llm", "Model", "llm", LLM_BACKEND, mcp_mode=None, subscription_required=not VALIDATE_JWT
+    )
     put_operation(
         "llm",
         "messages",
@@ -502,6 +575,7 @@ def main() -> dict:
 
     publish_discovery()
     publish_llm()
+    ensure_caller_key()
 
     out = {
         "gateway": c.CFG["DAS_APIM_BASE"],
@@ -513,17 +587,23 @@ def main() -> dict:
         "llm": "/llm",
         "gateway_validates_jwt": VALIDATE_JWT,
         "om_subscription_required": not VALIDATE_JWT,
+        "llm_subscription_required": not VALIDATE_JWT,
     }
     if not VALIDATE_JWT:
         out["om_subscription_key"] = om_subscription_key()
+        out["llm_subscription_key"] = llm_subscription_key()
     c.save_state(apim=out)
-    subscription_key = out.get("om_subscription_key")
-    if isinstance(subscription_key, str) and subscription_key:
-        # The agent and the client-config generator both send this header, so
-        # the value has to be reachable -- but it does not have to be on disk.
-        # It goes to the vault, and the settings file gets its NAME.
-        c.store_secret(OM_VAULT_ENTRY, subscription_key)
-        c.write_env(DAS_OM_SUBSCRIPTION_KEY=f"keyvault:{OM_VAULT_ENTRY}")
+    # The agent and the client-config generator both send these headers, so the
+    # values have to be reachable -- but they do not have to be on disk. They go
+    # to the vault, and the settings file gets their NAMES.
+    for entry, state_key, setting in (
+        (OM_VAULT_ENTRY, "om_subscription_key", "DAS_OM_SUBSCRIPTION_KEY"),
+        (LLM_VAULT_ENTRY, "llm_subscription_key", "DAS_LLM_SUBSCRIPTION_KEY"),
+    ):
+        value = out.get(state_key)
+        if isinstance(value, str) and value:
+            c.store_secret(entry, value)
+            c.write_env(**{setting: f"keyvault:{entry}"})
     return out
 
 

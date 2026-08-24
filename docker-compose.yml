@@ -470,6 +470,11 @@ services:
       # it to the llm-stub for the transport checks and unsets it after.
       DAS_LLM_BASE_URL: "${DAS_ASK_LLM_BASE_URL:-${DAS_LLM_BASE_URL:-}}"
       ANTHROPIC_API_KEY: "${DAS_ASK_LLM_KEY:-${ANTHROPIC_API_KEY:-}}"
+      # The caller label and the model route's own credential. Both are NAMES
+      # here; the agent resolves them with its own managed identity.
+      DAS_LLM_CALLER_KEY_SECRET: "${DAS_LLM_CALLER_KEY_SECRET:-keyvault:das-llm-caller-key}"
+      DAS_LLM_CALLER_WINDOW: "${DAS_LLM_CALLER_WINDOW:-}"
+      DAS_LLM_SUBSCRIPTION_KEY: "${DAS_LLM_SUBSCRIPTION_KEY:-}"
     volumes:
       - ./:/app:ro
       - tools-venv:/app/.venv
