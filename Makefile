@@ -23,7 +23,7 @@ endif
 
 PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
-.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance conformance-one conformance-ask conformance-models ask-serve client-config ask docs coverage coverage-python coverage-go coverage-manifest release-version witnesses-manifest witnesses-check unit guard-corpus
+.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance conformance-one conformance-ask conformance-models conformance-models-gateway ask-serve client-config ask docs coverage coverage-python coverage-go coverage-manifest release-version witnesses-manifest witnesses-check unit guard-corpus
 
 help: ## Show the available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -175,6 +175,16 @@ conformance-models: ## One contract, both model protocols, against the llm-stub
 	# is a check that does not run.
 	docker compose up -d --wait llm-stub
 	$(TOOLS) python -m agent.conformance.models $(ARGS)
+
+conformance-models-gateway: ## The same contract, through a real LiteLLM gateway
+	# Proves the backends survive something that ROUTES, TRANSLATES and METERS,
+	# rather than only a stub that answers in whatever shape it was asked in.
+	# The gateway sits in front of the same stub, so this still needs no model
+	# credential. Not in CI: it is a third-party image and a slow start, and
+	# what it proves changes rarely.
+	docker compose up -d --wait llm-stub
+	docker compose --profile gateway up -d litellm
+	$(TOOLS) python -m agent.conformance.models --via gateway $(ARGS)
 
 typecheck: ## Python types only
 	$(TY) check

@@ -42,10 +42,37 @@ import urllib.request
 from agent import model as mdl
 from agent.caller import HEADER
 
-PASS, FAIL = "\033[32mok\033[0m", "\033[31mFAIL\033[0m"
-_results: list[tuple[str, str, bool, str]] = []
+PASS, FAIL, SKIP = "\033[32mok\033[0m", "\033[31mFAIL\033[0m", "\033[33mskip\033[0m"
+_results: list[tuple[str, str, bool | None, str]] = []
 
+#: Where the stub is, for `GET /requests` -- always the stub, even when the
+#: backends are pointed at a gateway in front of it. What reached the FAR SIDE
+#: is the thing worth asserting on, and the far side is the stub either way.
 STUB = os.environ.get("DAS_LLM_STUB_URL", "http://llm-stub:8095").rstrip("/")
+
+#: Where the BACKENDS point. Against the stub directly by default; against a
+#: real gateway with `--via gateway`, which is the difference between proving
+#: the wire shapes and proving they survive something that routes, translates
+#: and meters. See docs/21-llm-backends.md.
+TARGETS = {
+    "stub": {
+        "anthropic": (f"{STUB}/anthropic", "stub"),
+        "openai": (f"{STUB}/openai/v1", "stub"),
+        "key": "stub-key",
+    },
+    "gateway": {
+        "anthropic": (
+            os.environ.get("DAS_LLM_GATEWAY_URL", "http://litellm:4000"),
+            "stub-anthropic",
+        ),
+        "openai": (
+            os.environ.get("DAS_LLM_GATEWAY_URL", "http://litellm:4000").rstrip("/") + "/v1",
+            "stub",
+        ),
+        "key": os.environ.get("LITELLM_MASTER_KEY", "sk-litellm-only"),
+    },
+}
+VIA = "stub"
 
 #: The one tool every check offers, in MCP's shape -- which is what
 #: `Toolbox.connect()` returns and therefore what a backend really receives.
@@ -65,6 +92,12 @@ SYSTEM = [
 ]
 LABEL = "conformance-label"
 REFUSAL_TEXT = "refused: only SELECT is allowed"
+
+
+def skip(protocol: str, name: str, why: str) -> None:
+    """Printed, counted, never hidden -- the same rule the ask contract uses."""
+    _results.append((protocol, name, None, why))
+    print(f"  {SKIP}  [{protocol}] {name} — {why}", flush=True)
 
 
 def check(protocol: str, name: str, ok: bool, detail: str = "") -> bool:
@@ -89,27 +122,35 @@ def forget() -> None:
 
 
 # --------------------------------------------------------- the backends --
+def _endpoint(protocol: str) -> tuple[str, str]:
+    """The (base url, model name) this run reaches `protocol` at."""
+    base, model = TARGETS[VIA][protocol]  # type: ignore[misc]
+    return str(base), str(model)
+
+
 def backend_for(protocol: str):
-    """A backend pointed at the stub, built the way a deployment builds one."""
+    """A backend pointed where this run says, built as a deployment builds one."""
+    target = TARGETS[VIA]
+    base, _model = _endpoint(protocol)
+    key = str(target["key"])
     if protocol == "anthropic":
         import anthropic
 
         from agent.models.anthropic import AnthropicBackend
 
-        return AnthropicBackend(
-            anthropic.Anthropic(base_url=f"{STUB}/anthropic", api_key="stub-key")
-        )
+        return AnthropicBackend(anthropic.Anthropic(base_url=base, api_key=key))
 
     import openai
 
     from agent.models.openai_chat import OpenAIChatBackend
 
-    return OpenAIChatBackend(openai.OpenAI(base_url=f"{STUB}/openai/v1", api_key="stub-key"))
+    return OpenAIChatBackend(openai.OpenAI(base_url=base, api_key=key))
 
 
 def conversation(protocol: str):
+    _base, model = _endpoint(protocol)
     return backend_for(protocol).start(
-        system=SYSTEM, tools=[TOOL], model="stub", effort="high", user=LABEL
+        system=SYSTEM, tools=[TOOL], model=model, effort="high", user=LABEL
     )
 
 
@@ -185,14 +226,27 @@ def run(protocol: str) -> None:
         f"in {answer.usage.input}, out {answer.usage.output}",
     )
 
-    # 6. The caller label, which is what a gateway meters on.
-    sent = received()[0]
-    check(
-        protocol,
-        "the caller's label reaches the far side, in the header a gateway keys on",
-        _label_reached(protocol, sent["body"]),
-        f"{HEADER} and this protocol's own field",
-    )
+    # 6. The caller label, which is what a gateway meters on -- and which a
+    #    gateway therefore CONSUMES. Asserted against the stub, where the next
+    #    hop is the thing being metered; observed rather than asserted through
+    #    a gateway, because a label forwarded past the party that meters it has
+    #    travelled further than it needed to. Witnessed against LiteLLM:
+    #    chat completions consumes `user` and Anthropic passthrough forwards
+    #    `metadata.user_id` -- see docs/21-llm-backends.md.
+    if VIA == "stub":
+        check(
+            protocol,
+            "the caller's label reaches the next hop, in this protocol's own field",
+            _label_reached(protocol, received()[0]["body"]),
+            f"{HEADER} and this protocol's own field",
+        )
+    else:
+        forwarded = _label_reached(protocol, received()[0]["body"])
+        skip(
+            protocol,
+            "the caller's label reaches the next hop, in this protocol's own field",
+            f"the gateway is the next hop and meters it there; it {'forwards' if forwarded else 'consumes'} it",
+        )
 
     # 7. What was given up rides on the turn's own record, not a startup log.
     check(
@@ -229,15 +283,25 @@ def _label_reached(protocol: str, body: dict) -> bool:
 
 
 def main() -> int:
+    global VIA  # noqa: PLW0603 — one run, one target
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", action="append", choices=["anthropic", "openai"])
+    ap.add_argument(
+        "--via",
+        default="stub",
+        choices=sorted(TARGETS),
+        help="stub: the wire shapes. gateway: the same, through a real LLM gateway.",
+    )
     a = ap.parse_args()
+    VIA = a.via
     for protocol in a.only or ["anthropic", "openai"]:
-        print(f"\n{protocol}")
+        print(f"\n{protocol} (via the {VIA})")
         run(protocol)
     passed = sum(1 for *_, ok, _ in _results if ok)
-    total = len(_results)
-    print(f"\n{passed}/{total} model contract checks passed")
+    skipped = sum(1 for *_, ok, _ in _results if ok is None)
+    total = len(_results) - skipped
+    tail = f", {skipped} skipped" if skipped else ""
+    print(f"\n{passed}/{total} model contract checks passed (via the {VIA}){tail}")
     return 0 if passed == total else 1
 
 

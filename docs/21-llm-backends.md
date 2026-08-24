@@ -149,3 +149,42 @@ it.
 
 `e2e.run` phase9 runs the same suite beside the executor contract, so the
 witness count moves if either drifts.
+
+## Against a real gateway
+
+```bash
+make conformance-models-gateway
+```
+
+The same suite, with the backends pointed at a **LiteLLM proxy** sitting in
+front of the same stub — so it proves the backends survive something that
+routes, translates and meters, and still needs no model credential.
+**14/14, 2 skipped.** Not in CI: a third-party image with a slow start, and
+what it proves changes rarely.
+
+Three things that run found, none of them a defect in this service:
+
+**A gateway terminates the caller label, and should.** The two label checks
+are skipped rather than asserted through a gateway, because the gateway *is*
+the next hop and the party doing the metering. Measured against LiteLLM:
+
+| | `user` / `metadata.user_id` | `X-DAS-Caller` |
+|---|---|---|
+| chat completions | **consumed**, not forwarded | dropped |
+| Anthropic passthrough | **forwarded** upstream | dropped |
+
+Consuming it is the better behaviour of the two: a label forwarded past the
+party that meters it has travelled further than it needed to.
+
+**`/v1/messages` will not reach an `openai/*` upstream.** LiteLLM serves that
+endpoint through its Responses-API adapter, so it calls `<api_base>/responses`
+— and a chat-completions-only upstream cannot answer. Route the upstream as
+`anthropic/*` when it speaks that shape, which is the natural configuration
+anyway. `docs/upstream-issues.md` 18 has the repro; `docker/litellm/config.yaml`
+carries both entries and says why. **This service never depends on a gateway
+translating between protocols** — it speaks whichever one the deployment
+configures, which is the whole point of having two backends.
+
+**A stub that omits a field is not speaking the shape it claims to.** The
+chat-completion responses had no `created`, which real ones always carry. The
+direct path tolerated it and the gateway did not. Fixed in the stub.

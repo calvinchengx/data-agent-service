@@ -475,6 +475,9 @@ services:
       DAS_LLM_CALLER_KEY_SECRET: "${DAS_LLM_CALLER_KEY_SECRET:-keyvault:das-llm-caller-key}"
       DAS_LLM_CALLER_WINDOW: "${DAS_LLM_CALLER_WINDOW:-}"
       DAS_LLM_SUBSCRIPTION_KEY: "${DAS_LLM_SUBSCRIPTION_KEY:-}"
+      DAS_LLM_PROTOCOL: "${DAS_LLM_PROTOCOL:-anthropic}"
+      DAS_LLM_ACCEPT_DEGRADED: "${DAS_LLM_ACCEPT_DEGRADED:-}"
+      DAS_LLM_API_KEY: "${DAS_LLM_API_KEY:-}"
     volumes:
       - ./:/app:ro
       - tools-venv:/app/.venv
@@ -485,6 +488,24 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+  # ------------------------------------------------------------- litellm --
+  # A real LLM gateway, for witnessing the model backends against something
+  # that is not our own stub. Behind a profile because the stack does not need
+  # it to run: `docker compose --profile gateway up -d litellm`.
+  litellm:
+    profiles: ["gateway"]
+    image: ghcr.io/berriai/litellm:main-stable
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:-sk-litellm-only}"
+    volumes:
+      - ./docker/litellm/config.yaml:/app/config.yaml:ro
+    ports:
+      - "${LITELLM_PORT:-14000}:4000"
+    depends_on:
+      llm-stub:
+        condition: service_started
 
 volumes:
   tools-venv:

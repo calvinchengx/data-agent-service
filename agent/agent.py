@@ -398,6 +398,19 @@ def _gateway_headers() -> dict[str, str]:
     return {}
 
 
+def _model_key() -> str:
+    """The model credential this deployment holds, resolved.
+
+    `DAS_LLM_API_KEY` is a `keyvault:` reference wherever there is an identity
+    to resolve it with, and a literal where there is not -- the same contract
+    every other credential here follows. Empty means "let the SDK find its
+    own", which is what an exported ANTHROPIC_API_KEY on a laptop is.
+    """
+    import vaultref
+
+    return vaultref.resolve(os.environ.get("DAS_LLM_API_KEY", "")) or ""
+
+
 def openai_client() -> Any:
     """The OpenAI-protocol client, pointed wherever the deployment says.
 
@@ -409,11 +422,8 @@ def openai_client() -> Any:
     """
     import openai
 
-    import vaultref
-
     base = os.environ.get("DAS_LLM_BASE_URL", "").strip()
-    key = vaultref.resolve(os.environ.get("DAS_LLM_API_KEY", "")) or "unset"
-    return openai.OpenAI(base_url=base or None, api_key=key)
+    return openai.OpenAI(base_url=base or None, api_key=_model_key() or "unset")
 
 
 def model_client() -> Any:
@@ -426,16 +436,24 @@ def model_client() -> Any:
     usage reporting lets the gateway actually enforce.
     """
     base = os.environ.get("DAS_LLM_BASE_URL", "").strip()
+    # The model credential, as a NAME where the deployment stores one. Both
+    # protocols read the same setting, because which protocol you speak does
+    # not change where a secret should live; `ANTHROPIC_API_KEY` still works
+    # and is what the SDK falls back to, which is what a laptop with an
+    # exported key expects.
+    key = _model_key()
     if not base:
-        return anthropic.Anthropic()
+        return anthropic.Anthropic(api_key=key) if key else anthropic.Anthropic()
     # The route applies the deployment's model credential at the gateway, so it
     # is authenticated: a subscription key where gateway-side JWT validation is
     # unavailable, exactly as the catalog route is. A NAME in the settings
     # file, resolved here with this service's own managed identity.
     import vaultref
 
-    key = vaultref.resolve(os.environ.get("DAS_LLM_SUBSCRIPTION_KEY", ""))
-    headers = {"Ocp-Apim-Subscription-Key": key} if key else {}
+    subscription = vaultref.resolve(os.environ.get("DAS_LLM_SUBSCRIPTION_KEY", ""))
+    headers = {"Ocp-Apim-Subscription-Key": subscription} if subscription else {}
+    if key:
+        return anthropic.Anthropic(base_url=base, api_key=key, default_headers=headers)
     return anthropic.Anthropic(base_url=base, default_headers=headers)
 
 

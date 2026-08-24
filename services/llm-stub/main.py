@@ -47,6 +47,10 @@ ANSWER = os.environ.get("STUB_ANSWER", "Net revenue for FY2025 was 1,905,417.10 
 #: a JSON string and one that carries them as an object.
 TOOL_ARGUMENTS = {"sql": "SELECT 1"}
 TOOL_CALL_ID = "stub-call-1"
+#: Every real chat completion carries `created`. Fixed rather than the clock,
+#: so a recorded request is byte-comparable; present because a stub that omits
+#: a field the shape always has is not speaking the shape it claims to.
+CREATED = 1700000000
 
 #: The last requests received, newest last, for `GET /requests`.
 RECEIVED: list[dict] = []
@@ -123,7 +127,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "invalid JSON"})
             return
 
-        RECEIVED.append({"path": self.path, "body": request})
+        # Headers as well as the body: what an intermediary forwards differs
+        # between the two, and a conformance suite that only saw bodies could
+        # not tell "the label was dropped" from "the label went in a header".
+        RECEIVED.append(
+            {
+                "path": self.path,
+                "body": request,
+                "headers": {k.lower(): v for k, v in self.headers.items()},
+            }
+        )
         del RECEIVED[:-RECEIVED_MAX]
 
         if self.path.startswith("/anthropic"):
@@ -174,6 +187,7 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "id": "chatcmpl-stub",
                     "object": "chat.completion",
+                    "created": CREATED,
                     "model": request.get("model", "stub"),
                     "choices": [
                         {
@@ -213,6 +227,7 @@ class Handler(BaseHTTPRequestHandler):
             {
                 "id": "chatcmpl-stub",
                 "object": "chat.completion",
+                "created": CREATED,
                 "model": request.get("model", "stub"),
                 "choices": [
                     {

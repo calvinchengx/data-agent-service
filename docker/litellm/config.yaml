@@ -1,0 +1,33 @@
+# A REAL LLM gateway, in front of this repository's own model stub.
+#
+# The point is not to exercise LiteLLM. It is to prove that the two protocol
+# backends work against something that is genuinely a gateway -- routing,
+# translating, and metering -- rather than only against a stub that answers in
+# whatever shape it was asked in. The stub behind it keeps the whole thing
+# free of a model credential, which is what lets this run anywhere.
+#
+# TWO ENTRIES, ONE STUB, because a gateway routes by what the upstream speaks
+# and not by what the caller asked in.
+#
+#   stub            openai/*    reached at /v1/chat/completions
+#   stub-anthropic  anthropic/* reached at /v1/messages
+#
+# Do NOT expect `/v1/messages` to work against the `openai/*` entry: LiteLLM
+# serves that endpoint through its Responses-API adapter, so it calls
+# `<api_base>/responses` upstream -- verified, and recorded as
+# docs/upstream-issues.md 18. An OpenAI-compatible upstream that implements
+# only chat completions cannot back it.
+model_list:
+  - model_name: stub
+    litellm_params:
+      model: openai/stub
+      api_base: http://llm-stub:8095/openai/v1
+      api_key: stub-key
+  - model_name: stub-anthropic
+    litellm_params:
+      model: anthropic/stub
+      api_base: http://llm-stub:8095/anthropic
+      api_key: stub-key
+
+litellm_settings:
+  drop_params: false
