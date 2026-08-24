@@ -1337,7 +1337,7 @@ def phase12() -> None:
         "phase12",
         "the caller a model call names is a keyed pseudonym, not the person",
         bool(label) and oid not in label and label == caller_mod.label(oid),
-        f"{caller_mod.KEY_SECRET} -> {len(label)} chars, stable in window {caller_mod.window()}",
+        f"{caller_mod.KEY_SETTING} -> {len(label)} chars, stable in window {caller_mod.window()}",
     )
 
 

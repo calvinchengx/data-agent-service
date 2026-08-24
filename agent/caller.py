@@ -44,7 +44,14 @@ LOG = logging.getLogger("agent.caller")
 # and because it is the one shape every gateway accepts.
 HEADER = "X-DAS-Caller"
 
-KEY_SECRET = "DAS_LLM_CALLER_KEY_SECRET"
+# The NAME OF A SETTING, not a key -- which is why it is `KEY_SETTING` and not
+# `KEY_SECRET`. It was the latter, and code scanning followed the constant into
+# the two log lines below and into a witness's detail string and reported three
+# cleartext-secret alerts, all on the name. A false positive it was right to
+# raise: a reader skimming `LOG.warning(..., KEY_SECRET)` would think the same.
+# The SETTING keeps its name, which mirrors DAS_PROMOTE_KEY_SECRET and is the
+# operator's contract; what changes is what this code calls the string.
+KEY_SETTING = "DAS_LLM_CALLER_KEY_SECRET"
 WINDOW_VAR = "DAS_LLM_CALLER_WINDOW"
 
 _warned = False
@@ -63,13 +70,13 @@ def _key() -> bytes:
     identity, the same way every other credential here is. A literal is
     honoured for a local run, which is what `vaultref` already decides.
     """
-    raw = os.environ.get(KEY_SECRET, "").strip()
+    raw = os.environ.get(KEY_SETTING, "").strip()
     if not raw:
         return b""
     try:
         return vaultref.resolve(raw).encode()
     except LookupError as e:
-        LOG.warning("cannot resolve %s: %s — model calls will carry no caller", KEY_SECRET, e)
+        LOG.warning("cannot resolve %s: %s — model calls will carry no caller", KEY_SETTING, e)
         return b""
 
 
@@ -90,7 +97,7 @@ def label(subject: str) -> str:
                 "%s is unset: model spend cannot be attributed per caller and will be "
                 "counted against the deployment. Set it to a `keyvault:` reference to "
                 "label calls with a keyed pseudonym (docs/09-llm-governance.md).",
-                KEY_SECRET,
+                KEY_SETTING,
             )
         return ""
     return pseudonym(subject, key, window())

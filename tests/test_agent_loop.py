@@ -110,7 +110,7 @@ def test_every_hop_carries_the_caller_label_and_never_the_oid(patched, monkeypat
 
     oid = "c73d7e0e-0335-4107-abce-e17921ebc8c3"
     token = _token_with_oid(oid)
-    monkeypatch.setenv(caller.KEY_SECRET, "a-key")
+    monkeypatch.setenv(caller.KEY_SETTING, "a-key")
     monkeypatch.setenv(caller.WINDOW_VAR, "2026-08")
     toolbox = FakeToolbox([("{}", False)])
     patched(toolbox)
@@ -131,7 +131,7 @@ def test_without_a_key_a_hop_carries_no_caller_at_all(patched, monkeypatch):
     """Not the oid, not an unkeyed hash: the field is absent."""
     from agent import caller
 
-    monkeypatch.delenv(caller.KEY_SECRET, raising=False)
+    monkeypatch.delenv(caller.KEY_SETTING, raising=False)
     monkeypatch.setattr(caller, "_warned", False)
     toolbox = FakeToolbox([])
     patched(toolbox)
