@@ -942,6 +942,25 @@ def phase9() -> None:
         summary.strip()[:70],
     )
 
+    # The same move, one layer up: the MODEL exists as two protocols, and what
+    # makes that a choice rather than a fork is that both satisfy one suite.
+    # It runs here because it costs nothing to -- the stub needs no credential.
+    out = subprocess.run(
+        [sys.executable, "-m", "agent.conformance.models"],
+        capture_output=True,
+        text=True,
+        env={**os.environ},
+        check=False,
+    )
+    tail = (out.stdout or out.stderr).strip().splitlines()
+    summary = next((line for line in reversed(tail) if "model contract checks" in line), "")
+    check(
+        "phase9",
+        "both model protocols satisfy one contract",
+        out.returncode == 0 and "model contract checks passed" in summary,
+        summary.strip()[:70],
+    )
+
     contract = json.loads(pathlib.Path("services/contract/openapi.json").read_text())
     operations = {
         op.get("operationId")

@@ -23,7 +23,7 @@ endif
 
 PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
-.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance conformance-one conformance-ask ask-serve client-config ask docs coverage coverage-python coverage-go coverage-manifest release-version witnesses-manifest witnesses-check unit guard-corpus
+.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance conformance-one conformance-ask conformance-models ask-serve client-config ask docs coverage coverage-python coverage-go coverage-manifest release-version witnesses-manifest witnesses-check unit guard-corpus
 
 help: ## Show the available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -167,6 +167,14 @@ conformance-ask: ## The ask contract (agent/contract/) direct AND through the ga
 	docker compose --profile ask up -d --build --force-recreate --wait ask
 	$(TOOLS) python -m agent.conformance.run --name "ask service, direct" $(ARGS)
 	$(TOOLS) python -m agent.conformance.run --via-gateway --name "ask service, via the gateway" $(ARGS)
+
+conformance-models: ## One contract, both model protocols, against the llm-stub
+	# No model credential and no gateway: the stub speaks both wire shapes,
+	# calls a tool, and remembers what it was sent. That is the whole reason
+	# this can run in CI, and a check that only runs where someone is paying
+	# is a check that does not run.
+	docker compose up -d --wait llm-stub
+	$(TOOLS) python -m agent.conformance.models $(ARGS)
 
 typecheck: ## Python types only
 	$(TY) check

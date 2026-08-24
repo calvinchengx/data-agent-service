@@ -113,11 +113,39 @@ Prose rather than a code, because the reader is a model: it has to be
 unmistakable mid-transcript and mean the same thing to a model that has never
 seen this service before.
 
-## Not built yet
+## One contract, both protocols
 
-The conformance suite that runs **both** backends against
-`services/llm-stub` — which already speaks both wire shapes with real usage
-objects and needs no credential, so it can run in CI. Each backend has its own
-tests and both have been driven by the real agent loop against the stub by
-hand; what is missing is the ONE suite that holds them to the same behaviour,
-which is what turns "protocol-agnostic" from a design into a fact.
+```bash
+make conformance-models
+```
+
+This is to the model seam what `services/conformance/run.py` is to the two
+executors: one set of assertions run against every implementation, so
+"protocol-agnostic" is a fact somebody checked rather than a claim in a
+README. **16/16**, in CI, on every push — and adding a third protocol means
+passing it, with nothing else to argue about.
+
+It runs against `services/llm-stub`, which speaks both wire shapes with real
+usage objects, calls a tool once per conversation, and remembers what it was
+sent at `GET /requests`. No model credential, no gateway. A check that only
+runs where someone is paying is a check that does not run.
+
+What it holds both backends to:
+
+| | Anthropic | OpenAI |
+|---|---|---|
+| the tool is offered under the toolbox's name | `tools[].input_schema` | `tools[].function.parameters` |
+| arguments survive the round trip | an object | a **JSON string** |
+| a refused result reaches the model | `is_error: true` | a marker in the content |
+| usage normalises to the same numbers | `input_tokens` / `output_tokens` | `prompt_tokens` / `completion_tokens` |
+| the caller's label reaches the far side | `metadata.user_id` | `user` |
+| what it cannot do is knowable per turn | gives up nothing | gives up four |
+
+The refusal row is the load-bearing one, and it is why the suite asserts on
+what the stub *received* rather than only on what the backend returned. A
+refusal the model cannot see is a refusal it retries forever, and the two
+protocols express it so differently that only checking the far side proves
+it.
+
+`e2e.run` phase9 runs the same suite beside the executor contract, so the
+witness count moves if either drifts.

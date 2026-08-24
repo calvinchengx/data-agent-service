@@ -354,6 +354,12 @@ jobs:
       # survived two phases behind a green contract.
       - name: executor contract, both implementations
         run: make conformance
+      # The same contract-over-two-implementations move, one layer up: the
+      # model exists as two wire protocols. Runs here because the stub speaks
+      # both and needs no model credential, so nothing about this step depends
+      # on someone paying for tokens.
+      - name: model contract, both protocols
+        run: make conformance-models
       # The witnesses badge is generated from docs/witnesses.json by the docs
       # site, which never runs the stack. This is what stops that number
       # drifting away from what the suite actually witnesses.
