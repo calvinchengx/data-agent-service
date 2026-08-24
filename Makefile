@@ -23,7 +23,7 @@ endif
 
 PY ?= $(shell for c in python3.13 python3.12 python3 python py; do if "$$c" -c 'import sys; assert sys.version_info >= (3,12)' >/dev/null 2>&1; then echo "$$c"; break; fi; done)
 
-.PHONY: help doctor up down restart clean status logs ps pull tools-build stack seed test eval load load-compare lint format typecheck conformance conformance-one conformance-ask conformance-models conformance-models-gateway ask-serve client-config ask docs coverage coverage-python coverage-go coverage-manifest release-version witnesses-manifest witnesses-check unit guard-corpus
+.PHONY: help doctor up down restart clean status logs ps pull tools-build stack superset seed test eval load load-compare lint format typecheck conformance conformance-one conformance-ask conformance-models conformance-models-gateway ask-serve client-config ask docs coverage coverage-python coverage-go coverage-manifest release-version witnesses-manifest witnesses-check unit guard-corpus
 
 help: ## Show the available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -64,6 +64,7 @@ stack: ## Everything from nothing: start, seed, apply, verify (what CI runs)
 	$(MAKE) seed
 	@echo "== applying ids the seed created (the executor reads them at start)"
 	$(COMPOSE) up -d
+	$(MAKE) superset
 	$(MAKE) load-compare ARGS="$(STACK_LOAD_ARGS)"
 	$(MAKE) load ARGS="$(STACK_LOAD_ARGS)"
 	$(MAKE) test
@@ -153,6 +154,13 @@ conformance-one: ## The contract against one implementation (DAS_EXECUTOR=py|go)
 	# unconditionally, so the gate refused every run and named the wrong cause.
 	$(PY) -m load.run --assert-executor $(DAS_EXECUTOR)
 	$(TOOLS) python -m services.conformance.run --name "$(DAS_EXECUTOR) executor"
+
+superset: ## Start Superset (a publishing target; phase19 needs it)
+	# Started here rather than with the core stack: ten containers already race
+	# each other in `make up`, SQL Server is the slowest of them, and three more
+	# at that moment is what pushed a CI runner over. Once the rest is healthy
+	# there is room.
+	$(COMPOSE) --profile superset up -d --wait superset
 
 ask-serve: ## The ask service, behind the gateway at /ask (docs/20-ask-service.md)
 	docker compose --profile ask up -d --build --wait ask

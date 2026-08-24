@@ -300,6 +300,15 @@ services:
       retries: 20
 
   # --------------------------------------------------------------- superset
+  # BEHIND A PROFILE, and started AFTER the core stack rather than beside it.
+  # `make up` brings up ten containers at once, of which SQL Server is the
+  # slowest and hungriest; adding three more to that moment is what made CI
+  # fail with `sqlserver exited (255)` six seconds in, healthy again a minute
+  # later. Nothing was wrong with it except that everything started together.
+  # `make superset` brings these up once the rest is healthy, and `make stack`
+  # does that between the seed and the load runs, so the witnesses still have
+  # it and the startup peak no longer includes it.
+  #
   # The second dashboard target (§20). Power BI proves the promotion path
   # against a tool with per-user identity; Superset proves the SAME Plan
   # survives contact with one that has none -- which is what makes the
@@ -310,6 +319,7 @@ services:
   # documentation excludes SQLite from production, and a local shape that
   # production would reject is the emulator-only path this repo refuses.
   superset-db:
+    profiles: ["superset"]
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: superset
@@ -327,6 +337,7 @@ services:
   # from the server because a webserver that migrates on boot races itself the
   # moment there is more than one replica.
   superset-init:
+    profiles: ["superset"]
     build:
       context: .
       dockerfile: docker/superset/Dockerfile
@@ -352,6 +363,7 @@ services:
         superset init
 
   superset:
+    profiles: ["superset"]
     build:
       context: .
       dockerfile: docker/superset/Dockerfile

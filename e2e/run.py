@@ -2072,6 +2072,25 @@ def phase16() -> None:
     assert report.visual_type(tuple(candidate["dimensions"])) in {"card", "barChart", "tableEx"}
 
 
+def _reachable(base: str, timeout: float = 5.0) -> bool:
+    """Whether something answers at `base` at all.
+
+    Any HTTP status counts, including a 4xx: the question is whether the
+    service is THERE, and an unauthenticated probe of a login-protected app is
+    supposed to be refused.
+    """
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(base, timeout=timeout):
+            return True
+    except urllib.error.HTTPError:
+        return True
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False
+
+
 def phase19() -> None:
     """A second dashboard target, and the same Plan surviving it.
 
@@ -2098,6 +2117,21 @@ def phase19() -> None:
 
     state = c.load_state()
     live = targets.configured(c.CFG, state)
+
+    # Superset is behind a compose profile -- it is a publishing TARGET, not
+    # part of the service, and starting it beside ten other containers is what
+    # pushed a CI runner over. So say plainly that it is not up, rather than
+    # failing with a name-resolution traceback that reads like a defect in the
+    # publisher. `make superset` starts it; `make stack` already does.
+    if not _reachable(c.CFG.get("DAS_SUPERSET_URL", "http://superset:8088")):
+        check(
+            "phase19",
+            "Superset is up, so the second publishing target can be witnessed",
+            False,
+            "not reachable — run `make superset` (it is behind a compose profile)",
+        )
+        return
+
     # Narrowed to the concrete target, not the protocol: this witness asserts
     # things only Superset has -- the vault reference it holds, the dataset it
     # created -- and a protocol-typed handle would hide a rename behind an
