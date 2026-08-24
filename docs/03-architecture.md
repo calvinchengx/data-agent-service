@@ -62,6 +62,21 @@ stripped from retrieved documents exactly as it is from warehouse columns.
 | Safe methods, declared parameters, item and body ceilings | `httpguard.py`, same process | the HTTP counterpart; an API call has no parse tree, so every property was translated rather than ported |
 | Who may see which rows | the data source itself, via the OBO token — **except where the engine has no identity**, see below | the database is the authority, not our code, wherever it can be |
 | Catalog reach and catalog writes | OpenMetadata's own policy on the bot matching the caller's role | the catalog decides what its bot may see and do; the executor only chooses which bot, by the role it resolved for the data path |
+| Model spend, per caller | APIM policy keyed on `X-DAS-Caller`, or the LLM gateway's own budgets | the caller is a keyed pseudonym, so the party that meters can cap and the party that bills cannot identify — [09-llm-governance](09-llm-governance.md) |
+
+### Where the model sits
+
+Exactly one place calls a model: `agent/agent.py`'s loop, through
+`agent/model.py`'s `ModelBackend`. **Neither executor imports one** — the
+guard, the access rules, the catalog bots and the OBO exchange all decide
+without it, which is why a wrong model is a wrong *answer* here and never a
+wrong permission.
+
+The backend is a WIRE PROTOCOL, not a vendor: `anthropic` or `openai`, chosen
+by `DAS_LLM_PROTOCOL`, so any gateway that speaks one of them is a base URL
+rather than an integration. What a protocol cannot do is declared, refused if
+this service cannot work without it, and otherwise recorded on every hop —
+[21-llm-backends](21-llm-backends.md).
 
 ## The engines that cannot be the authority
 

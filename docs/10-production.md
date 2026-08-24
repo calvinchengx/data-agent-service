@@ -129,6 +129,32 @@ Every value marked `<from deploy>` in `.env.prod.example` is an output above.
 `e2e/run.py` asserts that correspondence, so a value the runbook tells you to
 copy cannot quietly stop being produced.
 
+### The model, and the gateway if you use one
+
+```bash
+DAS_LLM_PROTOCOL=anthropic          # or openai — a PROTOCOL, not a vendor
+DAS_LLM_BASE_URL=                   # your gateway, or empty for the provider
+DAS_LLM_API_KEY=keyvault:das-llm-api-key
+DAS_MODEL=                          # whatever your gateway routes
+DAS_LLM_ACCEPT_DEGRADED=false
+DAS_LLM_CALLER_KEY_SECRET=keyvault:das-llm-caller-key
+```
+
+Three things this deployment will not do quietly, and each will stop it:
+
+* **an unlabelled caller.** Without `DAS_LLM_CALLER_KEY_SECRET` the agent
+  sends no caller at all and spend falls back to one bucket for the whole
+  deployment. `seed.apim` mints the key; if you supply your own, keep the
+  window (`DAS_LLM_CALLER_WINDOW`, default the calendar month) at least as
+  long as your budget period;
+* **a degraded protocol you did not ask for.** `openai` gives up prompt
+  caching, effort, server-side fallback and cache accounting, so it refuses
+  to start until `DAS_LLM_ACCEPT_DEGRADED=true` says you accept the cost;
+* **a model that cannot call tools.** Refused outright — every answer here is
+  produced by calling them.
+
+[21-llm-backends](21-llm-backends.md) is which gateway speaks what.
+
 ## 4. Seed the tenant
 
 ```bash

@@ -11,6 +11,9 @@ DAS_LLM_SUBSCRIPTION_KEY=keyvault:das-llm-subscription-key   # written by seed.a
 DAS_LLM_CALLER_KEY_SECRET=keyvault:das-llm-caller-key        # minted by seed.apim
 ```
 
+Which model, and which gateway, is [21-llm-backends](21-llm-backends.md).
+This page is about what it costs and who is charged.
+
 ## Who a call is for, and who may know
 
 An LLM gateway caps and bills per caller, so it needs a stable label per

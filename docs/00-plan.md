@@ -119,7 +119,7 @@ Agent workflow (prompt encodes the *workflow*, never a table name): find glossar
 | Endpoints | `DAS_APIM_BASE`, `DAS_OM_MCP_PATH`, `DAS_WAREHOUSE_MCP_PATH`, `DAS_FABRIC_API` | emulators | real hosts |
 | Sources | `DAS_SOURCES` = `[{name, kind=fabric|databricks|snowflake|postgres, dialect, authz_tier=user|service, om_service_fqn, conn…}]`; `DAS_SQL_AUDIENCE`, `DAS_SQL_MAX_ROWS`, `DAS_SQL_TIMEOUT_S`, `DAS_SQL_ALLOWED_SCHEMAS` | | |
 | Scope | `DAS_OM_SCOPE` (domain / service filter), `DAS_OM_CONTEXT_MODE=off|base|native` | | |
-| LLM | `ANTHROPIC_API_KEY`, `DAS_MODEL` | | |
+| LLM | `DAS_LLM_PROTOCOL` = `anthropic|openai`; `DAS_LLM_BASE_URL`, `DAS_LLM_API_KEY`, `DAS_MODEL`, `DAS_LLM_ACCEPT_DEGRADED`; `DAS_LLM_CALLER_KEY_SECRET`, `DAS_LLM_CALLER_WINDOW` | A gateway is a base URL, not an integration — see docs/21-llm-backends.md | Same, plus the gateway's own key |
 | Skills | `DAS_SKILLS` (list; default `om-grounded-sql,result-presentation` + per-source dialect) | | |
 | Promotion | `DAS_PROMOTE_ENABLED`, `DAS_PROMOTE_MIN_USERS=3`, `DAS_PROMOTE_MIN_RUNS=10`, `DAS_PROMOTE_WINDOW_DAYS=30`, `DAS_PROMOTE_ROLES` (who may see candidates) | | |
 | Publishing | `DAS_PUBLISH_ENABLED`, `DAS_PUBLISH_WORKSPACE_ID`, `DAS_PUBLISH_MODE=directlake|directquery` | | |

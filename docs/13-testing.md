@@ -8,6 +8,7 @@ that the catalog changed an answer.
 |---|---|---|
 | Unit | `make unit` | the code does what it says, with no stack running |
 | Contract | `make conformance` | both executors answer identically |
+| Model contract | `make conformance-models` | both model protocols behave identically — and `…-gateway` says the same through a real LLM gateway |
 | Witnesses | `make test` | the whole stack does it, against real emulators |
 | Evals | `make eval` | the agent gets the *right answer*, and the catalog is why |
 
