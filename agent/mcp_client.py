@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import ssl
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -45,21 +46,30 @@ class McpServer:
         self._id = 0
         self.session_id: str | None = None
         self.tools: list[dict] = []
+        # A turn's tool calls may run concurrently (see agent.ask), and two of
+        # the fields above are read-modify-write: the JSON-RPC id, and the
+        # session id the server hands back on first contact. Both are mutated
+        # briefly and never held across the HTTP call, so this lock costs
+        # nothing and removes the only shared state on the request path.
+        self._mu = threading.Lock()
 
     # ------------------------------------------------------------ transport --
     def _rpc(self, method: str, params: dict | None = None, *, notify: bool = False):
-        self._id += 1
+        with self._mu:
+            self._id += 1
+            call_id = self._id
+            session = self.session_id
         body = {"jsonrpc": "2.0", "method": method, "params": params or {}}
         if not notify:
-            body["id"] = self._id
+            body["id"] = call_id
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "Authorization": "Bearer " + self.token,
             **self.extra,
         }
-        if self.session_id:
-            headers["Mcp-Session-Id"] = self.session_id
+        if session:
+            headers["Mcp-Session-Id"] = session
         req = urllib.request.Request(
             self.url, data=json.dumps(body).encode(), headers=headers, method="POST"
         )
@@ -67,7 +77,8 @@ class McpServer:
             with urllib.request.urlopen(req, context=self._ssl, timeout=self.timeout) as r:
                 sid = r.headers.get("Mcp-Session-Id")
                 if sid:
-                    self.session_id = sid
+                    with self._mu:
+                        self.session_id = sid
                 raw = r.read().decode()
         except urllib.error.HTTPError as e:
             raise McpError(f"{self.name}: HTTP {e.code} {e.read().decode()[:300]}") from None

@@ -9,11 +9,14 @@ SQL and tables the evals score are recovered from what the executor reported.
 from __future__ import annotations
 
 import json
+import threading
+import time
 import types
 
 import pytest
 
 from agent import agent as agent_mod
+from agent import model as mdl
 
 
 class Block(types.SimpleNamespace):
@@ -211,3 +214,101 @@ def test_a_model_refusal_is_reported_not_raised(patched):
     answer = agent_mod.ask("something declined", "token", client=client)
     assert answer.stop_reason == "refusal"
     assert "declined" in answer.text
+
+
+# --------------------------------------------------------- tool fan-out --
+#
+# Several tool_use blocks in one turn are independent by construction: none of
+# them can read another's result, because the model has not seen any of them
+# yet. Running them one at a time makes a turn cost the sum of its calls when
+# it need only cost the slowest.
+
+
+class SlowToolbox:
+    """Records overlap, so a test can tell concurrency from a faster loop."""
+
+    def __init__(self, delay=0.15):
+        self.delay = delay
+        self.calls = []
+        self._live = 0
+        self.max_live = 0
+        self._mu = threading.Lock()
+
+    def connect(self):
+        return [{"name": "warehouse__describe_table", "description": "", "input_schema": {}}]
+
+    def call(self, name, arguments):
+        with self._mu:
+            self._live += 1
+            self.max_live = max(self.max_live, self._live)
+        try:
+            time.sleep(self.delay)
+            with self._mu:
+                self.calls.append(arguments["t"])
+            if arguments["t"] == "boom":
+                return "refused: you may not read that", True
+            return f"rows for {arguments['t']}", False
+        finally:
+            with self._mu:
+                self._live -= 1
+
+
+def _uses(*tables):
+    # mdl.ToolUse, not the API response block that `tool_use` above builds:
+    # _run_tool_calls receives what the model layer has already parsed.
+    return [
+        mdl.ToolUse(id=f"id{i}", name="warehouse__describe_table", arguments={"t": t})
+        for i, t in enumerate(tables)
+    ]
+
+
+def test_a_turns_tool_calls_actually_overlap():
+    box = SlowToolbox()
+    started = time.time()
+    out = agent_mod._run_tool_calls(box, _uses("a", "b", "c"))
+    elapsed = time.time() - started
+
+    assert box.max_live > 1, "the calls ran one at a time"
+    assert elapsed < box.delay * 3, f"{elapsed:.2f}s is the sequential cost"
+    assert len(out) == 3
+
+
+def test_results_keep_the_order_the_model_asked_for():
+    """Not the order they finished in.
+
+    The results are matched to tool_use ids downstream and the evals read a
+    run's SQL positionally, so a turn that reordered its answers would report
+    the wrong statement for the wrong call.
+    """
+
+    class Uneven(SlowToolbox):
+        def call(self, name, arguments):
+            time.sleep({"a": 0.20, "b": 0.01, "c": 0.10}[arguments["t"]])
+            return f"rows for {arguments['t']}", False
+
+    out = agent_mod._run_tool_calls(Uneven(), _uses("a", "b", "c"))
+    assert [c.arguments["t"] for c in out] == ["a", "b", "c"]
+    assert [c.result for c in out] == ["rows for a", "rows for b", "rows for c"]
+
+
+def test_one_refusal_does_not_cost_its_siblings_their_answers():
+    """A refusal is a RESULT the model must read, not an exception.
+
+    Under fan-out the risk is new: a raising call could take down the whole
+    turn, and the sibling that succeeded would lose an answer it had already
+    computed.
+    """
+    out = agent_mod._run_tool_calls(SlowToolbox(delay=0.01), _uses("ok1", "boom", "ok2"))
+    assert [c.is_error for c in out] == [False, True, False]
+    assert out[1].result.startswith("refused:")
+    assert out[0].result == "rows for ok1" and out[2].result == "rows for ok2"
+
+
+def test_concurrency_of_one_is_the_old_behaviour(monkeypatch):
+    """The setting exists so a latency measurement has a baseline to compare
+    against, and so a confusing run can be made sequential without a rebuild."""
+    monkeypatch.setattr(agent_mod, "TOOL_CONCURRENCY", 1)
+    box = SlowToolbox(delay=0.05)
+    out = agent_mod._run_tool_calls(box, _uses("a", "b", "c"))
+    assert box.max_live == 1
+    assert [c.arguments["t"] for c in out] == ["a", "b", "c"]

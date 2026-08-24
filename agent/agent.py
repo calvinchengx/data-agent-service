@@ -12,13 +12,14 @@ prompt (agent/prompt.md) describes the *method*, never the data.
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import dataclasses
 import json
 import os
 import pathlib
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import anthropic
@@ -576,16 +577,22 @@ def ask(
             account(turn, model_ms, [])
             return finish(turn.text, stop_reason)
 
+        # The model has already drawn the graph: several tool_use blocks in one
+        # turn are independent by construction, because none of them can read
+        # another's result -- the turn boundary is the only real edge. Running
+        # them one at a time makes the turn cost the SUM of its calls when it
+        # need only cost the slowest.
+        #
+        # Bounded, not unbounded: every call crosses the same gateway, which
+        # rate-limits. That is a hidden edge between calls that share no data,
+        # and unbounded fan-out converts a fast turn into a 429.
+        turn_calls = _run_tool_calls(toolbox, turn.tool_uses)
         results: list[mdl.ToolResult] = []
-        turn_calls: list[ToolCall] = []
-        for use in turn.tool_uses:
-            t0 = time.time()
-            text, is_error = toolbox.call(use.name, dict(use.arguments))
-            call = ToolCall(
-                use.name, dict(use.arguments), text, is_error, int((time.time() - t0) * 1000)
-            )
+        for use, call in zip(turn.tool_uses, turn_calls, strict=True):
             calls.append(call)
-            turn_calls.append(call)
+            # Reported in the order the model asked for, not the order they
+            # finished, so a transcript reads the same however the work was
+            # scheduled.
             if on_step:
                 on_step(_describe(call))
             if on_event:
@@ -601,11 +608,42 @@ def ask(
                 milestone = milestone_for(call)
                 if milestone:
                     on_event({"type": "milestone", **milestone})
-            results.append(mdl.ToolResult(use.id, use.name, text, is_error))
+            results.append(mdl.ToolResult(use.id, use.name, call.result, call.is_error))
         account(turn, model_ms, turn_calls)
         pending = results
 
     return finish("(gave up: too many steps without an answer)", "max_steps")
+
+
+# How many of a turn's tool calls may be in flight at once. One restores the
+# original sequential behaviour exactly, which is what a latency measurement
+# should compare against.
+TOOL_CONCURRENCY = max(1, int(os.environ.get("DAS_TOOL_CONCURRENCY", "4")))
+
+
+def _run_one_tool(toolbox: Toolbox, use: mdl.ToolUse) -> ToolCall:
+    t0 = time.time()
+    text, is_error = toolbox.call(use.name, dict(use.arguments))
+    return ToolCall(use.name, dict(use.arguments), text, is_error, int((time.time() - t0) * 1000))
+
+
+def _run_tool_calls(toolbox: Toolbox, uses: Sequence[mdl.ToolUse]) -> list[ToolCall]:
+    """Run a turn's tool calls, up to TOOL_CONCURRENCY at a time.
+
+    Returns them in the order the model ASKED for, whatever order they
+    finished in: results are matched to their tool_use ids downstream, and the
+    evals read the SQL a run issued positionally.
+
+    A failing call stays a result rather than an exception, exactly as before.
+    That is not defensive coding -- a refusal is something the model must read
+    and act on, and a sibling call must not lose its answer because another
+    one was denied.
+    """
+    if len(uses) < 2 or TOOL_CONCURRENCY == 1:
+        return [_run_one_tool(toolbox, use) for use in uses]
+    workers = min(TOOL_CONCURRENCY, len(uses))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(lambda use: _run_one_tool(toolbox, use), uses))
 
 
 def record_gap(answer: Answer, subject: str) -> None:
