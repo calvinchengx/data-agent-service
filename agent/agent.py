@@ -28,6 +28,7 @@ from agent import model as mdl
 from agent import skills as skills_mod
 from agent.mcp_client import McpServer, Toolbox
 from agent.models.anthropic import AnthropicBackend
+from agent.models.openai_chat import OpenAIChatBackend
 
 HERE = pathlib.Path(__file__).resolve().parent
 DEFAULT_MODEL = os.environ.get("DAS_MODEL", "claude-opus-5")
@@ -369,20 +370,50 @@ def build_toolbox(token: str, *, om: bool = True) -> Toolbox:
 ACCEPT_DEGRADED = os.environ.get("DAS_LLM_ACCEPT_DEGRADED", "").lower() in ("1", "true", "yes")
 
 
+PROTOCOL = "DAS_LLM_PROTOCOL"
+
+
 def backend_for(client: Any = None) -> mdl.ModelBackend:
     """The model backend this deployment is configured for.
 
-    One protocol today; `DAS_LLM_PROTOCOL` chooses between them once there is
-    more than one. `client` is an escape hatch for a caller that has already
-    built an SDK client -- the tests do, and so does anything that wants to
-    control retries or timeouts itself.
+    `DAS_LLM_PROTOCOL` names a WIRE PROTOCOL, not a gateway: the list of
+    gateways is open-ended and the list of protocols is short, so this is
+    where "works with any gateway" actually lives (docs/21-llm-backends.md).
+    `client` is an escape hatch for a caller holding an SDK client already --
+    the tests do, and so does anything wanting its own retries or timeouts.
     """
-    return AnthropicBackend(client or model_client(), headers=_gateway_headers())
+    protocol = os.environ.get(PROTOCOL, "anthropic").strip().lower() or "anthropic"
+    if protocol == "anthropic":
+        return AnthropicBackend(client or model_client(), headers=_gateway_headers())
+    if protocol in ("openai", "openai_chat", "chat_completions"):
+        return OpenAIChatBackend(client or openai_client(), headers=_gateway_headers())
+    raise mdl.Unsupported(
+        f"{PROTOCOL}={protocol!r} names no protocol this service speaks. "
+        "Built: anthropic, openai (docs/21-llm-backends.md)."
+    )
 
 
 def _gateway_headers() -> dict[str, str]:
     """Headers every model call carries, whatever the question."""
     return {}
+
+
+def openai_client() -> Any:
+    """The OpenAI-protocol client, pointed wherever the deployment says.
+
+    A base URL and a key is the whole of reaching TrueFoundry, a LiteLLM
+    proxy, Azure OpenAI, vLLM or anything else that speaks this protocol --
+    which is the point of having the protocol rather than one integration per
+    gateway. The key is a NAME in the settings file, resolved here with this
+    service's own managed identity.
+    """
+    import openai
+
+    import vaultref
+
+    base = os.environ.get("DAS_LLM_BASE_URL", "").strip()
+    key = vaultref.resolve(os.environ.get("DAS_LLM_API_KEY", "")) or "unset"
+    return openai.OpenAI(base_url=base or None, api_key=key)
 
 
 def model_client() -> Any:

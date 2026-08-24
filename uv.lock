@@ -490,7 +490,7 @@ wheels = [
 
 [[package]]
 name = "data-agent-service"
-version = "0.1.1"
+version = "0.2.0"
 source = { virtual = "." }
 dependencies = [
     { name = "anthropic" },
@@ -499,6 +499,7 @@ dependencies = [
     { name = "jsonschema" },
     { name = "mcp" },
     { name = "mssql-python" },
+    { name = "openai" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "sqlglot" },
@@ -523,6 +524,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "mcp", specifier = ">=2.0.0" },
     { name = "mssql-python", specifier = ">=0.9" },
+    { name = "openai", specifier = ">=2.9.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.4" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10.1" },
     { name = "sqlglot", specifier = ">=30.17.0" },
@@ -890,6 +892,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/6c/66/7c96d719dfe7e9dcbbbf7acb345c72dfaef392fa6c5042e2718dfb1779b4/mssql_python_odbc-18.6.2.1-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:3db256103b09156f0980bee2dedc47995f528f76d01388ab5c5f1758b7e8fc53", size = 3897877, upload-time = "2026-08-05T15:51:53.147Z" },
     { url = "https://files.pythonhosted.org/packages/bb/f6/e7725d5dc791f5535fa7ec750c2ab9a1ff731f923d01b9c0d5cf1779b676/mssql_python_odbc-18.6.2.1-py3-none-win_amd64.whl", hash = "sha256:07a987221f99b368161db912065ef9e64c85f6b0901a2b05e9c1e6b41da08d55", size = 3712266, upload-time = "2026-08-05T15:51:54.589Z" },
     { url = "https://files.pythonhosted.org/packages/ea/d8/cda7ae46dd3c723196043109204fcc7749d688194de834b3f8aa4cd94415/mssql_python_odbc-18.6.2.1-py3-none-win_arm64.whl", hash = "sha256:00e1eae3c44a157ca60f992c6305be45856f18276ccff5258c1e9619847f3a5a", size = 7017266, upload-time = "2026-08-05T15:51:56.958Z" },
+]
+
+[[package]]
+name = "openai"
+version = "3.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "httpx2" },
+    { name = "jiter" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7d/9c/ba0c292b4032ede74c249ca314ad64eb1bb5a03a843f6e01facb02f80cd8/openai-3.3.1.tar.gz", hash = "sha256:6f22807de1a976c932cecda620e8172a8c3fdbaeed29c7f21564e0c2410edf56", size = 1282113, upload-time = "2026-08-19T16:31:35.006Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6a/db/2b7a1b3de659bb82aef979116c74e809982b13e42c057759767552b5155f/openai-3.3.1-py3-none-any.whl", hash = "sha256:9652df7fdf8ee6f5bd58e0a12f2b1d414a18e0f06bb7a9a57c8643a5f5469bd3", size = 1690337, upload-time = "2026-08-19T16:31:32.812Z" },
 ]
 
 [[package]]

@@ -11,6 +11,11 @@ dependencies = [
   "jsonschema>=4.26.0",
   "mcp>=2.0.0",
   "mssql-python>=0.9",
+  # The client for the OpenAI chat-completions PROTOCOL, which is what every
+  # LLM gateway speaks. Not a gateway vendor's library: TrueFoundry, LiteLLM,
+  # Azure OpenAI, vLLM and the rest all document reaching them with this SDK,
+  # so it is the neutral choice rather than a bet on one of them.
+  "openai>=2.9.0",
   "psycopg[binary]>=3.3.4",
   "pyjwt[crypto]>=2.10.1",
   "sqlglot>=30.17.0",

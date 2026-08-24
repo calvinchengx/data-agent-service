@@ -7,7 +7,7 @@ is open-ended and growing, and the list of protocols is short and stable.
 | Protocol | `DAS_LLM_PROTOCOL` | Spoken by |
 |---|---|---|
 | Anthropic Messages, `POST /v1/messages` | `anthropic` | Anthropic direct · API Management passthrough · LiteLLM proxy · Bedrock and Vertex through the same SDK |
-| OpenAI chat completions | `openai` | *not built yet — see below* |
+| OpenAI chat completions | `openai` | TrueFoundry · LiteLLM proxy · Azure OpenAI · OpenRouter · vLLM · Ollama · most others |
 
 Choosing a gateway is three settings and no code:
 
@@ -70,9 +70,54 @@ Two consequences worth knowing:
   message has no such field, so that backend must say it in the content. It is
   a behaviour, not a detail, and the conformance suite is where it gets held.
 
+## What the OpenAI protocol costs you, measured
+
+Both backends declare what they can do, and the difference is not academic:
+
+```
+anthropic : tool_use prompt_caching cache_usage effort server_fallback refusal
+openai    : tool_use                                                   refusal
+```
+
+So **any deployment on the `openai` protocol must set
+`DAS_LLM_ACCEPT_DEGRADED=true`**. That is the design working, not a defect:
+the protocol has no cache breakpoints, and this backend will not promise a
+reasoning-effort control or cache accounting it cannot keep across whatever
+model a gateway routes to. Run against the stub, a hop then records exactly
+what was given up:
+
+```
+degraded: ('cache_usage', 'effort', 'prompt_caching', 'server_fallback')
+```
+
+`cache_usage` is the subtle one. OpenAI itself reports
+`prompt_tokens_details.cached_tokens`, and the backend **reads** that number
+whenever it is there — but it does not declare the capability, because behind
+a gateway the model is whatever was routed and whether it reports cached
+tokens is that model's business. Reporting the number when it is true and
+promising it never is the honest pair.
+
+## The refusal, which had to be translated rather than dropped
+
+The guard's `refused: only SELECT is allowed` must reach the model as
+something it READS and changes course on. Anthropic carries `is_error` on the
+tool result block. A `role: "tool"` message has no such field, so the OpenAI
+backend puts a marker in the content:
+
+```
+TOOL ERROR — this call did not succeed. Read it and change course.
+refused: only SELECT is allowed
+```
+
+Prose rather than a code, because the reader is a model: it has to be
+unmistakable mid-transcript and mean the same thing to a model that has never
+seen this service before.
+
 ## Not built yet
 
-The `openai` protocol, and the conformance suite that runs **both** backends
-against `services/llm-stub` — which already speaks both wire shapes with real
-usage objects and needs no credential, so it can run in CI. Until that exists,
-"protocol-agnostic" is a design and not a fact, and this page says so.
+The conformance suite that runs **both** backends against
+`services/llm-stub` — which already speaks both wire shapes with real usage
+objects and needs no credential, so it can run in CI. Each backend has its own
+tests and both have been driven by the real agent loop against the stub by
+hand; what is missing is the ONE suite that holds them to the same behaviour,
+which is what turns "protocol-agnostic" from a design into a fact.
