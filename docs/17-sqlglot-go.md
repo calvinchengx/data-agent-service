@@ -70,10 +70,16 @@ whole corpus. Its keyword, dialect, parser and function tables are all
 generated from the pinned reference rather than transcribed, and CI regenerates
 and diffs them.
 
-The parser reads **1,465 of sqlglot's 4,506 fixture statements** identically to
-the reference, with **zero divergences**: anything outside the grammar is
+The parser reads **2,181 of sqlglot's 4,506 fixture statements** identically to
+the reference and writes **2,080** of them back byte for byte, with **zero
+divergences and nothing written wrongly**: anything outside the grammar is
 refused, never guessed. That number understates what matters, because most of
 what it still cannot read is dialect exotica no data agent will emit.
+
+Per dialect: DuckDB 58.9%, neutral 47.4%, Databricks 40.8%, PostgreSQL 39.9%,
+T-SQL 38.8%. Every one of those was measured by the differential in CI, and
+every increment that moved them was green with `wrong` and `mismatched` at
+zero -- which is the only reason the numbers mean anything.
 
 So the port carries a **second measurement**, extracted read-only from this
 repository: the gold answers in `evals/usecases/*/questions.jsonl`, the
@@ -214,7 +220,8 @@ statement sqlglot pins for these four dialects in front of the port, and the
 port records why it refuses each one it cannot read:
 
 ```
-1,465 / 4,506 parsed identically   3,041 refused   0 divergent
+at the start of A1   1,465 / 4,506 parsed   3,041 refused   0 divergent
+now                  2,181 / 4,506 parsed   2,325 refused   0 divergent
 ```
 
 | cluster | refusals | share |
@@ -226,6 +233,24 @@ port records why it refuses each one it cannot read:
 | no-paren functions — `MAP`, `ANY`, `IF` | 47 | 1.5% |
 
 So the phases, in the order the numbers argue for:
+
+All of these are **done**, and what each actually cleared is recorded beside
+what it was expected to -- the two differ often enough to be worth keeping.
+
+| phase | what | expected | cleared |
+|---|---|---:|---:|
+| **A1** | Widen `probe_functions`: builders needing a dialect argument, and arguments the probe could not describe | ~901 | 155 |
+| **A2** | `COUNT(DISTINCT)`, arrays, subscripts, windows, `INTERVAL`, lambdas, JSON paths, arity-keyed specs, the `FROM`-syntax functions, struct literals, alias column lists, `FILTER` | ~781 | ~570 |
+| **B0** | Time formats -- `STRPTIME`, `STRFTIME`, `FORMAT` | 69 | 67 |
+| **B2** | Booleans by position, and the quantifier | ~20 | 18 |
+
+A1 came in far under its estimate for a reason worth remembering: roughly half
+of what it was meant to unlock turned out to be **unsafe to trust** rather than
+missing. A spec probed with placeholder columns is right for columns and
+quietly wrong for anything else, so the verification was tightened and the
+names stayed refused. Coverage went down in that commit on purpose.
+
+The original A1 line, for the record:
 
 | phase | what | clears |
 |---|---|---:|
@@ -321,8 +346,15 @@ non-DDL bucket, and it is tables rather than an algorithm, which is the idiom
 this port already runs on. So the sequence is:
 
 ```
-A1..A5 (done) -> B0 time formats -> B2 transforms -> [DuckDB oracle] -> B4 -> B1 -> B3 -> B5 -> B6
+A1..A5, B0, B2 (all done) -> [DuckDB oracle] -> B4 simplify -> B1 -> B3 -> B5 -> B6
 ```
+
+**Everything named is now closed.** What is left has no cluster in it: 81
+generator refusals spread across singletons, 48 subscripts that need
+`simplify`, 848 DDL/DML statements belonging to Target B, and the rest of
+sqlglot's dialect surface. The next structural step is the execution oracle,
+because B4 is the first phase that rewrites trees and no harness here can tell
+a wrong rewrite from a right one.
 
 The lesson is worth more than the re-ordering: a plan that names a dependency
 is still a guess until something counts it. Every other ordering call in this
@@ -440,8 +472,9 @@ writing them.
 | 1.5 — properties over what is ported | ~600 | done, in a day | **done** — six bugs |
 | differential harness (built first, used throughout) | ~800 | 3 days | **done** |
 | corpus harvest — sqlglot's whole dialect contract | ~40 | a day | **done** — 31 divergent trees |
-| 2 / Target A — full SELECT for four dialects | A1 is most of it | weeks; re-estimate after A1 | **now: the clusters are measured** |
-| 3 / Target B — the rest of sqlglot | ~30,000 | multi-quarter | after A, except B1/B2 which finish A |
+| 2 / Target A — full SELECT for four dialects | ~2,500 lines, mostly probes | **done** | measured, not guessed |
+| B0 / B2 — time formats, booleans, quantifier | ~600 | **done** | counted first, which reordered them |
+| 3 / Target B — the rest of sqlglot | ~30,000 | multi-quarter | **after the execution oracle** |
 
 Tier 1 first, with the harness before any parser code — so the first parser
 commit is already measured against the reference.
