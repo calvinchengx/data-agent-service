@@ -297,15 +297,36 @@ Go plus 18,461 generated. The optimizer alone is more than twice the port's
 hand-written size. Target B is multi-quarter work, and that is worth saying
 plainly before anyone plans around the name `sqlglot-go`.
 
-**B1 and B2 are not "after" Target A -- they are its last mile.** The generator
-refusals added while closing the harvest all wait on them: T-SQL has no boolean
-literal and needs the transform, a standalone `IF` is written three different
-ways per dialect, and `REGEXP_REPLACE` refuses precisely because its builder
-calls the type annotator. So the sequence is:
+**B1 was claimed here to be the last mile of Target A. Counting says it is
+not.** The claim came from noticing which refusals MENTION types -- the
+generator refuses a T-SQL boolean literal, `REGEXP_REPLACE` refuses because its
+builder calls the type annotator -- and reasoning from that rather than
+counting. With Target A closed, the two big parse-side buckets are:
 
 ```
-A1 -> A2 -> A3 -> A4 -> A5 -> B1 -> B2 -> [DuckDB oracle] -> B4 -> B3 -> B5 -> B6
+69  string argument   STRPTIME, STRFTIME, TO_TIMESTAMP
+48  subscript         DuckDB and PostgreSQL 0-based rewrite
 ```
+
+The first is time-FORMAT translation -- `sqlglot/time.py`, a set of per-dialect
+mapping tables -- and has nothing to do with the annotator. The second needs
+`simplify`, which is B4. The statements genuinely waiting on `annotate_types`
+number about two. The reference's own annotator fixture is recorded in
+`sqlglot-go` at `testdata/annotate.json` (71 cases, 28 of them in our dialects
+and needing no column resolved) so the gate exists whenever B1 comes; it should
+not come next.
+
+**B0 -- time formats** takes its place: 69 statements, the largest remaining
+non-DDL bucket, and it is tables rather than an algorithm, which is the idiom
+this port already runs on. So the sequence is:
+
+```
+A1..A5 (done) -> B0 time formats -> B2 transforms -> [DuckDB oracle] -> B4 -> B1 -> B3 -> B5 -> B6
+```
+
+The lesson is worth more than the re-ordering: a plan that names a dependency
+is still a guess until something counts it. Every other ordering call in this
+document came from a measurement, and this one did not.
 
 B4 is more tractable than its size suggests: `tests/fixtures/optimizer/` is
 15,426 lines across 23 files, **one per rule**. Port `simplify`, diff it against
