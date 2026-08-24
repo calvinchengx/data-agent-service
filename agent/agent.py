@@ -20,7 +20,7 @@ import os
 import pathlib
 import time
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, Protocol
 
 import anthropic
 
@@ -621,13 +621,28 @@ def ask(
 TOOL_CONCURRENCY = max(1, int(os.environ.get("DAS_TOOL_CONCURRENCY", "4")))
 
 
-def _run_one_tool(toolbox: Toolbox, use: mdl.ToolUse) -> ToolCall:
+class ToolCaller(Protocol):
+    """What running a tool call actually needs: something that can call one.
+
+    Narrower than Toolbox on purpose. The annotation used to say Toolbox,
+    which was true of every caller and false of every test double — and a
+    signature that forbids a legitimate argument is a signature that will be
+    worked around rather than read.
+    """
+
+    # Positional-only: an implementer is free to name these whatever reads
+    # best locally, and a protocol that insisted on the names would reject
+    # perfectly good callers for spelling.
+    def call(self, namespaced: str, arguments: dict, /) -> tuple[str, bool]: ...
+
+
+def _run_one_tool(toolbox: ToolCaller, use: mdl.ToolUse) -> ToolCall:
     t0 = time.time()
     text, is_error = toolbox.call(use.name, dict(use.arguments))
     return ToolCall(use.name, dict(use.arguments), text, is_error, int((time.time() - t0) * 1000))
 
 
-def _run_tool_calls(toolbox: Toolbox, uses: Sequence[mdl.ToolUse]) -> list[ToolCall]:
+def _run_tool_calls(toolbox: ToolCaller, uses: Sequence[mdl.ToolUse]) -> list[ToolCall]:
     """Run a turn's tool calls, up to TOOL_CONCURRENCY at a time.
 
     Returns them in the order the model ASKED for, whatever order they

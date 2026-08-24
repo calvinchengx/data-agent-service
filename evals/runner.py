@@ -17,6 +17,7 @@ a scorecard whose inputs are unknown cannot be compared with another one.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import contextlib
 import dataclasses
 import hashlib
@@ -26,7 +27,9 @@ import pathlib
 import statistics
 import subprocess
 import sys
+import threading
 import time
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from agent import agent as agent_mod
@@ -338,6 +341,23 @@ def evaluate(
     return s
 
 
+def map_jobs[T, R](jobs: Sequence[T], concurrency: int, fn: Callable[[T], R]) -> list[R]:
+    """Run `fn` over `jobs`, up to `concurrency` at a time, in job order.
+
+    Order is the point, not a nicety: the report pairs arms by question and
+    the ablation compares them positionally, so a run returning answers in
+    completion order would pair the wrong question with the wrong result.
+
+    Sequential at concurrency 1 -- the same code path a recorded run takes,
+    rather than a pool of one, so the default has no scheduler in it at all.
+    """
+    if concurrency > 1 and len(jobs) > 1:
+        workers = min(concurrency, len(jobs))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            return list(pool.map(fn, jobs))
+    return [fn(job) for job in jobs]
+
+
 def run(
     usecase: str,
     *,
@@ -351,6 +371,7 @@ def run(
     user: str,
     model: str,
     effort: str,
+    concurrency: int = 1,
 ) -> list[Result]:
     questions = load_questions(usecase, tier)
     # Arms must not inherit each other's prefetched schema. Two arms differing
@@ -359,70 +380,93 @@ def run(
     grounding.clear()
     os.environ["DAS_GROUNDING_PREFETCH"] = "true" if prefetch else "false"
     connections = GoldConnections()
-    results: list[Result] = []
-    for question in questions:
+
+    # Tokens first, sequentially. The cache in agent.identity is a plain dict:
+    # concurrent misses for one persona would not corrupt it, but they would
+    # sign in twice, and under the password grant that is real work charged to
+    # the run being measured. Resolving up front means the workers only read a
+    # warm cache.
+    for who in {q.get("persona") or user for q in questions}:
+        identity.token_for(who)
+
+    # The reference connections are shared and a database connection is not
+    # safe to use from two threads. Held for gold_rows and for evaluate's
+    # re-run of the agent's statement -- milliseconds each, beside a model
+    # call measured in tens of seconds, so serialising them costs nothing that
+    # matters.
+    db_mu = threading.Lock()
+    # One print per line, so concurrent workers cannot interleave halfway
+    # through a sentence.
+    out_mu = threading.Lock()
+
+    jobs = [(q, attempt) for q in questions for attempt in range(repeats)]
+
+    def run_one(job: tuple[dict, int]) -> Result:
+        question, attempt = job
         who = question.get("persona") or user
         token = identity.token_for(who)
-        conn = connections.for_question(question)
-        gold = gold_rows(question, conn)
-        for attempt in range(repeats):
-            label = f"{question['id']}" + (f" #{attempt + 1}" if repeats > 1 else "")
-            t0 = time.time()
-            if agent_kind == "gold":
-                answer = GoldAgent(token).ask(question)
-            elif agent_kind == "claude-code":
-                answer = claude_code_agent.ask(
-                    question["question"],
-                    token,
-                    om=om,
-                    catalog=catalog,
-                    naive=naive,
-                    prefetch=prefetch,
-                    model=model,
-                    effort=effort,
-                )
-            else:
-                answer = agent_mod.ask(
-                    question["question"], token, om=om, model=model, effort=effort
-                )
-            # An arm holds definitions only when the catalog is present AND
-            # its descriptions were not emptied.
-            s = evaluate(
-                question,
-                answer,
-                gold,
-                conn,
-                catalog_had_definitions=om and catalog == "full",
+        with db_mu:
+            conn = connections.for_question(question)
+            gold = gold_rows(question, conn)
+        label = f"{question['id']}" + (f" #{attempt + 1}" if repeats > 1 else "")
+        t0 = time.time()
+        if agent_kind == "gold":
+            answer = GoldAgent(token).ask(question)
+        elif agent_kind == "claude-code":
+            answer = claude_code_agent.ask(
+                question["question"],
+                token,
+                om=om,
+                catalog=catalog,
+                naive=naive,
+                prefetch=prefetch,
+                model=model,
+                effort=effort,
             )
-            result = Result(
-                question,
-                answer.text,
-                answer.sql,
-                sorted(answer.tables),
-                s,
-                len(answer.tool_calls),
-                answer.input_tokens,
-                answer.output_tokens,
-                answer.ms or int((time.time() - t0) * 1000),
-                answer.phase_ms() if hasattr(answer, "phase_ms") else {},
-                getattr(answer, "hops", 0),
-            )
-            results.append(result)
-            # Three outcomes, three labels. A decline printed as FAIL reads as
-            # a failure to anyone watching the run, however carefully the
-            # summary keeps it out of the denominator -- and the console is
-            # what a person actually reads.
-            if s.declined:
-                mark = "\033[33mskip\033[0m"
-            elif result.passed:
-                mark = "\033[32mpass\033[0m"
-            else:
-                mark = "\033[31mFAIL\033[0m"
+        else:
+            answer = agent_mod.ask(question["question"], token, om=om, model=model, effort=effort)
+        # An arm holds definitions only when the catalog is present AND
+        # its descriptions were not emptied.
+        s = evaluate(
+            question,
+            answer,
+            gold,
+            conn,
+            catalog_had_definitions=om and catalog == "full",
+        )
+        result = Result(
+            question,
+            answer.text,
+            answer.sql,
+            sorted(answer.tables),
+            s,
+            len(answer.tool_calls),
+            answer.input_tokens,
+            answer.output_tokens,
+            answer.ms or int((time.time() - t0) * 1000),
+            answer.phase_ms() if hasattr(answer, "phase_ms") else {},
+            getattr(answer, "hops", 0),
+        )
+        # Three outcomes, three labels. A decline printed as FAIL reads as
+        # a failure to anyone watching the run, however carefully the
+        # summary keeps it out of the denominator -- and the console is
+        # what a person actually reads.
+        if s.declined:
+            mark = "\033[33mskip\033[0m"
+        elif result.passed:
+            mark = "\033[32mpass\033[0m"
+        else:
+            mark = "\033[31mFAIL\033[0m"
+        with out_mu:
             print(
                 f"  {mark}  [{question['tier']}] {label}: {question['question'][:64]}"
                 + (f"  — {s.detail}" if s.detail and not result.passed else ""),
                 flush=True,
             )
+        return result
+
+    results = map_jobs(jobs, concurrency, run_one)
+
     connections.close()
     return results
 
@@ -492,7 +536,13 @@ def _phase_totals(results: list[Result]) -> dict[str, int]:
 
 
 def fingerprint(
-    usecase: str, model: str, effort: str, om: bool, agent_kind: str, prefetch: bool = False
+    usecase: str,
+    model: str,
+    effort: str,
+    om: bool,
+    agent_kind: str,
+    prefetch: bool = False,
+    concurrency: int = 1,
 ) -> dict:
     prompt = (pathlib.Path(agent_mod.HERE) / "prompt.md").read_bytes()
     # What THIS run read, not what the file says now.
@@ -514,6 +564,11 @@ def fingerprint(
         # which arm it is describing.
         "grounding_prefetch": prefetch,
         "prompt_sha256": hashlib.sha256(prompt).hexdigest()[:12],
+        # How the run was executed, not just what it ran. Questions sharing a
+        # rate-limited gateway are not as independent as they look, so a
+        # concurrent arm and a sequential one are not automatically comparable
+        # -- and a scorecard that does not say which it was cannot be checked.
+        "concurrency": concurrency,
         "questions_sha256": questions_sha,
         # The count too: two different sets can only be told apart by a hash if
         # someone compares hashes, and a differing count is legible at a glance.
@@ -603,6 +658,15 @@ def main() -> int:
         "catalog, same questions, same prompt file -- one fewer model turn per table",
     )
     ap.add_argument("--repeats", type=int, default=1)
+    ap.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="questions in flight at once. Default 1, deliberately: the "
+        "questions share one rate-limited gateway, so a concurrent run is a "
+        "different measurement, not the same one faster. Raise it for a quick "
+        "check; leave it at 1 for a number you intend to record.",
+    )
     ap.add_argument("--tier", default=None)
     ap.add_argument("--user", default=DEFAULT_USER)
     ap.add_argument("--model", default=agent_mod.DEFAULT_MODEL)
@@ -631,56 +695,89 @@ def main() -> int:
         _report_path(args).write_text(json.dumps(report, indent=1) + "\n")
 
     started_at = int(time.time())
-    for label, om, catalog, naive, prefetch in runs:
-        print(f"\n{label}")
-        results = run(
-            a.usecase,
-            agent_kind=a.agent,
-            om=om,
-            catalog=catalog,
-            naive=naive,
-            prefetch=prefetch,
-            repeats=a.repeats,
-            tier=a.tier,
-            user=a.user,
-            model=a.model,
-            effort=a.effort,
-        )
-        summary = summarise(results)
-        report["runs"][label] = {
-            "fingerprint": fingerprint(a.usecase, a.model, a.effort, om, a.agent, prefetch),
-            "summary": summary,
-            "results": [
-                {
-                    "id": r.question["id"],
-                    "tier": r.question["tier"],
-                    "passed": r.passed,
-                    "score": r.score.as_dict(),
-                    "sql": r.sql,
-                    "tables": r.tables,
-                    "answer": r.answer_text[:600],
-                    "tool_calls": r.tool_calls,
-                    "tokens_out": r.tokens_out,
-                    "ms": r.ms,
-                    "hops": r.hops,
-                    "phase_ms": r.phase_ms,
-                }
-                for r in results
-            ],
-        }
-        # Banked before the next arm starts, so a failure there costs one arm
-        # rather than every arm that already finished.
-        _save(a)
-        print(
-            f"  {summary['passed']}/{summary['n']} passed "
-            f"({summary['pass_rate']}%) · execution {summary['execution_accuracy']}% · "
-            f"grounding {summary['grounding']}% · semantics {summary['semantic_fidelity']}%"
-            + (
-                f" · attribution {summary['attribution_accuracy']}%"
-                if summary.get("attribution_accuracy") is not None
-                else ""
+
+    # The gateway's rate limit exists to be tested, and phase8 tests it. An
+    # eval measures whether the agent gets the answer right, so being throttled
+    # mid-run does not make the measurement stricter -- it makes it wrong, and
+    # the failure arrives as an McpError rather than a scored miss. The witness
+    # suite raises the limit for the same reason; this mirrors it, including
+    # putting it back.
+    #
+    # Concurrency makes this sharper rather than introducing it: `--concurrency
+    # 4` reaches the ceiling four times faster. Sequential runs hit it too --
+    # 18 questions of several calls each against 60 per minute.
+    #
+    # Best effort: a run against real Azure has no management access here, and
+    # should proceed rather than refuse to measure anything.
+    throttle = None
+    try:
+        from seed.apim import set_rate_limit
+
+        throttle = int(c.CFG.get("DAS_RATE_CALLS", "60"))
+        set_rate_limit(1_000_000)
+    except Exception as e:  # noqa: BLE001 — never fail a run over the limit
+        print(f"  (leaving the gateway rate limit as it is: {type(e).__name__})")
+        throttle = None
+
+    try:
+        for label, om, catalog, naive, prefetch in runs:
+            print(f"\n{label}")
+            results = run(
+                a.usecase,
+                agent_kind=a.agent,
+                om=om,
+                catalog=catalog,
+                naive=naive,
+                prefetch=prefetch,
+                repeats=a.repeats,
+                tier=a.tier,
+                user=a.user,
+                model=a.model,
+                effort=a.effort,
+                concurrency=a.concurrency,
             )
-        )
+            summary = summarise(results)
+            report["runs"][label] = {
+                "fingerprint": fingerprint(
+                    a.usecase, a.model, a.effort, om, a.agent, prefetch, a.concurrency
+                ),
+                "summary": summary,
+                "results": [
+                    {
+                        "id": r.question["id"],
+                        "tier": r.question["tier"],
+                        "passed": r.passed,
+                        "score": r.score.as_dict(),
+                        "sql": r.sql,
+                        "tables": r.tables,
+                        "answer": r.answer_text[:600],
+                        "tool_calls": r.tool_calls,
+                        "tokens_out": r.tokens_out,
+                        "ms": r.ms,
+                        "hops": r.hops,
+                        "phase_ms": r.phase_ms,
+                    }
+                    for r in results
+                ],
+            }
+            # Banked before the next arm starts, so a failure there costs one arm
+            # rather than every arm that already finished.
+            _save(a)
+            print(
+                f"  {summary['passed']}/{summary['n']} passed "
+                f"({summary['pass_rate']}%) · execution {summary['execution_accuracy']}% · "
+                f"grounding {summary['grounding']}% · semantics {summary['semantic_fidelity']}%"
+                + (
+                    f" · attribution {summary['attribution_accuracy']}%"
+                    if summary.get("attribution_accuracy") is not None
+                    else ""
+                )
+            )
+
+    finally:
+        if throttle is not None:
+            with contextlib.suppress(Exception):
+                set_rate_limit(throttle)
 
     if a.ablation and len(report["runs"]) >= 2:
         ordered = list(report["runs"])
