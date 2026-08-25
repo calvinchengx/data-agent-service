@@ -28,7 +28,7 @@ Consequences already applied: MCP OAuth discovery endpoints are served by our ow
 | 3 | **Accuracy evals by use case** | 5-tier eval suite per use case; execution accuracy, grounding, semantic fidelity, abstention, guardrail; **ablation** OM-context on/off | Phase 7 scorecard |
 | 4 | **Performance options: Go vs Python** | Two executor implementations behind one OpenAPI contract, one conformance suite, one k6 run | Phase 9 comparison table + ADR |
 | 5 | **Same setup in production** | `infra/terraform/`; `docs/10-production.md` runbook; `make test eval load ENV=prod` | parity.md column "witnessed on real Azure" |
-| 6 | **Per-user authorization** | Entra groups/app roles → APIM claims, OM roles/policies, Fabric SQL GRANT/RLS; OBO carries user identity to SQL | Persona evals (`alice` vs `bob`) |
+| 6 | **Per-user authorization** | Entra groups/app roles → APIM claims, OM roles/policies, Fabric SQL GRANT/RLS; OBO carries user identity to SQL. A second axis: *which application* may hold that user's token (`DAS_ALLOWED_CLIENT_IDS` vs `azp`), because a valid token says who signed in and not what software is holding it | Persona evals (`alice` vs `bob`); phase6 registers a second application and refuses its genuine token |
 | 7 | **Client-agnostic MCP** | Streamable HTTP + MCP OAuth discovery (RFC 9728/8414 + DCR) at APIM; no vendor fields | Client matrix: Claude, ChatGPT, Cursor, VS Code, reference SDKs |
 
 ---
@@ -157,6 +157,31 @@ Generalization rule: **the only Contoso-specific code is under `seed/` and `eval
 
 Per-user authorization source of truth = Entra groups / app roles (seeded personas: `analyst`, `finance`, `admin`, `reader-only`). Consumed by: APIM required-claims + rate tiers; OM role-mapped bots (D8) → OM policies (domain/tag based); SQL `GRANT`/RLS/masks. Persona evals prove it. Caveat: fabric-emulator TDS may not map `sub` to a SQL principal — row becomes "witnessed in prod only".
 
+### Which application, which device, which account
+
+Every hop above answers **who**. None of them answers **what software is
+holding the token**, and the question an enterprise reviewer actually asks —
+*can someone sign in from a personal AI subscription with their corporate
+account?* — needs three controls acting on three different things:
+
+| | Decides | Where it runs | Closes |
+|---|---|---|---|
+| Layer 1 | which **application** may hold the token (`azp` vs `DAS_ALLOWED_CLIENT_IDS`) | **this service**, in both executors, after signature validation | an unapproved client on a managed device |
+| Layer 2 | which **device** may obtain one | Entra Conditional Access, on a flag Intune writes | any client on an unmanaged device |
+| Layer 3 | which **account** may sign in at all | tenant restrictions, managed browser policy, CASB | an approved client under a personal vendor account |
+
+**No two are redundant** — each is the only thing closing one case — and only
+layer 1 is in this repository. It **fails open** when unset, which is
+deliberate and is the wrong default to reach by forgetting.
+
+What none of them closes: a person reading an answer and pasting it elsewhere.
+Prevention stops at the screen; past it the levers are the column denials and
+row ceilings that reduce what is on screen, and the `client` on every audit
+line that makes the question answerable afterwards.
+
+Drawn, with the matrix of which layer closes which case, in
+[authorization](05-authorization.md#three-gates-and-the-moment-each-one-fires).
+
 ---
 
 ## 9. Client-agnostic MCP
@@ -204,7 +229,7 @@ Emulator numbers are relative (laptop SQL Server sidecar), not Fabric capacity �
 | 3 Identity spike | C6 credential path | MI token; FIC-backed OBO → `database.windows.net` with `sub=alice`; TDS login; fallback documented | 0 |
 | 4 Executor (Python) | C6, C8, APIM REST→MCP | `tools/list` = 3 tools; guard rejects; multi-warehouse routing; 401 without token | 1, 3 |
 | 5 OM via gateway | C5 passthrough + role bots + rate limit | user token works; foreign issuer 401; 429 on limit | 2 |
-| 6 Authz | C4 + persona seeds | alice/bob get different rows/denials at APIM, OM, SQL | 4, 5 |
+| 6 Authz | C4 + persona seeds + `DAS_ALLOWED_CLIENT_IDS` | alice/bob get different rows/denials at APIM, OM, SQL; a SECOND registered application is refused while serving the same person through the approved one — a real sign-in, not a forged token | 4, 5 |
 | 7 Agent + evals | C9, C10 | `make eval` scorecard meets targets; ablation delta on L3 | 6 |
 | 8 Load | C11 | `make load` gates pass; APIM-tax report | 7 |
 | 9 Go executor | C7 + conformance + k6 rerun | conformance green; comparison table; ADR | 8 |
@@ -259,7 +284,8 @@ data-agent-service/
   infra/terraform/  versions variables identity main outputs
   e2e/              run.py clients/
   docs/             00-plan.md 01-quickstart … 07-evaluation 08-load-testing 10-production parity.md witnesses.json adr/
-  scripts/          doctor.sh status.sh
+  docs/img/         src/<name>.svg authored; <name>-{light,dark}.svg generated — see scripts/build_diagrams.py
+  scripts/          doctor.sh status.sh build_diagrams.py
 ```
 
 ---
@@ -276,6 +302,8 @@ data-agent-service/
 | Go guard fidelity | medium | conservative guard; conformance suite shared with Python |
 | Emulator load numbers not Fabric-representative | certain | relative only; prod rerun |
 | Report rendering cannot be witnessed locally | certain | emulator persists definition only; visual correctness witnessed in prod; DAX==SQL check is the local proxy |
+| An **approved** client driven from a personal AI subscription | medium | Not closable here: the token is genuine and the destination account is not in it. Layers 2 and 3 (§8) close it and both live in the tenant. Whether it is live at all depends on whether that product can present a client id an administrator registered — empirical, and `client` on every audit line is where the answer shows up |
+| An OAuth proxy adding DCR in front of Entra | low | Would restore self-registration and make `DAS_ALLOWED_CLIENT_IDS` only as strong as what the proxy admits. Closing the MCP connection gap and keeping this control are the same decision, taken twice |
 
 ---
 
