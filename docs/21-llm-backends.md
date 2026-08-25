@@ -22,6 +22,43 @@ DAS_MODEL=<whatever your gateway routes>
 it was configured with, not the vendor's model id. That is configuration, and
 it is the one thing every new deployment gets wrong once.
 
+## Where the gateway sits
+
+On a **different axis from API Management**, and never on the way to data.
+
+```
+                     ┌─ model protocol ─────────► LLM GATEWAY ──────► model
+                     │  DAS_LLM_PROTOCOL          LiteLLM · TrueFoundry
+  person ─► OUR ─────┤  DAS_LLM_BASE_URL          APIM · Bedrock · direct
+            agent    │
+                     └─ MCP, the user's bearer ─► APIM ─► executor ─► guard ─► OBO ─► sources
+
+
+  person ─► Claude ── its own model path, not this deployment's ──► (its vendor)
+            Desktop │
+                    └─ MCP, the user's bearer ─► APIM ─► executor ─► guard ─► OBO ─► sources
+```
+
+Two things follow, and both are easy to get backwards.
+
+**The LLM gateway is a property of the CLIENT, not of the service.** Exactly
+one place constructs a model backend — `agent/agent.py` — and neither executor
+imports one at all. So `DAS_LLM_*` governs *this project's own agent*: the ask
+service, and `make eval`. When the MCP client is Claude Desktop, Cursor or
+anything else, that client's vendor runs the model and these settings are
+irrelevant to it. The data path is byte-identical either way, which is what
+makes "client-agnostic" true rather than aspirational.
+
+**Two gateways, two independent choices.** API Management is the gateway in
+front of the *data*; the LLM gateway is in front of the *model*. APIM happens
+to be a candidate for both — `seed/apim.py` publishes an `llm` API with
+`llm-token-limit` and `llm-emit-token-metric` over `/llm/anthropic/v1/messages`
+and `/llm/openai/v1/chat/completions`, and `e2e.run` phase12 witnesses 429
+after quota on both routes. Using it for one, the other, both or neither are
+four supportable deployments. See [09-llm-governance](09-llm-governance.md) for
+what a gateway can count, and [03-architecture](03-architecture.md#where-the-model-sits)
+for why a wrong model here is a wrong *answer* and never a wrong permission.
+
 ## What a backend must do, and what it may do without
 
 Being able to reach any gateway is worth something. Pretending every gateway

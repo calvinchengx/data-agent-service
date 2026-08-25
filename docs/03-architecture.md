@@ -78,6 +78,14 @@ rather than an integration. What a protocol cannot do is declared, refused if
 this service cannot work without it, and otherwise recorded on every hop —
 [21-llm-backends](21-llm-backends.md).
 
+Which means the LLM gateway is a property of the **client**, on an axis that
+never crosses the data path. `DAS_LLM_*` governs this project's own agent — the
+ask service and `make eval`. A person using Claude Desktop or Cursor brings
+their vendor's model, those settings do not apply to them, and everything from
+the gateway rightwards is unchanged. That is what makes client-agnostic a fact
+rather than a hope: the guard, the access rules and the OBO exchange are the
+same whoever chose the model.
+
 ## The engines that cannot be the authority
 
 The row above is the load-bearing one, and there is a class of source where it
@@ -122,6 +130,20 @@ a fourth SQL dialect at almost no cost.
 
 The executor holds no secret in its environment: its managed identity reads
 what it needs from Key Vault.
+
+**The token is a login credential, not a connection string.** For Fabric,
+Azure SQL and Synapse it reaches the driver as an attribute rather than in the
+DSN — `SQL_COPT_SS_ACCESS_TOKEN` (1256), a four-byte little-endian length
+followed by the token in UTF-16-LE, which is the documented way to hand a
+federated token to a SQL Server driver. The Go executor does the same through
+`mssql.NewAccessTokenConnector`, which is why that image needs no ODBC driver,
+no unixODBC and no Kerberos libraries.
+
+**Connection pools are keyed by `(source, token)`, not by source.** This is a
+security property rather than a tuning choice: a pool shared across users would
+run one person's query on another person's connection, which is the thing this
+service exists to prevent. The count is bounded — a token lives about an hour,
+and without a limit an hour of distinct callers would be an hour of pools.
 
 
 ## Two executors

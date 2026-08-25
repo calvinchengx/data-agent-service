@@ -214,7 +214,12 @@ footer a{text-decoration:none}
     <p class="lede">Standard protocols end to end — MCP, OAuth 2.0 on-behalf-of, managed identity,
       TDS. No component knows whether it is talking to an emulator or to Azure.</p>
     <figure>
-      <svg viewBox="0 0 940 400" width="100%" role="img" aria-label="Architecture: an MCP client authenticates with Entra, calls the APIM gateway, which routes to the executor; the executor retrieves semantics from OpenMetadata, applies a SQL guard, exchanges the user token on-behalf-of, and queries the data sources.">
+      <svg viewBox="0 0 940 400" width="100%" role="img" aria-label="Architecture: an MCP client calls the APIM gateway, which validates the token against Entra and routes to the executor. The executor retrieves semantics from OpenMetadata, applies a SQL guard, exchanges the user token with Entra on-behalf-of, and queries the data sources under that user. Separately, when the client is this project's own agent, its model calls go through whichever LLM gateway is configured — LiteLLM, TrueFoundry, API Management or the vendor directly — on a path that never touches the data.">
+        <rect class="bx" x="8" y="20" width="140" height="66" rx="10"/>
+        <text class="lbl" x="78" y="44" text-anchor="middle">LLM gateway</text>
+        <text class="sub" x="78" y="62" text-anchor="middle">LiteLLM · TrueFoundry</text>
+        <text class="sub" x="78" y="76" text-anchor="middle">APIM · direct</text>
+
         <rect class="bx" x="8" y="150" width="140" height="72" rx="10"/>
         <text class="lbl" x="78" y="180" text-anchor="middle">MCP client</text>
         <text class="sub" x="78" y="199" text-anchor="middle">Claude · Cursor</text>
@@ -260,6 +265,16 @@ footer a{text-decoration:none}
         <path class="ar" d="M336 186 H378" marker-end="url(#a)"/>
         <path class="ar" d="M466 132 V92" marker-end="url(#a)"/>
         <path class="ar" d="M266 150 V92" marker-end="url(#a)"/>
+        <text class="sub" x="272" y="126">validate-jwt</text>
+        <!-- The OBO exchange had no line: the executor listed it and the drawing
+             never showed the user's identity reaching the data plane. -->
+        <path class="ar" d="M400 132 V112 H306 V92" marker-end="url(#a)"/>
+        <text class="sub" x="312" y="108">on-behalf-of</text>
+        <!-- Dashed: the model path exists only when the client is OUR agent.
+             With Claude Desktop or Cursor the model is theirs, and everything
+             to the right of the client is unchanged. -->
+        <path class="ar" d="M78 150 V92" marker-end="url(#a)" stroke-dasharray="5 4"/>
+        <text class="sub" x="84" y="126">model calls</text>
         <path class="ar" d="M548 172 H594" marker-end="url(#a)"/>
         <path class="ar" d="M548 186 H570 V92 H594" marker-end="url(#a)"/>
         <path class="ar" d="M548 200 H570 V242 H594" marker-end="url(#a)"/>
@@ -268,7 +283,10 @@ footer a{text-decoration:none}
           <path d="M0 0 L10 5 L0 10 z" fill="currentColor" style="color:var(--diagram-line)"/></marker></defs>
       </svg>
       <figcaption>The gateway carries policy. The executor carries the guard, the catalog lookup and
-        the identity exchange. Adding a source is configuration, not a fork.</figcaption>
+        the identity exchange. Adding a source is configuration, not a fork. The dashed hop is the
+        model path — a different axis, and never on the way to data: with this project's own agent it
+        runs through whichever gateway you configure, and with Claude Desktop or Cursor it is theirs.
+        Neither executor imports a model at all.</figcaption>
     </figure>
   </div>
 </section>
