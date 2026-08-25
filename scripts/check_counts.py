@@ -33,8 +33,10 @@ of. Scope shows up adjacent to the number and nowhere else -- `phase 18
 witnesses` before it, `23 witnesses across ...` and `10 witnesses · ...`
 after it -- so those are excluded and everything else must equal the manifest.
 That rule is predictable, which is the requirement: scope it, or it is the
-total. `--self-test` asserts both halves, because a checker that cannot be
-shown to fail is indistinguishable from one that does not run.
+total. `self_test()` asserts both halves and runs on EVERY invocation, not
+behind a flag: a checker that cannot be shown to fail is indistinguishable
+from one that does not run, and a proof that only runs when someone remembers
+to ask for it is the same hole one level up.
 """
 
 from __future__ import annotations
@@ -129,7 +131,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--fix", action="store_true", help="rewrite the totals instead of failing")
     ap.add_argument(
-        "--self-test", action="store_true", help="prove the scoped/total rule, then exit"
+        "--self-test",
+        action="store_true",
+        help="run only the scoped/total proof (it runs on every invocation anyway)",
     )
     args = ap.parse_args()
 
@@ -138,8 +142,15 @@ def main() -> int:
         return 1
     total = int(json.loads(MANIFEST.read_text())["total"])
 
+    # Unconditional, and before the real check: the scoped/total rule is only
+    # worth anything if it can still be shown to fail, and a proof that runs
+    # only when someone passes a flag is a proof that stops running. It is
+    # pure string matching, so it costs nothing. --self-test is the same thing
+    # on its own, for when that is what you want to read.
+    if self_test(total) != 0:
+        return 1
     if args.self_test:
-        return self_test(total)
+        return 0
 
     files: list[pathlib.Path] = []
     for pattern in TARGETS:

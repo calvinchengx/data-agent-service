@@ -103,11 +103,6 @@ jobs:
         run: uv run python -m scripts.check_annotations
       # docs/witnesses.json exists so one number has one source. It did not
       # stop the number being copied into prose, where four copies drifted.
-      # Order matters: the self-test proves the scoped/total rule can still
-      # fail before the real check is trusted to say it passed.
-      - name: the witness-count rule holds both ways
-        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
-        run: uv run python -m scripts.check_counts --self-test
       - name: witness totals in prose match the manifest
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: uv run python -m scripts.check_counts
