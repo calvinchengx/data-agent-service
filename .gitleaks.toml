@@ -61,3 +61,26 @@ paths = [
   '''^website/dist/''',
   '''^_site/''',
 ]
+
+# A DOCUMENT SLUG, captured as a secret. gitleaks' generic-api-key rule reads
+# `auth` (in "an authz tier") as a keyword and takes the next quoted string as
+# the value — which in website/scripts/sync-docs.ts is the next entry's key,
+# `07-evaluation`. Entropy 3.55, and a filename.
+#
+# Keyed on the VALUE and anchored, like the goldens above and for the same
+# reason: a path entry would disarm the whole file, and that file is where a
+# real key would most plausibly be pasted. `\d\d-lowercase-with-hyphens` is a
+# document in docs/, not a credential shape — nothing that could authenticate
+# to anything matches it.
+#
+# Rewording the prose fixed the working tree but not the history, which is
+# permanent and shared; this is what makes `gitleaks git .` pass without
+# rewriting a branch five sessions are committing to.
+#
+# Canary: with this entry in place, an `sk_live_...` string added to that same
+# file still fires. Verified, both ways.
+[[allowlists]]
+description = "Document slugs in the docs-site generator, not credentials"
+regexes = [
+  '''^\d{2}-[a-z][a-z-]*$''',
+]
