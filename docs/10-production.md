@@ -252,6 +252,25 @@ confirming rather than assuming:
   secret is never read. `az containerapp logs show` will say which credential
   the executor used.
 
+One thing behaves *worse* if you leave it blank, and it does so silently:
+
+* **`DAS_ALLOWED_CLIENT_IDS`.** This is the only control in this service over
+  **which application** may hold a user's token — the difference between the
+  approved connector and a personal AI subscription that a person signed into
+  with their corporate account. It **fails open**: unset, every application the
+  tenant issues a token to is accepted, and nothing logs that the check did not
+  run. That default is deliberate and right only when the tenant's own consent
+  settings are already the control; it is the wrong default to arrive at by
+  forgetting. `.env.prod.example` carries a placeholder rather than a value for
+  the same reason.
+
+  `make test ENV=prod` asserts the list is present and that the agent's own
+  client is on it, so the witnesses will tell you — which is a reason to run
+  them rather than a reason not to check now. See
+  [Authorization](05-authorization.md#how-each-gate-works) for what this layer
+  does and does not close, and for the two controls outside this service that
+  close the cases it cannot.
+
 ## 6. What to watch
 
 | Signal | Where | Why |
@@ -260,6 +279,7 @@ confirming rather than assuming:
 | Gateway 429s | APIM diagnostics | your rate limit doing its job, or too tight |
 | OBO failures | executor logs, `on-behalf-of exchange failed` | a federated credential that stopped matching |
 | `role lookup failed` | executor logs | the directory would not answer — authorization is failing closed, which is safe but silently narrowing |
+| `verdict=denied` with a `client` you do not recognise | Log Analytics | an application nobody approved is holding valid tokens for your users. This is also how you find out whether a personal subscription can reach you at all — see [Authorization](05-authorization.md#before-deploying-layer-3-find-out-whether-the-gap-is-live) |
 
 ## Cost, roughly
 

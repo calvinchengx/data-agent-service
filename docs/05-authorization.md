@@ -270,28 +270,204 @@ from a personal subscription**: if the organisation has registered a connector
 app for legitimate use, that client id can be configured into a personal
 subscription, and the `azp` will then be the approved one.
 
-Nothing readable in the token separates those two cases. What separates them:
+Nothing readable in the token separates those two cases. The token is genuine,
+every claim is correct, and the thing that actually differs — the *destination
+account* — appears nowhere in it. **No amount of token validation closes this.**
+That is not a gap in this service so much as a statement about what a token is,
+and it is why the rest of this section is mostly about controls that live
+somewhere else.
 
-| Control | What it decides |
+## Three gates, and the moment each one fires
+
+The controls that matter are not alternatives to one another. They act on three
+different things — the account, the device, the application — at three
+different moments, and only the last of them is in this repository.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/authz-three-gates-dark.svg">
+  <img alt="Three gates in series. Layer 3 runs on the network, browser or identity provider and decides which account may sign in; it cannot see the device or the application. Layer 2 is Entra Conditional Access with Intune and decides which device may obtain a token; it cannot see which application or vendor account is driving. Layer 1 is DAS_ALLOWED_CLIENT_IDS in this service and decides which application may hold the token; it cannot see which account inside that application." src="img/authz-three-gates-light.svg">
+</picture>
+
+Layer 2 stops a token **existing**. Layer 1 stops a token **being used**. Layer
+3 stops the sign-in **starting**.
+
+## Which gate closes which case
+
+Each layer is the only thing standing between a deployment and one specific
+case. Read the columns: every row that is blocked at all is blocked by exactly
+one of them.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/authz-coverage-dark.svg">
+  <img alt="Coverage matrix. Personal device with an unapproved client is blocked by layer 2 and layer 1. Personal device with an approved client is blocked by layer 2 alone. Corporate device with an unapproved client is blocked by layer 1 alone. Corporate device with an approved client under a personal vendor account is blocked by layer 3 alone. Corporate device, approved client, corporate account is served. With DAS_ALLOWED_CLIENT_IDS unset the layer 1 column empties and two rows lose their only block." src="img/authz-coverage-light.svg">
+</picture>
+
+**No two layers are redundant**, which is the useful thing the matrix shows:
+drop any one and exactly one case reopens with nothing else covering it. The
+last row is not a gap — it is the service working.
+
+So which layers to deploy is a threat-model decision rather than a checklist:
+
+| If the concern is | Deploy |
 |---|---|
-| `DAS_ALLOWED_CLIENT_IDS` | which application may hold a token |
-| Conditional Access + Intune | which **device** may obtain one — an unmanaged personal machine never does |
-| Admin consent; user consent disabled | which applications exist in the tenant at all |
-| Enterprise AI tenancy | makes the vendor account the corporate account, administered by the organisation |
-| Column denials, row ceilings (this service) | how much is on screen to leak in the first place |
-| `client` on every audit line | which application asked, not only who |
+| Unapproved software reaching the service | Layer 1 alone |
+| …and BYOD or home machines | Layers 1 + 2 |
+| …and corporate data landing in a personal AI account | Layers 1 + 2 + 3 |
 
-### The honest limit
+## How each gate works
 
-There is no foolproof technical control against egress by an authorised user.
-If a person can see the data they can retype it, photograph it, or remember it.
-Every control above is friction and detection. The nearest thing to a real
-answer is architectural rather than a control: run the model inside the
-organisation's own trust boundary, so the destination is its tenant under its
-contract. Then the question stops being how to stop data leaving and becomes
-that it did not leave.
+### Layer 1 — `DAS_ALLOWED_CLIENT_IDS` (this service)
 
-### Witnessed, not asserted
+When Entra issues an access token it stamps the requesting application's
+`client_id` into it as `azp` (v2.0) or `appid` (v1.0). The executor reads that
+claim off the already-verified token and compares it to the configured list.
+
+It runs in the **executor**, not only at the gateway, and *after* signature
+validation — so it judges a token already proved genuine, at the layer that
+cannot be bypassed by reaching the service directly. Both executors enforce it,
+which matters because the quick start defaults to Go. The refusal is audited
+with `client` and `verdict=denied`, because "which application asked" is the
+question an administrator will actually have.
+
+Why it is enforceable rather than advisory is the DCR argument above: no
+application in the tenant registered itself, so a list of permitted ones is
+worth enforcing.
+
+**It fails open.** `if len(allowedClients) > 0 && …` — an unset variable is no
+check at all. That is deliberate, and stated where it is configured in
+`.env.prod.example`: empty is right only when the tenant's own consent settings
+are already the control. `e2e.run` phase6 asserts the list is both present and
+non-vacuous, so a deployment that runs the witnesses is told which it has.
+
+### Layer 2 — Conditional Access + Intune device compliance
+
+This runs **before a token exists**. After Entra authenticates the person but
+before it issues the authorization code, Conditional Access evaluates policy
+against the user, the target application, device state, location and risk. If a
+policy requires a compliant device and the signal is absent or false, no token
+is issued and this service never sees a request at all.
+
+Two systems, and it is worth knowing which does what: **Intune decides**
+compliance — OS version, disk encryption, jailbreak state — and writes a flag;
+**Entra enforces** it. Where the device signal comes from is what determines
+whether the control works:
+
+| Platform | What carries device state |
+|---|---|
+| Windows | Primary Refresh Token — a device-bound credential from Entra or Hybrid join |
+| macOS / iOS / Android | A broker app (Company Portal, Authenticator) presenting a device certificate |
+| Browser | The browser must surface the device claim — Edge natively, Chrome via the Windows Accounts extension |
+
+An unmanaged machine has no PRT, no broker and no device certificate, so the
+claim is simply absent — and absent evaluates the same as non-compliant.
+
+**Its limit is its definition.** It evaluates the *device*. A corporate laptop
+is compliant no matter which application or which vendor account is driving it,
+which is exactly why it cannot reach the third or fourth row of the matrix.
+
+On **mobile**, Intune app protection policies go further than a device gate —
+blocking copy-paste out of managed applications, blocking save-to-personal-
+storage, requiring an app PIN. On a full desktop the equivalents are much
+weaker, and assuming desktop parity is a mistake worth not making.
+
+### Layer 3 — tenant restrictions, managed browser, CASB
+
+Three mechanisms rather than one, and the weakest and most vendor-dependent of
+the three layers. Which applies depends on how the personal account signs in.
+
+**Tenant Restrictions v2.** A corporate proxy, or the device itself under
+policy, injects headers into requests to Microsoft login endpoints:
+
+```
+Restrict-Access-To-Tenants: <tenants you permit>
+Restrict-Access-Context:    <your tenant id>
+```
+
+Microsoft's login service honours them and refuses to authenticate to any
+tenant not listed, consumer Microsoft accounts included.
+
+> **The scope limit that decides whether this helps at all.** Tenant
+> restrictions govern authentication *to Microsoft's login endpoints*. They
+> stop someone signing into another Entra tenant or a consumer Microsoft
+> account. They do **not** govern a third-party product's own account system:
+> if the personal AI subscription is reached with a vendor-native login or a
+> Google sign-in, this mechanism never sees it.
+
+**Managed browser profile policy.** Browser policies pushed by Intune or GPO —
+restricting which accounts may sign into the profile, forcing enrollment,
+disabling secondary profiles. The browser itself refuses the account. Its limit
+is that a second browser or a different machine sidesteps it, which is why
+layer 2 is its partner rather than its alternative.
+
+**CASB or egress filtering.** Distinguish the enterprise instance of a product
+from the consumer one and block the latter. It holds only on-network or behind
+an always-on agent, and it is a standing contest with certificate pinning and
+DNS-over-HTTPS.
+
+### Not a gate — enterprise AI tenancy
+
+An enterprise agreement federates the vendor account to the directory (SSO,
+usually with SCIM provisioning) and brings administrative audit logs, retention
+and training settings, and a data-processing agreement.
+
+It is worth having and it is **not a control**. Buying it does not stop a
+personal account existing alongside it, and not buying it is not what leaves
+the fourth row open — blocking that is layer 3's job. Its role is different and
+still real: without a sanctioned path, the other three layers produce
+workarounds rather than compliance.
+
+## Before deploying layer 3, find out whether the gap is live
+
+Layer 3 costs the most to deploy, and it may already be closed for you by the
+same property that makes layer 1 enforceable.
+
+**Can a personal subscription actually obtain a token under the approved
+connector's client id?**
+
+* If the personal product would present *the same* client id the tenant
+  registered, the fourth row is live and layer 3 is what closes it.
+* If it would need an application of its own, a non-administrator **cannot
+  create one** — Entra has no DCR — and the fourth row is already closed
+  without layer 3 at all.
+
+This is empirical and cheap to settle: sign in to a personal subscription, try
+to add this server, and read what reaches the audit line. Every line records
+`client`, so the evidence arrives somewhere already being read. Test it rather
+than infer it — the answer depends on the tenant's app registrations and on the
+vendor's connector behaviour, neither of which this document can know.
+
+**One deployment decision reopens it regardless.** The common workaround for
+MCP's DCR expectation is an OAuth proxy adding registration in front of Entra.
+Deploy one and applications can mint identities again: the fourth row goes live,
+and layer 1 becomes only as strong as whatever that proxy admits.
+
+## The honest limit
+
+All three layers together give a complete block of the **authenticated path**.
+They do not give a complete block of the **data**, and conflating the two is
+how a control programme comes to believe it is finished.
+
+Even with every layer deployed, this works:
+
+> A person asks the enterprise client. Reads the answer. Pastes it into the
+> personal one.
+
+No connection control touches that, because there is no connection. It is the
+same class as photographing the screen, only faster. Every layer above governs
+which client may hold a token; none governs what a person does with what is
+already on their screen.
+
+So there is no foolproof technical control against egress by an authorised
+user. If a person can see the data they can retype it, photograph it, or
+remember it. Everything above is friction and detection — which is often the
+right trade, and worth choosing knowingly rather than by accident.
+
+The nearest thing to a real answer is architectural rather than a control: run
+the model inside the organisation's own trust boundary, so the destination is
+its tenant under its contract. Then the question stops being how to stop data
+leaving, and becomes that it did not leave.
+
+## Witnessed, not asserted
 
 `make test --only phase6-clients` registers a second application in the tenant,
 signs the same person in through it, and shows the executor refusing that token

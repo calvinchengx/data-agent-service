@@ -18,6 +18,9 @@ seed/state.json
 services/warehouse-query-go/warehouse-query
 website/src/content/docs/
 website/.astro/
+# sync-docs copies docs/img into public/ so the site can serve it; the
+# authored source and the generated pair both live in docs/.
+website/public/img/
 _site/
 .pnpm-store/
 

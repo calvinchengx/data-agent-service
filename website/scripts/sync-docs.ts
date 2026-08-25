@@ -6,6 +6,7 @@
 // frontmatter pointing "Edit this page" at the real file, drops the duplicate
 // H1, and rewrites intra-doc links to site routes.
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -22,6 +23,13 @@ const REPO = join(here, '..', '..');
 const DOCS_SRC = join(REPO, 'docs');
 const OUT = join(here, '..', 'src', 'content', 'docs');
 const BASE = '/data-agent-service/docs/';
+// Diagrams live beside the docs so `img/x.svg` resolves on GitHub. On the site
+// the pages are flat `<base>/<slug>/` routes, so that relative path would look
+// one level too deep -- the files are copied into public/ and the references
+// rewritten to absolute. Same single source, both renderings.
+const IMG_SRC = join(REPO, 'docs', 'img');
+const IMG_OUT = join(here, '..', 'public', 'img');
+const IMG_RE = /(src|srcset)="img\/([^"]+)"/g;
 const REPO_URL = 'https://github.com/calvinchengx/data-agent-service';
 
 // The docs worth publishing: `NN-name.md` chapters, plus the two living
@@ -70,7 +78,11 @@ function rewriteLinks(md: string, where: string): string {
     ADR_LINK_RE,
     (_match, slug: string, anchor?: string) => `](${BASE}${ADR_DIR}/${slug}/${anchor ?? ''})`,
   );
-  return rewriteRepoLinks(withAdrs, where);
+  const withImages = withAdrs.replace(
+    IMG_RE,
+    (_match, attr: string, file: string) => `${attr}="${BASE}img/${file}"`,
+  );
+  return rewriteRepoLinks(withImages, where);
 }
 
 // "ADR 0001 — Two executor implementations" keeps its number; a chapter's
@@ -130,6 +142,17 @@ function writeIndex(): void {
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(join(OUT, ADR_DIR), { recursive: true });
 
+// Only the generated pair is published; docs/img/src is the authored source
+// and belongs in the repository, not on the site.
+rmSync(IMG_OUT, { recursive: true, force: true });
+mkdirSync(IMG_OUT, { recursive: true });
+const diagrams = existsSync(IMG_SRC)
+  ? readdirSync(IMG_SRC).filter((n) => n.endsWith('.svg'))
+  : [];
+for (const name of diagrams) {
+  cpSync(join(IMG_SRC, name), join(IMG_OUT, name));
+}
+
 const chapters = readdirSync(DOCS_SRC).filter((name) => DOC_RE.test(name)).sort();
 for (const name of chapters) {
   writeFileSync(join(OUT, name), convert(name));
@@ -169,5 +192,6 @@ if (unreachable.length) {
 
 console.log(
   `sync-docs: ${chapters.length} chapters, ${adrs.length} ADR(s), ` +
-    `all reachable from the sidebar, ${warnings} warning(s)`,
+    `${diagrams.length} diagram(s), all reachable from the sidebar, ` +
+    `${warnings} warning(s)`,
 );

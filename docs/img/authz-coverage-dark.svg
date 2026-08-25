@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 396" width="100%" role="img"
+     aria-label="Coverage matrix. Personal device with an unapproved client is blocked by both layer 2 and layer 1. Personal device with an approved client is blocked by layer 2 alone. Corporate device with an unapproved client is blocked by layer 1 alone. Corporate device, approved client, personal vendor account is blocked by layer 3 alone. Corporate device, approved client, corporate account is served. With DAS_ALLOWED_CLIENT_IDS unset the layer 1 column is empty and two of those rows open.">
+  <style>
+    :root{--ink:#e8eaee;--muted:#98a0ae;--accent:#4fd1c5;--accent-soft:#12292b;--diagram-line:#5a6575;--diagram-fill:#1c222c;}
+    .bx{fill:var(--diagram-fill);stroke:var(--diagram-line);stroke-width:1.5}
+    .ac{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+    .cell{fill:none;stroke:var(--diagram-line);stroke-width:1.2;stroke-dasharray:3 3}
+    .rule{stroke:var(--diagram-line);stroke-width:1;opacity:.45}
+    .hd{font:600 12px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:var(--ink)}
+    .row{font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:var(--ink)}
+    .sub{font:11px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;fill:var(--muted)}
+    .eye{font:600 10px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;fill:var(--accent);letter-spacing:.12em}
+    .blk{font:600 10px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;fill:var(--accent)}
+    .dash{font:11px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;fill:var(--muted);opacity:.55}
+    .res{font:600 11px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;fill:var(--ink)}
+    .ok{font:600 11px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;fill:var(--muted)}
+  </style>
+
+  <text class="eye" x="20" y="26">EVERY BLOCKED ROW IS BLOCKED BY EXACTLY ONE LAYER</text>
+
+  <text class="hd" x="20"  y="64">Scenario</text>
+  <text class="hd" x="524" y="64" text-anchor="middle">LAYER 3</text>
+  <text class="hd" x="644" y="64" text-anchor="middle">LAYER 2</text>
+  <text class="hd" x="764" y="64" text-anchor="middle">LAYER 1</text>
+  <text class="hd" x="860" y="64">Result</text>
+  <text class="sub" x="524" y="79" text-anchor="middle">account</text>
+  <text class="sub" x="644" y="79" text-anchor="middle">device</text>
+  <text class="sub" x="764" y="79" text-anchor="middle">client</text>
+  <line class="rule" x1="20" y1="90" x2="920" y2="90"/>
+
+  <!-- row 1 -->
+  <text class="row" x="20" y="117">personal device, unapproved client</text>
+  <rect class="cell" x="478" y="100" width="92" height="26" rx="6"/><text class="dash" x="524" y="118" text-anchor="middle">—</text>
+  <rect class="ac"   x="598" y="100" width="92" height="26" rx="6"/><text class="blk"  x="644" y="118" text-anchor="middle">BLOCK</text>
+  <rect class="ac"   x="718" y="100" width="92" height="26" rx="6"/><text class="blk"  x="764" y="118" text-anchor="middle">BLOCK</text>
+  <text class="res" x="860" y="118">blocked</text>
+  <line class="rule" x1="20" y1="138" x2="920" y2="138"/>
+
+  <!-- row 2 -->
+  <text class="row" x="20" y="165">personal device, approved client</text>
+  <rect class="cell" x="478" y="148" width="92" height="26" rx="6"/><text class="dash" x="524" y="166" text-anchor="middle">—</text>
+  <rect class="ac"   x="598" y="148" width="92" height="26" rx="6"/><text class="blk"  x="644" y="166" text-anchor="middle">BLOCK</text>
+  <rect class="cell" x="718" y="148" width="92" height="26" rx="6"/><text class="dash" x="764" y="166" text-anchor="middle">—</text>
+  <text class="res" x="860" y="166">blocked</text>
+  <line class="rule" x1="20" y1="186" x2="920" y2="186"/>
+
+  <!-- row 3 -->
+  <text class="row" x="20" y="213">corporate device, unapproved client</text>
+  <rect class="cell" x="478" y="196" width="92" height="26" rx="6"/><text class="dash" x="524" y="214" text-anchor="middle">—</text>
+  <rect class="cell" x="598" y="196" width="92" height="26" rx="6"/><text class="dash" x="644" y="214" text-anchor="middle">—</text>
+  <rect class="ac"   x="718" y="196" width="92" height="26" rx="6"/><text class="blk"  x="764" y="214" text-anchor="middle">BLOCK</text>
+  <text class="res" x="860" y="214">blocked</text>
+  <line class="rule" x1="20" y1="234" x2="920" y2="234"/>
+
+  <!-- row 4 -->
+  <text class="row" x="20" y="255">corporate device, approved client,</text>
+  <text class="row" x="20" y="271">PERSONAL vendor account</text>
+  <rect class="ac"   x="478" y="244" width="92" height="26" rx="6"/><text class="blk"  x="524" y="262" text-anchor="middle">BLOCK</text>
+  <rect class="cell" x="598" y="244" width="92" height="26" rx="6"/><text class="dash" x="644" y="262" text-anchor="middle">—</text>
+  <rect class="cell" x="718" y="244" width="92" height="26" rx="6"/><text class="dash" x="764" y="262" text-anchor="middle">—</text>
+  <text class="res" x="860" y="262">blocked</text>
+  <line class="rule" x1="20" y1="284" x2="920" y2="284"/>
+
+  <!-- row 5 -->
+  <text class="row" x="20" y="305">corporate device, approved client,</text>
+  <text class="row" x="20" y="321">corporate account</text>
+  <rect class="cell" x="478" y="294" width="92" height="26" rx="6"/><text class="dash" x="524" y="312" text-anchor="middle">—</text>
+  <rect class="cell" x="598" y="294" width="92" height="26" rx="6"/><text class="dash" x="644" y="312" text-anchor="middle">—</text>
+  <rect class="cell" x="718" y="294" width="92" height="26" rx="6"/><text class="dash" x="764" y="312" text-anchor="middle">—</text>
+  <text class="ok"  x="860" y="312">served</text>
+
+  <rect class="bx" x="20" y="340" width="900" height="44" rx="10"/>
+  <text class="sub" x="38" y="358">Drop a layer and exactly one row reopens — nothing else covers it.</text>
+  <text class="sub" x="38" y="374">DAS_ALLOWED_CLIENT_IDS unset empties the LAYER 1 column: rows 1 and 3 lose their only block.</text>
+</svg>

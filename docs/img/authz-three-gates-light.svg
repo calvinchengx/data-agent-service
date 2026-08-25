@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 372" width="100%" role="img"
+     aria-label="Three gates in series. Layer 3 runs on the network, browser or identity provider and decides which account may sign in; it cannot see the device or the application. Layer 2 is Entra Conditional Access with Intune and decides which device may obtain a token; it cannot see which application or vendor account is driving. Layer 1 is DAS_ALLOWED_CLIENT_IDS in this service and decides which application may hold the token; it cannot see which account inside that application. A request passing all three is served.">
+  <style>
+    :root{--ink:#16181d;--muted:#5c6270;--accent:#0f6f6b;--accent-soft:#e6f2f1;--diagram-line:#828c9c;--diagram-fill:#ffffff;}
+    .bx{fill:var(--diagram-fill);stroke:var(--diagram-line);stroke-width:1.5}
+    .ac{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+    .ar{stroke:var(--diagram-line);stroke-width:1.5;fill:none}
+    .head{fill:var(--diagram-line)}
+    .hd{font:600 13px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:var(--ink)}
+    .lbl{font:600 12px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:var(--ink)}
+    .sub{font:11px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;fill:var(--muted)}
+    .eye{font:600 10px ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;fill:var(--accent);letter-spacing:.12em}
+    .no{font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:var(--muted)}
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="head" d="M0 0 L10 5 L0 10 z"/>
+    </marker>
+  </defs>
+
+  <text class="eye" x="20" y="26">THREE GATES, THREE DIFFERENT THINGS</text>
+
+  <line class="ar" x1="20"  y1="180" x2="88"  y2="180" marker-end="url(#a)"/>
+  <line class="ar" x1="322" y1="180" x2="353" y2="180" marker-end="url(#a)"/>
+  <line class="ar" x1="587" y1="180" x2="618" y2="180" marker-end="url(#a)"/>
+  <line class="ar" x1="852" y1="180" x2="920" y2="180" marker-end="url(#a)"/>
+  <text class="sub" x="20"  y="170">sign-in</text>
+  <text class="sub" x="864" y="170">served</text>
+
+  <text class="eye" x="90" y="66">NETWORK · BROWSER · IdP</text>
+  <rect class="ac" x="90" y="78" width="232" height="128" rx="10"/>
+  <text class="hd"  x="206" y="104" text-anchor="middle">LAYER 3</text>
+  <text class="lbl" x="206" y="126" text-anchor="middle">which ACCOUNT may sign in</text>
+  <text class="sub" x="206" y="149" text-anchor="middle">tenant restrictions</text>
+  <text class="sub" x="206" y="165" text-anchor="middle">managed browser profile</text>
+  <text class="sub" x="206" y="181" text-anchor="middle">CASB / egress filtering</text>
+  <text class="sub" x="206" y="198" text-anchor="middle">before the flow starts</text>
+  <text class="no"  x="90"  y="232">Cannot see: the device, or which</text>
+  <text class="no"  x="90"  y="248">application is asking.</text>
+
+  <text class="eye" x="355" y="66">ENTRA + INTUNE</text>
+  <rect class="ac" x="355" y="78" width="232" height="128" rx="10"/>
+  <text class="hd"  x="471" y="104" text-anchor="middle">LAYER 2</text>
+  <text class="lbl" x="471" y="126" text-anchor="middle">which DEVICE may get a token</text>
+  <text class="sub" x="471" y="149" text-anchor="middle">Conditional Access decides</text>
+  <text class="sub" x="471" y="165" text-anchor="middle">Intune writes the flag</text>
+  <text class="sub" x="471" y="181" text-anchor="middle">PRT · broker · device cert</text>
+  <text class="sub" x="471" y="198" text-anchor="middle">before a token exists</text>
+  <text class="no"  x="355" y="232">Cannot see: which application, or</text>
+  <text class="no"  x="355" y="248">which vendor account is driving.</text>
+
+  <text class="eye" x="620" y="66">THIS SERVICE</text>
+  <rect class="ac" x="620" y="78" width="232" height="128" rx="10"/>
+  <text class="hd"  x="736" y="104" text-anchor="middle">LAYER 1</text>
+  <text class="lbl" x="736" y="126" text-anchor="middle">which APPLICATION may hold it</text>
+  <text class="sub" x="736" y="149" text-anchor="middle">DAS_ALLOWED_CLIENT_IDS</text>
+  <text class="sub" x="736" y="165" text-anchor="middle">vs the azp / appid claim</text>
+  <text class="sub" x="736" y="181" text-anchor="middle">in BOTH executors</text>
+  <text class="sub" x="736" y="198" text-anchor="middle">after the token is verified</text>
+  <text class="no"  x="620" y="232">Cannot see: which account inside</text>
+  <text class="no"  x="620" y="248">that approved application.</text>
+
+  <rect class="bx" x="90" y="278" width="762" height="66" rx="10"/>
+  <text class="lbl" x="471" y="304" text-anchor="middle">What passes all three: an approved app, on a managed device, under a corporate account.</text>
+  <text class="sub" x="471" y="326" text-anchor="middle">That is the service working — past this point it is reduction and detection, not prevention.</text>
+</svg>

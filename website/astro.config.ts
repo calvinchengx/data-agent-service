@@ -1,5 +1,6 @@
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
+import mermaid from 'astro-mermaid';
 
 // The site is generated from /docs by scripts/sync-docs.ts, which runs before
 // dev and build. /docs stays the single source of truth; nothing here is
@@ -8,6 +9,18 @@ export default defineConfig({
   site: 'https://calvinchengx.github.io',
   base: '/data-agent-service/docs/',
   integrations: [
+    // ```mermaid fences, rendered in the browser rather than at build time --
+    // a build-time renderer wants a headless browser in CI, which is a large
+    // dependency for a diagram. GitHub renders the same fences natively, so a
+    // mermaid diagram is ONE source that themes itself correctly in both
+    // renderings with no generated files.
+    //
+    // Prefer mermaid for anything that tracks the code, where staying current
+    // matters more than looking bespoke. The hand-authored SVGs under
+    // docs/img/src are for the few diagrams that are conceptual, stable, and
+    // want the landing page's exact visual language; scripts/build_diagrams.py
+    // explains what those cost.
+    mermaid({ theme: 'neutral', autoTheme: true }),
     starlight({
       title: 'Data Agent Service',
       description:
