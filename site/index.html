@@ -122,6 +122,12 @@ svg .ar{stroke:var(--diagram-line);stroke-width:1.5;fill:none}
 footer{padding:44px 0 60px;border-top:1px solid var(--line);color:var(--muted);font-size:.88rem}
 footer a{text-decoration:none}
 
+/* Every section is addressable, and a jump clears the sticky nav rather than
+   landing the heading underneath it. Applies to the ids that were already
+   here, not only the ones added later. */
+html{scroll-behavior:smooth}
+.sec[id]{scroll-margin-top:72px}
+
 /* The docs are a click away from every scroll position, not only the hero. */
 .topnav{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--bg) 88%,transparent);
   backdrop-filter:saturate(1.4) blur(8px);border-bottom:1px solid var(--line)}
@@ -141,6 +147,7 @@ footer a{text-decoration:none}
   <div class="wrap">
     <a class="brand" href="./">Data Agent Service</a>
     <div class="links">
+      <a href="./#architecture">Architecture</a>
       <a href="./#release">Get it</a>
       <a href="./#start">Run it locally</a>
       <a href="./#status">Status</a>
@@ -180,7 +187,7 @@ footer a{text-decoration:none}
   </div>
 </header>
 
-<section class="sec">
+<section class="sec" id="problem">
   <div class="wrap">
     <h2>The problem this solves</h2>
     <p class="lede">A language model that writes SQL is a demo. A language model you let near the
@@ -208,7 +215,7 @@ footer a{text-decoration:none}
   </div>
 </section>
 
-<section class="sec">
+<section class="sec" id="architecture">
   <div class="wrap">
     <h2>How it fits together</h2>
     <p class="lede">Standard protocols end to end — MCP, OAuth 2.0 on-behalf-of, managed identity,
@@ -398,7 +405,7 @@ footer a{text-decoration:none}
   </div>
 </section>
 
-<section class="sec">
+<section class="sec" id="catalog">
   <div class="wrap">
     <h2>Why the meaning has to come from the catalog</h2>
     <p class="lede">The evals are built so that ignoring the glossary changes the answer, not just
