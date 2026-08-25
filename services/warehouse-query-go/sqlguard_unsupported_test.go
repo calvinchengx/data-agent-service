@@ -15,10 +15,13 @@ func policyFor(dialect string) Policy {
 }
 
 func TestAConstructTheGuardCannotReadIsNamed(t *testing.T) {
+	// These get replaced as the port learns to read them, which is the point:
+	// window functions, PIVOT and GROUP BY ROLLUP were all here and all now
+	// parse. What is left is whatever the backlog still holds.
 	for _, tc := range []struct{ sql, want string }{
-		{"SELECT ROW_NUMBER() OVER (ORDER BY a) FROM dbo.t", "trailing tokens at OVER"},
-		{"SELECT a FROM dbo.t PIVOT (SUM(b) FOR c IN ('x'))", "trailing tokens at PIVOT"},
-		{"SELECT a FROM dbo.t GROUP BY ROLLUP(a)", "GROUP BY ROLLUP"},
+		{"SELECT a FROM dbo.t CLUSTER BY b", "trailing tokens at CLUSTER BY"},
+		{"SELECT a[0][0].b.c[1].d FROM dbo.t", "trailing tokens"},
+		{"SELECT FORMAT(a, 'x') FROM dbo.t", "function FORMAT with this many arguments at FROM"},
 	} {
 		_, err := Guard(tc.sql, policyFor("tsql"))
 		if err == nil {
@@ -102,6 +105,30 @@ func TestTheLabelIsProducedForEveryDialect(t *testing.T) {
 		}
 		if unsupportedConstruct(err) == "" {
 			t.Errorf("%s: refused with no construct recorded: %v", dialect, err)
+		}
+	}
+}
+
+// A CREATE now PARSES, where it used to be refused for being unreadable. The
+// read-only verdict must not have moved with it: the guard reports on the
+// ROOT CLASS, which is the same answer by another route, and IsWrite is the
+// belt to that brace.
+func TestAParsedWriteIsStillRefused(t *testing.T) {
+	for _, tc := range []struct{ sql, want string }{
+		{"CREATE TABLE dbo.t (a INT)", "only SELECT is allowed; this endpoint is read-only (got CREATE)"},
+		{"CREATE TABLE dbo.t AS SELECT 1", "only SELECT is allowed; this endpoint is read-only (got CREATE)"},
+		{"CREATE OR REPLACE TABLE dbo.t (a INT)", "only SELECT is allowed; this endpoint is read-only (got CREATE)"},
+	} {
+		_, err := Guard(tc.sql, policyFor("tsql"))
+		if err == nil {
+			t.Fatalf("%q was PERMITTED; it writes", tc.sql)
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%q: %v, want %q", tc.sql, err, tc.want)
+		}
+		// And it must not be counted as a gap in the port: it parsed fine.
+		if got := unsupportedConstruct(err); got != "" {
+			t.Errorf("%q was counted as a port gap (%q); it is a policy refusal", tc.sql, got)
 		}
 	}
 }

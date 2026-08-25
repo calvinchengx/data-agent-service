@@ -20,6 +20,8 @@ github.com/calvinchengx/sqlglot-go v0.1.3 h1:c4Q/uSjTxBo60dYb6YQRkIsmUX/Xd6ThWrz
 github.com/calvinchengx/sqlglot-go v0.1.3/go.mod h1:pFjQ1WEhw4ZzjMYfRMsV2wOBhXrWrA8KeE7lZJGv7cg=
 github.com/calvinchengx/sqlglot-go v0.2.0 h1:byV7Z7OB5YKh8OQ42qARG1xUfy1biqHChFJVINv84fM=
 github.com/calvinchengx/sqlglot-go v0.2.0/go.mod h1:pFjQ1WEhw4ZzjMYfRMsV2wOBhXrWrA8KeE7lZJGv7cg=
+github.com/calvinchengx/sqlglot-go v0.3.0 h1:eDypuI2BVx4RxXa/D9v7XbdfjRzkjuNg5vRj5GiZP4U=
+github.com/calvinchengx/sqlglot-go v0.3.0/go.mod h1:pFjQ1WEhw4ZzjMYfRMsV2wOBhXrWrA8KeE7lZJGv7cg=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
