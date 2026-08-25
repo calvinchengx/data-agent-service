@@ -47,10 +47,19 @@ the parity table now agrees; see [Go parity](16-go-parity.md).
 
 ```sh
 make release-version V=X.Y.Z          # uv version writes it into pyproject.toml
+uv lock                               # ...and this writes it into uv.lock
 git commit -m "Release vX.Y.Z" -- pyproject.toml uv.lock
 git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin main vX.Y.Z
 ```
+
+`uv lock` is a separate line because `uv version --frozen` does not write the
+lock — that is what `--frozen` means. Without it, `git commit -- uv.lock`
+commits the OLD version and the lock is quietly rewritten by whichever
+`uv run` comes next, leaving the tagged commit disagreeing with itself. It
+does not fail the release: the project is `source = { virtual = "." }`, so
+`uv sync --frozen` never checks the lock against `pyproject.toml`. That is
+exactly why it is worth writing down — nothing catches it.
 
 `X.Y.Z` is a placeholder deliberately: naming a real version here reads as
 the one to cut next, and it is always the one already cut.
