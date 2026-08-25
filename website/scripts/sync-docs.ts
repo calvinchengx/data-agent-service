@@ -54,6 +54,20 @@ const REPO_LINK_RE = /\]\(\.\.\/([^)#]+)(#[^)]*)?\)/g;
 
 let warnings = 0;
 
+// The inventory is taken BEFORE anything is converted, because the link
+// validator below reads it: a set populated later would make every early call
+// see an empty set and either warn about everything or (worse) check nothing.
+const chapters = readdirSync(DOCS_SRC).filter((name) => DOC_RE.test(name)).sort();
+const adrDir = join(DOCS_SRC, ADR_DIR);
+const adrs = existsSync(adrDir)
+  ? readdirSync(adrDir).filter((name) => name.endsWith('.md')).sort()
+  : [];
+const KNOWN = new Set(chapters.map((n) => n.replace(/\.md$/, '')));
+if (KNOWN.size === 0) {
+  console.error(`sync-docs: no chapters found in ${DOCS_SRC} — refusing to publish nothing`);
+  process.exit(1);
+}
+
 function rewriteRepoLinks(md: string, where: string): string {
   return md.replace(REPO_LINK_RE, (_match, path: string, anchor?: string) => {
     const clean = path.replace(/\/+$/, '');
@@ -70,11 +84,20 @@ function rewriteRepoLinks(md: string, where: string): string {
 }
 
 function rewriteLinks(md: string, where: string): string {
-  const chapters = md.replace(
+  // A slug matching no document became a silent 404: this rewrote the path
+  // without ever asking whether the target existed, while `../` links one
+  // function down HAVE been checked all along. Same failure, two link shapes.
+  const withChapters = md.replace(
     LINK_RE,
-    (_match, slug: string, anchor?: string) => `](${BASE}${slug}/${anchor ?? ''})`,
+    (_match, slug: string, anchor?: string) => {
+      if (!KNOWN.has(slug)) {
+        console.warn(`sync-docs: WARNING ${where}: links to ${slug}.md, which is not published`);
+        warnings += 1;
+      }
+      return `](${BASE}${slug}/${anchor ?? ''})`;
+    },
   );
-  const withAdrs = chapters.replace(
+  const withAdrs = withChapters.replace(
     ADR_LINK_RE,
     (_match, slug: string, anchor?: string) => `](${BASE}${ADR_DIR}/${slug}/${anchor ?? ''})`,
   );
@@ -107,36 +130,88 @@ function convert(relative: string): string {
     // Starlight renders the frontmatter title, so the H1 would be a duplicate.
     lines.splice(h1Index, lines[h1Index + 1]?.trim() === '' ? 2 : 1);
   }
+  titles.set(relative.replace(/\.md$/, ''), title);
   const body = rewriteLinks(lines.join('\n').replace(/^\n+/, ''), relative);
   const editUrl = `${REPO_URL}/edit/main/docs/${relative}`;
   return `---\ntitle: ${yamlEscape(title)}\neditUrl: ${yamlEscape(editUrl)}\n---\n\n${body}`;
 }
 
+// One line per document, saying why a reader would open it. This is the ONLY
+// editorial content here: the grouping and order come from the sidebar in
+// astro.config.ts, and the link text comes from each document's own H1.
+//
+// A document appears on the front door if and only if it has a gloss. That
+// makes omission deliberate and visible — the run reports every sidebar entry
+// without one — rather than the previous arrangement, where the front door was
+// a hand-written list that quietly listed 9 of 25 because it was written when
+// there were 9.
+const GLOSS: Record<string, string> = {
+  '01-quickstart': 'the whole stack from nothing',
+  '03-architecture': 'what each component is for',
+  '09-mcp-clients': 'connect Claude, Cursor or VS Code with no custom code',
+  '20-ask-service': 'a ticket, then a stream, so a client can speak first',
+  '05-authorization': 'how one user sees different rows than another, and which apps may ask',
+  '19-classification': 'a label in OpenMetadata becomes a column the answer will not show',
+  '09-adding-a-source': 'an adapter, a dialect, and an authz tier',
+  '07-evaluation': 'does the catalog change the answer?',
+  '08-load-testing': 'and what the gateway costs',
+  '13-testing': 'what each layer of the suite is for',
+  '11-ci': 'every gate, and why a red job is not always the cause',
+  '10-production': 'what changes, and what does not',
+  '18-releases': 'two executors answering one contract, and which image to pull',
+  '09-llm-governance': 'capping and billing per person, without naming the person',
+  '21-llm-backends': 'protocols rather than vendors, so any of them is a base URL',
+  '12-promotion': 'a recurring question becomes a dashboard, with no prose stored',
+  '14-publishing': 'Power BI, Superset and Tableau from one plan',
+  '15-adding-a-dashboard-target': 'one plan, another renderer',
+  '15-http-sources': 'an OpenAPI document is the allow-list; GraphQL is not built',
+  '16-go-parity': 'what each implementation can do, measured',
+  parity: 'the ledger that separates the emulators from real Azure',
+  'upstream-issues': 'what is broken beneath us, filed rather than worked around',
+};
+
+// Titles come from the documents themselves, recorded as they are converted,
+// so a renamed heading cannot leave the front door calling it the old thing.
+const titles = new Map<string, string>();
+
+/** The sidebar's groups, in order, with their slugs — the single structure. */
+function sidebarGroups(): [string, string[]][] {
+  const config = readFileSync(join(here, '..', 'astro.config.ts'), 'utf8');
+  const groups: [string, string[]][] = [];
+  for (const m of config.matchAll(/label: '([^']+)',\s*items: \[(.*?)\]/gs)) {
+    groups.push([m[1], [...m[2].matchAll(/slug: '([^']+)'/g)].map((s) => s[1])]);
+  }
+  return groups;
+}
+
 // The landing page is synthesized here rather than taken from /docs, because
 // the repository's front door is README.md and duplicating it would give two
 // things to keep true.
-function writeIndex(): void {
-  const body =
+function writeIndex(): Set<string> {
+  const linked = new Set<string>();
+  let body =
     `Natural-language questions over governed data — grounded in the glossary, metrics and\n` +
     `schema held in OpenMetadata, fronted by Azure API Management, and answered under the\n` +
     `asking user's own Entra identity.\n\n` +
     `Everything here runs locally against the [Azure emulator family](https://github.com/calvinchengx/emulators),\n` +
-    `and the same code runs against real Azure — switching is configuration, not a code path.\n\n` +
-    `## Start here\n\n` +
-    `- [Quick start](01-quickstart.md) — the whole stack from nothing\n` +
-    `- [Architecture](03-architecture.md) — what each component is for\n` +
-    `- [MCP clients](09-mcp-clients.md) — connect Claude, Cursor or VS Code with no custom code\n` +
-    `- [Authorization](05-authorization.md) — how one user sees different rows than another\n` +
-    `- [Classification](19-classification.md) — how a sensitivity label in OpenMetadata becomes a withheld column\n` +
-    `- [Running against real Azure](10-production.md) — what changes, and what does not\n\n` +
-    `## How claims are checked\n\n` +
-    `- [Evaluation](07-evaluation.md) — does the catalog change the answer?\n` +
-    `- [Load testing](08-load-testing.md) — and what the gateway costs\n` +
-    `- [Parity](parity.md) — what is witnessed, and what is not yet\n`;
+    `and the same code runs against real Azure — switching is configuration, not a code path.\n\n`;
+
+  for (const [heading, slugs] of sidebarGroups()) {
+    const entries = slugs.filter((s) => s !== 'index' && GLOSS[s]);
+    if (!entries.length) continue;
+    body += `## ${heading}\n\n`;
+    for (const slug of entries) {
+      linked.add(slug);
+      body += `- [${titles.get(slug) ?? slug}](${slug}.md) — ${GLOSS[slug]}\n`;
+    }
+    body += `\n`;
+  }
+
   const frontmatter =
     `---\ntitle: Overview\ndescription: A governed data agent — natural-language questions over Fabric, ` +
     `PostgreSQL and more, grounded in OpenMetadata and answered as the asking user.\neditUrl: false\n---\n\n`;
   writeFileSync(join(OUT, 'index.md'), frontmatter + rewriteLinks(body, 'index'));
+  return linked;
 }
 
 rmSync(OUT, { recursive: true, force: true });
@@ -153,20 +228,15 @@ for (const name of diagrams) {
   cpSync(join(IMG_SRC, name), join(IMG_OUT, name));
 }
 
-const chapters = readdirSync(DOCS_SRC).filter((name) => DOC_RE.test(name)).sort();
 for (const name of chapters) {
   writeFileSync(join(OUT, name), convert(name));
 }
 
-const adrDir = join(DOCS_SRC, ADR_DIR);
-const adrs = existsSync(adrDir)
-  ? readdirSync(adrDir).filter((name) => name.endsWith('.md')).sort()
-  : [];
 for (const name of adrs) {
   writeFileSync(join(OUT, ADR_DIR, name), convert(join(ADR_DIR, name)));
 }
 
-writeIndex();
+const onTheFrontDoor = writeIndex();
 
 // A page nobody can navigate to is a page nobody reads. The sidebar is
 // curated rather than generated -- reading order is an editorial decision --
@@ -190,8 +260,19 @@ if (unreachable.length) {
   process.exit(1);
 }
 
+// Reported, not enforced: see writeIndex. Naming them is the point — a count
+// alone would not say WHICH page grew without a way in from the front door.
+const offTheFrontDoor = generated.filter((slug) => !onTheFrontDoor.has(slug));
+if (offTheFrontDoor.length) {
+  console.log(
+    `sync-docs: ${offTheFrontDoor.length} document(s) have no one-line gloss, so they are ` +
+      `reachable from the sidebar only: ${offTheFrontDoor.join(', ')}`,
+  );
+}
+
 console.log(
   `sync-docs: ${chapters.length} chapters, ${adrs.length} ADR(s), ` +
     `${diagrams.length} diagram(s), all reachable from the sidebar, ` +
+    `${generated.length - offTheFrontDoor.length}/${generated.length} on the front door, ` +
     `${warnings} warning(s)`,
 );
