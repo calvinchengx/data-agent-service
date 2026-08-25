@@ -5,8 +5,8 @@ published, because both are real: they answer the same contract, and choosing
 between them is a deployment decision rather than a fork.
 
 ```sh
-docker pull ghcr.io/calvinchengx/data-agent-service/executor-go:0.2.0
-docker pull ghcr.io/calvinchengx/data-agent-service/executor-py:0.2.0
+docker pull ghcr.io/calvinchengx/data-agent-service/executor-go:0.3.0
+docker pull ghcr.io/calvinchengx/data-agent-service/executor-py:0.3.0
 ```
 
 Both are `linux/amd64` and `linux/arm64`, and both carry build provenance and
