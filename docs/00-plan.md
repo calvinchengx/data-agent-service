@@ -228,7 +228,7 @@ Emulator numbers are relative (laptop SQL Server sidecar), not Fabric capacity �
 
 MVP = phases 0–7 + 10. Then 8, 9, 11, 12.
 
-**Every phase carrying a ✅ is landed and witnessed** — 159 witnesses, green in CI on
+**Every phase carrying a ✅ is landed and witnessed** — **167 witnesses**, green in CI on
 every push. **19a and 20 are not**: they are written down here as scope, and a row in this
 table is a plan until a witness says otherwise — which is the same rule Phase 15 was marked
 complete in violation of, noted below.

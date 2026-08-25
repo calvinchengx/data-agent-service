@@ -11,12 +11,30 @@ still true when the total moves:
 
     23 witnesses across phases 1-5        scoped -- not checked
     10 witnesses · OpenMetadata's own API scoped -- not checked
+    the phase 18 witnesses                scoped -- not checked
     121/121 witnesses                     total  -- checked
     121 end-to-end witnesses              total  -- checked
     **121 witnesses**                     total  -- checked
+    121 witnesses, green in CI            total  -- checked
 
 The distinction is the point. A checker that flags a correct scoped number
 gets switched off, and then the totals stop being checked too.
+
+The last row is the one this checker was missing. `docs/00-plan.md` said
+"159 witnesses, green in CI on every push" against a real 167, and every
+pattern here passed it: the fraction pattern needs a slash, the end-to-end
+pattern needs those words, the bold pattern needs the asterisks, and the
+markup pattern only fires on the landing page. A total written as plain prose
+matched nothing at all -- so the one shape an author is most likely to reach
+for was the one shape that went unchecked.
+
+A bare count is therefore read as a TOTAL unless it says what it is a count
+of. Scope shows up adjacent to the number and nowhere else -- `phase 18
+witnesses` before it, `23 witnesses across ...` and `10 witnesses · ...`
+after it -- so those are excluded and everything else must equal the manifest.
+That rule is predictable, which is the requirement: scope it, or it is the
+total. `--self-test` asserts both halves, because a checker that cannot be
+shown to fail is indistinguishable from one that does not run.
 """
 
 from __future__ import annotations
@@ -46,18 +64,82 @@ TOTAL_PATTERNS = (
     # deploy rather than a failed lint.
     re.compile(r"<b>(\d{2,4})</b><span>\s*end-to-end\s+witnesses"),
     re.compile(r"\*\*(\d{2,4})\s+witnesses\*\*"),
+    # A bare total in prose. The lookarounds carry the scoped/total
+    # distinction the docstring promises, and SCOPE_* below are the literal
+    # cases they were built from -- `--self-test` reads them, so the examples
+    # and the exclusions cannot drift apart.
+    re.compile(
+        r"(?<!phase)(?<!phase )(?<!phase-)(?<!Phase )(?<!Phase-)"
+        r"\b(\d{2,4})\s+witnesses\b"
+        r"(?!\s*(?:across|·|in\s+phase|for\s+phase))"
+    ),
 )
+
+# Read by --self-test. Scoped lines must pass whatever the manifest says;
+# total-shaped lines must be caught whenever they disagree with it.
+SCOPE_SCOPED = (
+    "make test          # 23 witnesses across phases 1-5",
+    "10 witnesses · OpenMetadata's own API is the live source",
+    "the phase 18 witnesses are the ones that pin this document",
+    "Two phase-15 witnesses and one phase-16 witness asserted on",
+    "the phase11 witnesses now check the definition",
+    "| 19a | phase-16 witnesses pass unchanged |",
+)
+SCOPE_TOTALS = (
+    "**Every phase carrying a ✅ is landed and witnessed** — {n} witnesses, green in CI",
+    "{n}/{n} witnesses",
+    "{n} end-to-end witnesses",
+    "**{n} witnesses**",
+)
+
+
+def self_test(total: int) -> int:
+    """Prove the rule both ways: scoped counts survive, totals are caught."""
+    bad: list[str] = []
+    bad.extend(
+        f"  scoped line flagged: {line!r} -> {m.group(0)!r}"
+        for line in SCOPE_SCOPED
+        for pattern in TOTAL_PATTERNS
+        for m in pattern.finditer(line)
+    )
+    for shape in SCOPE_TOTALS:
+        # A total one off the manifest must be seen; the manifest's own must not.
+        wrong_line = shape.format(n=total + 1)
+        if not any(p.search(wrong_line) for p in TOTAL_PATTERNS):
+            bad.append(f"  a WRONG total went unnoticed: {wrong_line!r}")
+        right_line = shape.format(n=total)
+        bad.extend(
+            f"  a CORRECT total was flagged: {right_line!r}"
+            for pattern in TOTAL_PATTERNS
+            for m in pattern.finditer(right_line)
+            if {int(g) for g in m.groups() if g is not None} != {total}
+        )
+    if bad:
+        print("self-test failed:")
+        print("\n".join(bad))
+        return 1
+    print(
+        f"self-test: {len(SCOPE_SCOPED)} scoped counts pass untouched, "
+        f"{len(SCOPE_TOTALS)} total shapes are caught when wrong"
+    )
+    return 0
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--fix", action="store_true", help="rewrite the totals instead of failing")
+    ap.add_argument(
+        "--self-test", action="store_true", help="prove the scoped/total rule, then exit"
+    )
     args = ap.parse_args()
 
     if not MANIFEST.exists():
         print(f"FAIL: {MANIFEST} does not exist — run `make witnesses-manifest`.")
         return 1
     total = int(json.loads(MANIFEST.read_text())["total"])
+
+    if args.self_test:
+        return self_test(total)
 
     files: list[pathlib.Path] = []
     for pattern in TARGETS:
