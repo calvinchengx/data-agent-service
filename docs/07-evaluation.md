@@ -87,6 +87,35 @@ existed at the end. That is not hypothetical — a run compared 14 questions
 against 18 and reported one hash for both, so the number whose whole purpose is
 to make two scorecards comparable could not see that they were not.
 
+### Questions may run concurrently, and the fingerprint says whether they did
+
+`--concurrency N` runs N questions at once. **The default is 1, and that is
+the setting for a number you intend to record** — the questions share one
+rate-limited gateway, so a concurrent run is a different measurement rather
+than the same one faster. Raise it for a quick check.
+
+A gold run of 48 questions scored 48/48 at both `1` and `4`, in the same
+question order. That is reassurance, not a licence: the setting is **recorded
+in the fingerprint** rather than assumed harmless, so a reader comparing two
+scorecards can see which they have instead of guessing.
+
+Three things it had to not break, and each is a place the naive version does:
+
+* **Tokens are resolved before the fan-out.** Otherwise N threads discover the
+  same missing token at once and race to fetch it.
+* **The connection pool and the gold rows are behind a lock**, and printing is
+  atomic — interleaved half-lines from four questions are not a log.
+* **The APIM rate limit is raised for the run and restored in a `finally`.**
+  Concurrency makes this sharper rather than introducing it — 18 sequential
+  questions of several calls each already reach 60/minute, and `--concurrency
+  4` reaches it four times faster. A 429 mid-run reads exactly like a service
+  defect, and cost real time proving it was not one. Raising it is best-effort
+  (a run against real Azure has no management access here and should still
+  measure something), which is why the restore is `contextlib.suppress`ed too.
+
+Concurrency buys wall-clock on the harness. It is not one of the latency
+levers in §21 of the plan — it makes *measuring* cheaper, not answering.
+
 ## Running the model
 
 There are two backends, and a baseline. They are not interchangeable, and the

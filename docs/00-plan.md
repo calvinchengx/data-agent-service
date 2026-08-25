@@ -210,7 +210,7 @@ Emulator numbers are relative (laptop SQL Server sidecar), not Fabric capacity �
 | 9 Go executor | C7 + conformance + k6 rerun | conformance green; comparison table; ADR | 8 |
 | 10 Client-agnostic | OAuth discovery + `e2e/clients/` | Claude/Cursor/VS Code/SDK clients connect with no custom code | 5 |
 | 11 Production | C12 + `docs/10-production.md` | `make test eval load ENV=prod` green; parity column filled | 7, 8, 10 |
-| 13 Sources | `SourceBackend` adapters `databricks`, `snowflake`, `postgres` (witnessed on sibling emulators / container); `docs/09-adding-a-source.md`; REST-variant eval metrics | each adapter passes conformance + its use-case evals | 11 |
+| 13 Sources (partly) | `SourceBackend` adapters `postgres`, `databricks`, `duckdb`, `rest` — **all four in both executors** as of v0.3.0 (`duckdb` opt-in in Go via `-tags duckdb`); `snowflake` unbuilt; `docs/09-adding-a-source.md`; REST-variant eval metrics | each adapter passes conformance + its use-case evals. `postgres` is the one carrying phase13 witnesses; `databricks` is unwitnessed in **both** executors, which is a missing witness rather than a missing adapter | 11 |
 | 14 Skills ✅ | C15 | evals re-run with skill hashes pinned; no scorecard regression vs Phase 7 | 7 |
 | 15 Promotion ✅ | C16 + 15b catalog gaps + persona-replay eval | promoter fires on seeded recurring template, not on one-offs; no prose in store; title "Resolution Time by Team"; candidates visible only to `DAS_PROMOTE_ROLES` | 8, 14 |
 | 16 Dashboard publish ✅ | C17 | `SemanticModel` + `Report` items created in Fabric via OBO (emulator: definition persisted; rendering prod-only); OM `Dashboard` lineage present; DAX measure == SQL answer | 15 |
@@ -218,6 +218,7 @@ Emulator numbers are relative (laptop SQL Server sidecar), not Fabric capacity �
 | 19a Dashboard targets | `DashboardTarget` + `Plan` + `plan.schema.json`; Power BI extracted; Go generator | phase-16 witnesses pass unchanged; a non-Fabric candidate gets a *reason*; Go and Python artefacts byte-equal | 16 |
 | 20 Latency & fast path | per-hop instrumentation; catalog prefetched into the cached prompt; `Canonicaliser` protocol dispatched on `surface` (SQL + HTTP); fast path built against the protocol (§21) | per-hop latency recorded by phase; hop count falls with no eval regression; an HTTP line canonicalises with no literal on the released surface and a truncated URL is refused | 15, 19a |
 | 12 Stretch ✅ | LLM via APIM (`llm-token-limit`); `DAS_OM_CONTEXT_MODE=native` | 429 after quota; native passes same evals | 11 |
+| 12b Model seam ✅ | the model is a `Protocol` with Anthropic and OpenAI implementations behind one gateway (`DAS_LLM_PROTOCOL`, `DAS_LLM_BASE_URL`); the model route authenticates its caller; a backend declares per turn what it cannot honour; `docs/21-llm-backends.md` | `make conformance-models` 16/16 against both wire shapes in CI, asserting on what the far side RECEIVED — a refusal the model cannot see is one it retries forever; `e2e.run` phase12 returns 429 after quota on both `/llm/anthropic` and `/llm/openai` | 12 |
 
 > **Phase 15 was marked complete before it was.** The exit test says candidates
 > are "visible only to `DAS_PROMOTE_ROLES`", and for a while that setting was
@@ -229,9 +230,14 @@ Emulator numbers are relative (laptop SQL Server sidecar), not Fabric capacity �
 MVP = phases 0–7 + 10. Then 8, 9, 11, 12.
 
 **Every phase carrying a ✅ is landed and witnessed** — **167 witnesses**, green in CI on
-every push. **19a and 20 are not**: they are written down here as scope, and a row in this
-table is a plan until a witness says otherwise — which is the same rule Phase 15 was marked
-complete in violation of, noted below.
+every push. **13, 19a and 20 are not**: they are written down here as scope, and a row in
+this table is a plan until a witness says otherwise — which is the same rule Phase 15 was
+marked complete in violation of, noted below. Phase 13 is the interesting one, and it is
+un-ticked for two different reasons: `snowflake` is not built at all, and `databricks` is
+built in both executors but **witnessed in neither** — no run against a real warehouse
+(`docs/upstream-issues.md` 12). Only `postgres` carries phase13 witnesses; `duckdb` is held
+by unit tests and its own CI job. A row is done or it is not, and "mostly" is how 15 went
+wrong.
 `docs/parity.md` remains the honest record of what has been proved against the emulators versus against real Azure: nothing in this table is a claim about production until that ledger says so.
 
 ---
@@ -641,7 +647,7 @@ starts before this does.**
 | 2 | Effort tiered per hop | ~1 s/hop on presentation | accuracy risk on the SQL hop |
 | 3 | Stream the final hop | perceived only | none |
 | 4 | Known-question fast path | ~1 s, no model | only for repeats |
-| 5 | Parallel tool calls in one turn | 1–2 hops | none |
+| 5 | Parallel tool calls in one turn **✅ built** | 1–2 hops | none |
 
 **1 is the one to bet on.** `agent.py` says business meaning "arrives from the
 catalog at runtime", and that is 4–6 hops per question spent rediscovering it.
@@ -654,6 +660,28 @@ stale copy it does not say is stale.
 
 **2 needs Step 0 first.** `DAS_EFFORT=high` runs on all seven hops including
 "read this result and say it in a sentence".
+
+**Lever 5 is built.** A turn's `tool_use` blocks are independent by
+construction — none of them can read another's result, because the model has
+not seen any of them yet — so `agent.py` runs them on a bounded pool
+(`DAS_TOOL_CONCURRENCY`, default 4) and reassembles the results **in the order
+the model asked for them**, not the order they finished. That ordering is not
+a nicety: results are matched to `tool_use` ids downstream and the evals read
+a run's SQL positionally, so a turn that reordered its answers would report
+the wrong statement for the wrong call. `DAS_TOOL_CONCURRENCY=1` restores the
+sequential loop, which is what gives a latency measurement a baseline.
+
+Two things it cost, both paid. `McpServer` had read-modify-write state on the
+request path — the JSON-RPC id, and the session id the server hands back on
+first contact — now under a lock that is never held across the HTTP call, so
+calls to the *same* server still overlap. And a refusal had to stay a
+**result**: under fan-out a raising call could take down the whole turn and
+cost a sibling the answer it had already computed, so the tests assert that
+one refusal leaves its siblings' answers intact.
+
+What lever 5 does **not** buy: it is bounded by how often the model asks for
+two tools in one turn, and that is unmeasured — Step 0 again. It cannot turn
+seven sequential hops into two; only lever 1 does that.
 
 **Lever 1 is built and measurable, and not yet measured.**
 `DAS_GROUNDING_PREFETCH` is off by default, and `--prefetch-arm` adds an arm
