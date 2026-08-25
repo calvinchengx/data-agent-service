@@ -19,7 +19,7 @@ an SBOM. `latest` follows the most recent tag.
 | Size | ~290 MB | **~19.5 MB** |
 | Throughput (this machine, 5 VUs) | 242 req/s | **965 req/s** |
 | Base | Debian + ODBC, unixODBC, Kerberos | distroless, static binary |
-| Sources | fabric / azuresql / synapse, postgres, databricks | fabric / azuresql / synapse, postgres |
+| Sources | fabric / azuresql / synapse, postgres, duckdb, databricks, rest | the same, with duckdb behind `-tags duckdb` |
 
 Both satisfy `services/contract/openapi.json` — 28 assertions, and
 `DAS_EXECUTOR=go make conformance` passes them against every configured
@@ -30,10 +30,18 @@ measuring both was worth.
 Choose with `DAS_EXECUTOR=py|go`. Nothing above the executor changes: the
 gateway, the guard, the access rules and the catalog are the same either way.
 
-The one asymmetry worth knowing is the last row above. The Databricks adapter
-exists in Python only; a deployment that configures a `databricks` source must
-run the Python image, and the Go executor will refuse that source by name
-rather than mis-routing it.
+The one asymmetry worth knowing is the last row above, and it is DuckDB
+rather than an engine. The Go adapter reaches `libduckdb` through `dlopen`,
+which costs the static binary and the distroless base, so it is built with
+`-tags duckdb` on a loader-carrying base rather than shipped to every
+deployment that has no DuckDB source. A default Go image refuses a `duckdb`
+source at start-up, not at the first query.
+
+What is no longer an asymmetry: Databricks and the REST surface were
+Python-only at v0.2.0 and are in both executors now. Databricks is unwitnessed
+in **both** — neither has been run against a real warehouse — which is one gap
+shared by the two images rather than a difference between them. Every row of
+the parity table now agrees; see [Go parity](16-go-parity.md).
 
 ## Cutting a release
 

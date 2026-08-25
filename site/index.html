@@ -425,10 +425,10 @@ footer a{text-decoration:none}
         <thead><tr><th>Capability</th><th>Status</th><th>What backs it</th></tr></thead>
         <tbody>
           <tr><td>Fabric + PostgreSQL, both executors</td><td><span class="tag t-ship">shipped</span></td><td>28/28 contract against each; two datasets live in two engines</td></tr>
-          <tr><td>Databricks adapter</td><td><span class="tag t-wip">shipped, unwitnessed</span></td><td>In <code>executor-py</code> with unit tests, over the Statement Execution API — but never run against a real workspace, and absent from the Go executor</td></tr>
+          <tr><td>Databricks adapter</td><td><span class="tag t-wip">shipped, unwitnessed</span></td><td>In <em>both</em> executors, over the Statement Execution API, with unit tests on each — but neither has been run against a real workspace</td></tr>
           <tr><td>Fabric Lakehouse</td><td><span class="tag t-wip">untested</span></td><td>Its SQL analytics endpoint is the same TDS surface the Warehouse exposes, so the existing adapter should reach it — nothing here has tried</td></tr>
           <tr><td>Snowflake</td><td><span class="tag t-plan">not built</span></td><td>~150 lines against External OAuth trusting Entra; plan §15</td></tr>
-          <tr><td>DuckDB</td><td><span class="tag t-plan">not supported</span></td><td>No adapter and no dialect entry — it appears nowhere in the code</td></tr>
+          <tr><td>DuckDB</td><td><span class="tag t-ship">shipped</span></td><td>Both executors, opened read-only; opt-in in Go behind <code>-tags duckdb</code>, which is what keeps the static binary and the distroless base</td></tr>
           <tr><td>MCP, client-agnostic</td><td><span class="tag t-ship">witnessed</span></td><td>28 checks; two independent official SDKs</td></tr>
           <tr><td>OBO per-user authorization</td><td><span class="tag t-ship">witnessed</span></td><td>Three personas, including a denial</td></tr>
           <tr><td>Guardrails on the parse tree</td><td><span class="tag t-ship">shipped</span></td><td>Unit corpus shared by both implementations</td></tr>
@@ -464,8 +464,8 @@ docker pull ghcr.io/calvinchengx/data-agent-service/executor-go:0.2.0</code></pr
       <table class="tbl">
         <thead><tr><th>Image</th><th>Size</th><th>Platforms</th><th>Engines it serves</th></tr></thead>
         <tbody>
-          <tr><td><code>executor-go</code></td><td>19.5&nbsp;MB</td><td>linux/amd64 · linux/arm64</td><td>Fabric (T-SQL over TDS), PostgreSQL</td></tr>
-          <tr><td><code>executor-py</code></td><td>290&nbsp;MB</td><td>linux/amd64 · linux/arm64</td><td>Fabric, PostgreSQL, Databricks</td></tr>
+          <tr><td><code>executor-go</code></td><td>19.5&nbsp;MB</td><td>linux/amd64 · linux/arm64</td><td>Fabric (T-SQL over TDS), PostgreSQL, Databricks, REST; DuckDB opt-in</td></tr>
+          <tr><td><code>executor-py</code></td><td>290&nbsp;MB</td><td>linux/amd64 · linux/arm64</td><td>Fabric, PostgreSQL, DuckDB, Databricks, REST</td></tr>
         </tbody>
       </table>
     </div>
@@ -475,8 +475,9 @@ docker pull ghcr.io/calvinchengx/data-agent-service/executor-go:0.2.0</code></pr
       <a href="docs/adr/0001-two-executors/">ADR&nbsp;0001</a>.</p>
     <div class="note">
       <b>What this version does not yet do.</b>
-      <p>The REST adapter landed after v0.1.0 and is Python-only — the Go executor has neither it nor
-        a Databricks adapter, recorded in ADR&nbsp;0001 rather than discovered later. GraphQL is not
+      <p>The REST and Databricks adapters were Python-only at v0.2.0; both executors carry them now,
+        and every row of the parity table agrees. What is still missing is a <em>witness</em>, not an
+        adapter: neither Databricks adapter has been run against a real workspace. GraphQL is not
         built. An unknown source <code>kind</code> is refused outright rather than guessed at, so a
         source no adapter handles fails loudly instead of being answered from the wrong engine.</p>
     </div>
