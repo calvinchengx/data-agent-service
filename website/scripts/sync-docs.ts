@@ -152,7 +152,10 @@ const GLOSS: Record<string, string> = {
   '20-ask-service': 'a ticket, then a stream, so a client can speak first',
   '05-authorization': 'how one user sees different rows than another, and which apps may ask',
   '19-classification': 'a label in OpenMetadata becomes a column the answer will not show',
-  '09-adding-a-source': 'an adapter, a dialect, and an authz tier',
+  // Not "authz tier": gitleaks' generic-api-key rule reads `auth` as a
+  // keyword and captures the NEXT quoted key as the secret. A false
+  // positive is a reason to reword one line, never to allowlist a file.
+  '09-adding-a-source': 'an adapter, a dialect, and whose permissions apply',
   '07-evaluation': 'does the catalog change the answer?',
   '08-load-testing': 'and what the gateway costs',
   '13-testing': 'what each layer of the suite is for',
