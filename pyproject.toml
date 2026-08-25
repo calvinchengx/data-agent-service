@@ -1,6 +1,6 @@
 [project]
 name = "data-agent-service"
-version = "0.2.0"
+version = "0.3.0"
 description = "Governed Data Agent: NL questions over Fabric Warehouses, grounded in OpenMetadata, fronted by APIM"
 requires-python = ">=3.12"
 license = "Apache-2.0"
