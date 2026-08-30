@@ -114,13 +114,13 @@ jobs:
         with:
           go-version-file: services/warehouse-query-go/go.mod
           cache-dependency-path: services/warehouse-query-go/go.sum
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
       - if: matrix.language == 'go'
         run: go build ./...
         working-directory: services/warehouse-query-go
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
