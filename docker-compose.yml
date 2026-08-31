@@ -93,7 +93,7 @@ services:
       start_period: 20s
 
   fabric-emulator:
-    image: ghcr.io/calvinchengx/fabric-emulator:${FABRIC_EMULATOR_VERSION:-0.32.0}
+    image: ghcr.io/calvinchengx/fabric-emulator:${FABRIC_EMULATOR_VERSION:-0.35.0}
     depends_on:
       entra-emulator:
         condition: service_healthy
