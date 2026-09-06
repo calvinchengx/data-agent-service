@@ -106,7 +106,7 @@ def _column_for(node: exp.Expression) -> str:
     return columns[0].name.lower() if columns else ""
 
 
-def _normalise_aliases(tree: exp.Expression) -> None:
+def _normalise_aliases(tree: exp.Expr) -> None:
     """Rename every alias positionally, in place.
 
     Alias choice is the analyst's, not the question's: `AS m` and

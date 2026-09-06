@@ -258,7 +258,7 @@ def _verify_ceiling_survived(rewritten: str, row_limit: int, policy: Policy) -> 
         )
 
 
-def _columns_read(tree: exp.Expression, tables: set[str]) -> tuple[str, ...]:
+def _columns_read(tree: exp.Expr, tables: set[str]) -> tuple[str, ...]:
     """Every column the statement READS, qualified by table.
 
     A column named in WHERE or GROUP BY has been read as surely as one in the
@@ -298,9 +298,17 @@ def _columns_read(tree: exp.Expression, tables: set[str]) -> tuple[str, ...]:
     return tuple(sorted(out))
 
 
-def _apply_limit(root: exp.Expression, policy: Policy) -> tuple[exp.Expression, int]:
+def _apply_limit(root: exp.Query, policy: Policy) -> tuple[exp.Query, int]:
     """Enforce the ceiling with the dialect's own construct, keeping a smaller
-    caller-supplied limit if there is one."""
+    caller-supplied limit if there is one.
+
+    `exp.Query` rather than `exp.Expression`, because `.limit` lives on Query
+    and not on Expression. The guard above already refuses anything that is not
+    a SELECT, a UNION, an EXCEPT or an INTERSECT -- and all four are Query
+    subclasses -- so this was never wrong at runtime. It was unprovable, which
+    is a different thing: the type said any expression would do, and any
+    expression would not.
+    """
     cap = policy.max_rows
     if policy.dialect == "tsql":
         existing = root.args.get("limit")
