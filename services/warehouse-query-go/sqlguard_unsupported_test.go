@@ -17,11 +17,17 @@ func policyFor(dialect string) Policy {
 func TestAConstructTheGuardCannotReadIsNamed(t *testing.T) {
 	// These get replaced as the port learns to read them, which is the point:
 	// window functions, PIVOT and GROUP BY ROLLUP were all here and all now
-	// parse. What is left is whatever the backlog still holds.
+	// parse, and sqlglot-go v0.4.0 learned CLUSTER BY and FORMAT(a, fmt) too.
+	// What is left is whatever the backlog still holds.
+	//
+	// Replace a case with one of the SAME KIND where possible, so the list keeps
+	// covering different shapes of gap rather than three trailing clauses. Only a
+	// NAMED refusal belongs here: a construct refused with an empty name is
+	// refused for what it is (see the test below), not for a gap in the port.
 	for _, tc := range []struct{ sql, want string }{
-		{"SELECT a FROM dbo.t CLUSTER BY b", "trailing tokens at CLUSTER BY"},
+		{"SELECT a FROM dbo.t CONNECT BY PRIOR a = b", "trailing tokens at CONNECT BY"},
 		{"SELECT a[0][0].b.c[1].d FROM dbo.t", "trailing tokens"},
-		{"SELECT FORMAT(a, 'x') FROM dbo.t", "function FORMAT with this many arguments at FROM"},
+		{"SELECT a FROM dbo.t MATCH_RECOGNIZE (ORDER BY a)", "identifier at ORDER BY"},
 	} {
 		_, err := Guard(tc.sql, policyFor("tsql"))
 		if err == nil {

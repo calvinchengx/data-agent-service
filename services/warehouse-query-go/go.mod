@@ -6,7 +6,7 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/calvinchengx/go-pduckdb v0.2.1-calvinchengx.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/microsoft/go-mssqldb v1.11.0
 )
 
@@ -16,7 +16,7 @@ require (
 )
 
 require (
-	github.com/calvinchengx/sqlglot-go v0.3.0
+	github.com/calvinchengx/sqlglot-go v0.4.0
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
