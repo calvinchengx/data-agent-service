@@ -325,18 +325,29 @@ The argument holds only while the write verb comes first, and there it stops:
 ```
 WITH c AS (SELECT 1) INSERT INTO dbo.t SELECT * FROM c
   python:  only SELECT is allowed … (got INSERT)
-  go:      could not parse as tsql: unsupported statement: expression at "INTO"
+  go (then): could not parse as tsql: unsupported statement: expression at "INTO"
+  go (now):  parses to Insert, writes back byte for byte identical to python
 
 BEGIN TRANSACTION
-  python:  … (got TRANSACTION)      go:  … (got BEGIN)
+  python:  … (got TRANSACTION)      go (then):  … (got BEGIN)
+  go (now): parses to Transaction, writes back byte for byte identical to python
 ```
 
-A verb after a `WITH` clause cannot be named without parsing past the CTE. Both
-guards still REFUSE, so there is no security divergence -- but they refuse for
-different reasons, which is the `must_parse_to_refuse` failure the conformance
-suite exists to catch, and neither statement is in the shared corpus, which is
-why nothing caught them. **Both are open.** A5 is the bounded piece of statement
-grammar that closes them; the remaining ~848 belong to Target B.
+A verb after a `WITH` clause cannot be named without parsing past the CTE.
+**Closed** -- the port now parses both `WITH … INSERT`/`WITH … UPDATE` and
+`BEGIN TRANSACTION` into the same tree the reference builds, verified against
+the pinned reference for both statements above (byte-identical output) and
+covered by 5 committed cases in `testdata/expected/`. A5 was the bounded piece
+of statement grammar that closed them; the remaining ~848 belong to Target B.
+Bare `BEGIN` opening a block (no `TRANSACTION`/`TRAN` following) stays refused
+on purpose: the reference itself gives up there and returns an opaque
+`Command`, which this port's architecture deliberately does not replicate --
+its own refusal points differ from the reference's, so a Command built from a
+different give-up point would be a tree the reference never actually builds.
+Not verified here: whether
+`services/warehouse-query-go`'s own conformance corpus (the
+`must_parse_to_refuse` category) has been re-run against this parser change: it
+lives outside `sqlglot-go` and this session did not touch it.
 
 ### Tier 3 / Target B — the rest of sqlglot
 
@@ -381,8 +392,7 @@ non-DDL bucket, and it is tables rather than an algorithm, which is the idiom
 this port already runs on. So the sequence is:
 
 ```
-A1..A4, B0, B2 (done) -> [DuckDB oracle] -> B4 simplify -> B1 -> B3 -> B5 -> B6
-  (A5 still open -- see the guard divergence above)
+A1..A4, A5, B0, B2 (done) -> [DuckDB oracle] -> B4 simplify -> B1 -> B3 -> B5 -> B6
 ```
 
 **The named CLUSTERS were closed; Target A was not.** This section used to say
@@ -397,7 +407,7 @@ form -- `MAP {'x': 1}` -- and not the ordinary calls, which parse. `ANY` (6)
 stays refused deliberately: it has a parser in the reference and no signature
 here, so building it as an anonymous call would invent a tree the reference
 never makes. Target A's own definition is that the four dialect suites
-round-trip, and they still do not -- A5 is open, and the long tail is real.
+round-trip, and they still do not -- A5 is closed, but the long tail is real.
 
 What was true is that no CLUSTER was left. Everything since has been won a
 mechanism at a time, and that has been worth more than the clusters were: 491
@@ -415,7 +425,7 @@ best one in this document. What each phase has reached:
 | phase | state | measured by |
 |---|---|---|
 | **Target A** (A1--A4) | **done** | A3/A4 closed last, having been named and skipped once |
-| **A5** statement grammar | **open** | `WITH … INSERT` and `BEGIN TRANSACTION` still refuse; 21 corpus statements |
+| **A5** statement grammar | **done** | `WITH … INSERT`/`WITH … UPDATE` and `BEGIN TRANSACTION` parse and write back byte-identical to the reference; bare `BEGIN` stays refused by policy (see above) |
 | **execution oracle** | **done**, and extended twice | 342 statements executed and compared across 2 engines, 7 known divergences |
 | **B4** `simplify` | **started** | 224 of the reference's 480-pair contract |
 | **B1** `annotate_types` | **started** | 48 of 113 scope-free cases, 0 wrong |
