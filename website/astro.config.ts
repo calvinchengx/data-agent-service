@@ -84,6 +84,7 @@ export default defineConfig({
           label: 'Reference',
           items: [
             { slug: '00-plan' },
+            { slug: '22-charts' },
             { slug: '15-http-sources' },
             { slug: '16-go-parity' },
             { slug: '17-sqlglot-go' },

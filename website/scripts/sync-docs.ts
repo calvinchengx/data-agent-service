@@ -169,6 +169,7 @@ const GLOSS: Record<string, string> = {
   '12-promotion': 'a recurring question becomes a dashboard, with no prose stored',
   '14-publishing': 'Power BI, Superset and Tableau from one plan',
   '15-adding-a-dashboard-target': 'one plan, another renderer',
+  '22-charts': 'a proposal: dbt Charts may draw the data, never fetch it',
   '15-http-sources': 'an OpenAPI document is the allow-list; GraphQL is not built',
   '16-go-parity': 'what each implementation can do, measured',
   parity: 'the ledger that separates the emulators from real Azure',
