@@ -1,9 +1,10 @@
 # Charts with dbt Charts
 
-> **Status: proposal. Nothing here is built.** This page records how
-> [dbt Charts](https://dbtcharts.com/blog/charts-built-for-chat/) could fit
-> this service, and the one way it must not. It becomes a design only after
-> the spike at the end has run.
+> **Status: proposal, spike run once by hand (2026-09-17, `dct` 0.8.0).**
+> Nothing is built into the service. The spike showed that option 1 below
+> works, and only with a gate in front of `dct`: on its own it renders
+> numbers a model typed in and makes outbound requests a board asks for.
+> The spike is not a CI check, so nothing here is witnessed.
 
 dbt Charts is fine as a chart format and a renderer. It becomes a problem as
 soon as it queries the warehouse itself: that is a second route to the data,
@@ -20,10 +21,12 @@ declarative chart language released in September 2026.
 | `charts/` | sits beside dbt `models/` and may use `ref()`. A dbt project is **not** required. |
 | `dct validate` | checks a file and returns warnings an agent can act on ([docs](https://docs.dbtcharts.com/cli/validate/)) |
 | `dct render` / `dct serve` | produces SVG, HTML, PNG, PDF or terminal output |
-| Data access | DuckDB, SQLite, and local CSV/Parquet/JSON files built in; Postgres, Snowflake, BigQuery, Redshift, Databricks, Spark and Trino through extras ([PyPI](https://pypi.org/project/dbt-charts/0.6.0/)). The login is the dbt profile: one saved credential. |
+| Data access | source types in 0.8.0: `dbt_profile`, `postgres`, `snowflake`, `bigquery`, `redshift`, `mysql`, `trino`, `duckdb`, `sqlite`, `csv`, `json`, `parquet`, `http` ([PyPI](https://pypi.org/project/dbt-charts/)). A warehouse login is a dbt profile or environment variables: one saved credential. |
+| Query types | `sql`, `http` (any URL), `values` (rows written into the YAML), `schema` |
 | dbtCharts.com | a hosted service (public beta) where viewers do not need a warehouse login |
 
-Fabric/TDS is not among its supported warehouses.
+Fabric/TDS is not among its source types. Databricks is not a direct type
+either; it may be reachable through `dbt_profile`, which the spike did not try.
 
 ## Why it must not fetch the data
 
@@ -51,19 +54,21 @@ may not fetch it.
 caller ──run_query──▶ executor (OBO, deny_tagged, access rules)
                          │ rows, already governed
                          ▼
-                      result.parquet ──▶ dct validate ──▶ dct render ──▶ SVG
+                      result.json ──▶ dct validate ──▶ dct render ──▶ SVG
                          ▲
-model ──chart YAML───────┘   (chart type, fields, encodings; no SQL, no data)
+model ──chart YAML──▶ gate ┘   (charts and layout only; no SQL, no data, no URLs)
 ```
 
 - The executor runs the query exactly as it does today, as the caller.
 - The rows it returns are written to a local file, and the chart reads that
   file, never the warehouse. `dct` holds no credentials.
-- The model writes only the chart specification: no SQL, no values. What
-  the chart shows is the governed result, not anything the model typed, so
-  a model cannot draw a number the caller was not allowed to see.
-- `dct validate` becomes one more check that fails closed. A chart that does
-  not validate is not shown, and its warnings go back to the model.
+- The model writes only the chart specification, and **a gate enforces
+  that**; `dct` does not (see below). What the chart shows is then the
+  governed result, not anything the model typed.
+- `dct validate` and `dct render` both fail closed. A chart that fails
+  either is not shown, and the error goes back to the model. `validate`
+  alone is not enough: it does not check column names or whether a named
+  source exists.
 - It works for every source, Fabric included, because `dct` never connects
   to any of them.
 - A column withheld by `deny_tagged` cannot appear in the chart: it never
@@ -96,22 +101,69 @@ Not for any `user`-tier source. Not for DuckDB either: DuckDB is service tier
 permanently, but `deny_tagged` is enforced in the executor, and a hosted
 chart would read around it.
 
+### The gate
+
+The model's YAML is checked against an allow-list before `dct` sees it.
+Anything not named is refused, so a field a later `dct` release adds is
+refused until someone decides it is safe.
+
+| The model may write | Rule |
+|---|---|
+| top level | `charts` and exactly one of `rows`, `cols`, `grid` |
+| a chart | `query`, `type`, `x`, `y`, `color`, `sort`, `style` |
+| `query` | the one name we supply; never SQL |
+| `type` | `bar`, `line`, `area`, `scatter`, `pie`, `donut`, `table`, `histogram`, `heatmap` |
+| `x`, `y`, `color`, `sort.by` | a column of the governed result |
+| `style` | `aspect_ratio`, `number_format`, `orientation`, `stack` |
+
+The service writes everything else: the title (the promoter's, from the
+catalog), the single query `SELECT * FROM result`, its file source, and a
+`dbt_charts.yml` with no sources. `dct` runs with an empty environment, so
+there is no profile or warehouse variable for it to find.
+
+## What the spike found
+
+Run against the local stack: the promoted candidate *Net Revenue by Country*
+for FY2026, through the gateway, as the personas in
+[05](05-authorization.md).
+
+| Step | Result |
+|---|---|
+| alice (`Data.Analyst`) runs the promoted query | 3 rows; the executor added its `TOP 500` |
+| alice asks for `dim_customer.email` | refused: `Data.Analyst may not read dbo.dim_customer.email`. No file, so no chart. |
+| carol (`Data.Finance`) asks for the same column | 400 rows. The difference is the executor's decision, not the chart's. |
+| the model writes chart YAML from column names and types only | rendered on the second attempt, both times; `dct validate` named the mistake exactly (`sort.direction`, then `sort` on a table) |
+| `dct` renders with no credentials | SVG and PNG, fully offline |
+
+Seven hostile boards, each refused by the gate. What `dct` 0.8.0 does with
+them on its own:
+
+| Board | `dct` alone |
+|---|---|
+| a `values` query with typed-in numbers | **renders them** |
+| an `http` query | **makes the request** (pointed at a closed local port) |
+| a chart with `link:` | **renders it**, with the URL template embedded |
+| a free-text `callout` | **renders it** |
+| a column the caller cannot see | `validate` passes; `render` fails |
+| a named warehouse, no credentials | `validate` passes; `render` fails |
+| SQL inline in the chart | `validate` fails |
+
+It does protect one thing on its own: DuckDB file access is disabled, so
+`SELECT … FROM read_text('/etc/hosts')` over a file source was refused.
+
 ## Risks
 
 | Risk | Effect |
 |---|---|
-| Released days before this page was written; version 0.6 | the YAML and CLI may change under us |
+| Released days before the spike; 0.8.0 when it ran | the YAML and CLI may change under us; the allow-list is what keeps a new field from becoming a new route |
 | Semantic Layer support is planned, not shipped | our metric names come from OpenMetadata, not dbt; nothing maps them yet |
 | `ref()` assumes a dbt project | we have none; charts would read a file, which is what option 1 wants anyway |
 | Another tool in the image | both executors (Python and Go) would need it, or a separate renderer would |
 
-## The spike
+## Next
 
-1. Take one promoted candidate and run it through the executor as a test user.
-2. Write the result to Parquet.
-3. Have the model write the chart YAML; run `dct validate`, then `dct render`
-   to SVG.
-4. Assert that a column blocked by `deny_tagged` cannot appear in the chart,
-   and that `dct` is given no credentials.
-5. Only then decide where rendering runs, and whether option 2 is ever worth
-   its service-tier limit.
+1. Decide where rendering runs: inside each executor (Python and Go would
+   both need `dct`), or a separate renderer that takes the governed rows.
+2. Turn the gate and the hostile boards into a contract with cases, so it is
+   checked in CI rather than once by hand.
+3. Keep option 2 closed until OpenMetadata has a service type for it.
