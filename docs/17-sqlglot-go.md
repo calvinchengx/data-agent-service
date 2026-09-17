@@ -426,9 +426,9 @@ best one in this document. What each phase has reached:
 |---|---|---|
 | **Target A** (A1--A4) | **done** | A3/A4 closed last, having been named and skipped once |
 | **A5** statement grammar | **done** | `WITH … INSERT`/`WITH … UPDATE` and `BEGIN TRANSACTION` parse and write back byte-identical to the reference; bare `BEGIN` stays refused by policy (see above) |
-| **execution oracle** | **done**, and extended twice | 342 statements executed and compared across 2 engines, 7 known divergences |
-| **B4** `simplify` | **started** | 224 of the reference's 480-pair contract |
-| **B1** `annotate_types` | **started** | 48 of 113 scope-free cases, 0 wrong |
+| **execution oracle** | **done**, and extended repeatedly | ~550 statements executed and compared across 2 engines per run, 15 known divergences (each investigated and confirmed reference-reproduced, not a port bug) |
+| **B4** `simplify` | **effectively done** | 466 of the reference's 480-pair contract; of the remaining 14, 12 are not folded that far (6 of those are a deliberate non-goal -- a quirk of the reference's own bare pseudo-generator, not worth a second generator to reproduce) and 2 cannot be read/written back at all |
+| **B1** `annotate_types` | **effectively done** | 104 of 113 scope-free cases, 0 wrong; of the 9 remaining, 1 is a parser gap (`ALL(subquery)` reads anonymously), 1 needs a parameterised-type representation the port's `fixed` rule has nowhere to put (`STR_TO_MAP`'s `MAP<TEXT, TEXT>`), and the other 6 (`PERCENTILE_APPROX`/`APPROX_PERCENTILE`) are declined rather than recorded wrong -- their rule is conditional on a sibling argument's shape in a way the port's probe correctly detects it cannot verify |
 | B3, B5, B6 | not started | -- |
 
 Alongside the phases, the function-builder probe kept paying after A1 closed.
@@ -450,12 +450,17 @@ The oracle grew past what was planned for it, and each step paid:
   would agree.
 * **Simplify output**, which is the whole reason the oracle exists.
 
-**It has found seven bugs in sqlglot itself**, recorded in the port's
-`docs/upstream-issues.md` and reproduced rather than worked around. Two of them
-RUN and return a wrong answer -- `SELECT 0b1010` becomes `SELECT b'1010'`, an
-integer into a bit string; DuckDB's reversing slice `[:-:-1]` becomes a
-one-element slice. No tree or string comparison against sqlglot could ever have
-found either, because the port agrees with sqlglot exactly and both are wrong.
+**It has found nineteen bugs in sqlglot itself**, recorded in the port's
+`docs/upstream-issues.md` and reproduced rather than worked around -- most of
+the growth from seven came out of B4, where every DATE_TRUNC/date-arithmetic
+fold newly landed had to be checked against a real engine, and several turned
+out to promote a DATE to a wider type at runtime (DuckDB and Postgres both,
+independently) in a way the reference's own fold does not account for. Two of
+the earlier seven RUN and return a wrong answer -- `SELECT 0b1010` becomes
+`SELECT b'1010'`, an integer into a bit string; DuckDB's reversing slice
+`[:-:-1]` becomes a one-element slice. No tree or string comparison against
+sqlglot could ever have found either, because the port agrees with sqlglot
+exactly and both are wrong.
 
 Two harnesses were added that the plan did not anticipate, both because a
 rewrite can be wrong in ways a corpus diff cannot see:
@@ -608,7 +613,7 @@ writing them.
 | corpus harvest — sqlglot's whole dialect contract | ~40 | a day | **done** — 31 divergent trees |
 | 2 / Target A — full SELECT for four dialects | ~2,500 lines, mostly probes | **done** | measured, not guessed |
 | B0 / B2 — time formats, booleans, quantifier | ~600 | **done** | counted first, which reordered them |
-| 3 / Target B — the rest of sqlglot | ~30,000 | multi-quarter | **oracle done; B4 and B1 both started** |
+| 3 / Target B — the rest of sqlglot | ~30,000 | multi-quarter | **oracle done; B4 effectively done (466/480); B1 effectively done (104/113)** |
 
 Tier 1 first, with the harness before any parser code — so the first parser
 commit is already measured against the reference.
