@@ -429,7 +429,8 @@ best one in this document. What each phase has reached:
 | **execution oracle** | **done**, and extended repeatedly | ~550 statements executed and compared across 2 engines per run, 15 known divergences (each investigated and confirmed reference-reproduced, not a port bug) |
 | **B4** `simplify` | **effectively done** | 466 of the reference's 480-pair contract; of the remaining 14, 12 are not folded that far (6 of those are a deliberate non-goal -- a quirk of the reference's own bare pseudo-generator, not worth a second generator to reproduce) and 2 cannot be read/written back at all |
 | **B1** `annotate_types` | **effectively done** | 104 of 113 scope-free cases, 0 wrong; of the 9 remaining, 1 is a parser gap (`ALL(subquery)` reads anonymously), 1 needs a parameterised-type representation the port's `fixed` rule has nowhere to put (`STR_TO_MAP`'s `MAP<TEXT, TEXT>`), and the other 6 (`PERCENTILE_APPROX`/`APPROX_PERCENTILE`) are declined rather than recorded wrong -- their rule is conditional on a sibling argument's shape in a way the port's probe correctly detects it cannot verify |
-| B3, B5, B6 | not started | -- |
+| **B3** DDL/DML parsing | **effectively done** | 12 named gap-report entries closed to 1 (bare `BEGIN`, a deliberate non-goal -- see above); the port's own gap report (`make gaps`, against the same 4,508-statement corpus `TestAgainstReference` measures) stands at 7 refusals total, of which 4 are unrelated multi-statement-semicolon cases and 2 are non-DDL edge cases (a slice-step subscript, a list-comprehension-style expression) that belong to B1's territory, not B3's |
+| B5, B6 | not started | -- |
 
 Alongside the phases, the function-builder probe kept paying after A1 closed.
 Three kinds of builder it could not describe have since been recovered by
@@ -613,7 +614,7 @@ writing them.
 | corpus harvest — sqlglot's whole dialect contract | ~40 | a day | **done** — 31 divergent trees |
 | 2 / Target A — full SELECT for four dialects | ~2,500 lines, mostly probes | **done** | measured, not guessed |
 | B0 / B2 — time formats, booleans, quantifier | ~600 | **done** | counted first, which reordered them |
-| 3 / Target B — the rest of sqlglot | ~30,000 | multi-quarter | **oracle done; B4 effectively done (466/480); B1 effectively done (104/113)** |
+| 3 / Target B — the rest of sqlglot | ~30,000 | multi-quarter | **oracle done; B4 effectively done (466/480); B1 effectively done (104/113); B3 effectively done (gap report 19 -> 7)** |
 
 Tier 1 first, with the harness before any parser code — so the first parser
 commit is already measured against the reference.
