@@ -476,6 +476,28 @@ rewrite can be wrong in ways a corpus diff cannot see:
 * **Never write what the parser would refuse to read.** The generator now
   applies the parser's own refusal condition before choosing a spelling.
 
+#### Per-dialect parse coverage against the reference
+
+Measured by `TestAgainstReference` at reference `ceb5111421e9`. "Unparsed" is a statement the port declines; **mismatched** (parsing to a wrong tree) is 0 everywhere, and every dialect is also 0 wrong on the generation side.
+
+| Dialect | Exact match | Mismatched | Notes |
+|---|---|---|---|
+| neutral (base) | 994/997 (99.7%) | 0 | Target A core |
+| tsql | 595/597 (99.7%) | 0 | Target A |
+| postgres | 857/857 (100%) | 0 | Target A |
+| duckdb | 1629/1631 (99.9%) | 0 | Target A |
+| databricks | 426/426 (100%) | 0 | Target A |
+| redshift | 275/307 (89.6%) | 0 | B5 |
+| materialize | 44/51 (86.3%) | 0 | B5 |
+| risingwave | 12/14 (85.7%) | 0 | B5; the 2 unparsed are Kafka `CREATE SOURCE`/`SINK` |
+| fabric | 47/47 (100%) | 0 | B5; no gaps, no refusals |
+| presto | 568/596 (95.3%) | 0 | B5 |
+| trino | 175/253 (69.2%) | 0 | B5; a Presto subclass, unparsed is mostly `WITH FUNCTION` |
+| dremio | 54/61 (88.5%) | 0 | B5; unparsed is `AT SNAPSHOT`/`AT TIMESTAMP` |
+| mysql | 521/638 (81.7%) | 0 | B5; the largest B5 landing, 117 honest refusals |
+
+21 dialects remain in B5. Fabric is the only B5 dialect at a full match.
+
 ### What B1 was worth, against what this document predicted
 
 It said the statements genuinely waiting on `annotate_types` "number about
