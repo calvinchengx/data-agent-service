@@ -10,5 +10,10 @@
     "preinstall": "npx only-allow pnpm",
     "docs:dev": "pnpm --filter data-agent-service-docs dev",
     "docs:build": "pnpm --filter data-agent-service-docs build"
+  },
+  "pnpm": {
+    "overrides": {
+      "lodash-es": "^4.18.1"
+    }
   }
 }
