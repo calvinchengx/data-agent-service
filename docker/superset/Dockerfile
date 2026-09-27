@@ -11,7 +11,7 @@
 #
 # Nothing is patched. One `pip install` of pinned drivers, on a digest-pinned
 # base. §20's 19c row adds the ODBC driver here for the Fabric warehouse.
-FROM apache/superset:5.0.0@sha256:09735adaae3945c5a8fabbeca31a7954c8c74de195702ba61622aee8604d5c55
+FROM mirror.gcr.io/apache/superset:5.0.0@sha256:09735adaae3945c5a8fabbeca31a7954c8c74de195702ba61622aee8604d5c55
 
 USER root
 # `uv`, because that is what the image itself is built with -- its venv ships
