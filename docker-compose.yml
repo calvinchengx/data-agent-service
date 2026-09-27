@@ -137,7 +137,7 @@ services:
   # OpenMetadata 1.13.2 exactly as fabric-emulator's governance profile runs
   # it (Postgres + OpenSearch; OpenSearch because semantic search needs it).
   om-postgresql:
-    image: docker.getcollate.io/openmetadata/postgresql:1.13.2
+    image: ghcr.io/calvinchengx/openmetadata-postgresql:1.13.2
     command: "--work_mem=10MB"
     environment:
       POSTGRES_USER: postgres
@@ -151,7 +151,7 @@ services:
       retries: 10
 
   om-opensearch:
-    image: opensearchproject/opensearch:3.4.0
+    image: mirror.gcr.io/opensearchproject/opensearch:3.4.0
     environment:
       - discovery.type=single-node
       - OPENSEARCH_JAVA_OPTS=-Xms1024m -Xmx1024m
@@ -166,7 +166,7 @@ services:
       retries: 10
 
   om-migrate:
-    image: docker.getcollate.io/openmetadata/server:1.13.2
+    image: ghcr.io/calvinchengx/openmetadata-server:1.13.2
     command: "./bootstrap/openmetadata-ops.sh migrate"
     environment: &om-env
       DB_HOST: om-postgresql
@@ -183,7 +183,7 @@ services:
         condition: service_healthy
 
   openmetadata:
-    image: docker.getcollate.io/openmetadata/server:1.13.2
+    image: ghcr.io/calvinchengx/openmetadata-server:1.13.2
     ports:
       - "${OM_PORT:-8585}:8585"
     environment: *om-env
@@ -223,7 +223,7 @@ services:
   # witnessed without a model credential. Never in the service's request path:
   # the `llm` API points here only when DAS_LLM_BACKEND says so.
   llm-stub:
-    image: python:3.12-slim
+    image: mirror.gcr.io/library/python:3.12-slim
     command: ["python", "/app/main.py"]
     volumes:
       - ./services/llm-stub:/app:ro
@@ -284,7 +284,7 @@ services:
   # having it in the stack means the weaker path is exercised rather than
   # described.
   postgres:
-    image: postgres:16-alpine
+    image: mirror.gcr.io/library/postgres:16-alpine
     environment:
       POSTGRES_USER: das
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-das-local-only}
@@ -320,7 +320,7 @@ services:
   # production would reject is the emulator-only path this repo refuses.
   superset-db:
     profiles: ["superset"]
-    image: postgres:16-alpine
+    image: mirror.gcr.io/library/postgres:16-alpine
     environment:
       POSTGRES_USER: superset
       POSTGRES_PASSWORD: ${SUPERSET_DB_PASSWORD:-superset-local-only}

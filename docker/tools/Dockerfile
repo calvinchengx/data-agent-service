@@ -26,7 +26,7 @@ RUN npm init -y >/dev/null \
 
 FROM ${BASE_REGISTRY}/python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.11.32 /uv /uvx /bin/
-COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=mirror.gcr.io/library/node:22-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=jsdeps /opt/mcp-js /opt/mcp-js
 # mssql-python bundles its own ODBC driver; it needs these to load.
 RUN apt-get update && apt-get install -y --no-install-recommends \
