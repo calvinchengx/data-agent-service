@@ -184,7 +184,7 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         with:
-          version: v2.13.1
+          version: v2.14.0
           working-directory: services/warehouse-query-go
       # The Go guard is held to the Python guard's recorded verdicts, for SQL
       # and for HTTP alike. Those records are only worth anything if they still
@@ -304,7 +304,7 @@ jobs:
       - run: go test -tags duckdb ./...
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13.1
+          version: v2.14.0
           working-directory: services/warehouse-query-go
           args: --build-tags duckdb
 

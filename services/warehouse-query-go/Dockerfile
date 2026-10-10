@@ -29,7 +29,7 @@
 # are byte-identical to Docker Hub's, checked before switching. Override
 # BASE_REGISTRY to pull from anywhere else, including Docker Hub itself.
 ARG BASE_REGISTRY=mirror.gcr.io/library
-FROM ${BASE_REGISTRY}/golang:1.26-alpine AS build
+FROM ${BASE_REGISTRY}/golang:1.27-alpine AS build
 WORKDIR /src
 COPY services/warehouse-query-go/go.mod services/warehouse-query-go/go.sum ./
 RUN go mod download
