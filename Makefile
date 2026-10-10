@@ -79,7 +79,7 @@ seed: ## Seed warehouse data, OpenMetadata semantics, authz, and APIM resources 
 GOLANGCI  = golangci/golangci-lint:v2.13.1
 # Pinned like every other image here: a toolchain that floats is a build that
 # passes on a laptop and fails in CI for reasons nobody changed.
-GO_IMAGE  = golang:1.26
+GO_IMAGE  = golang:1.27
 # Terraform runs in a container like every other tool here, so a fresh clone
 # still needs Docker and nothing else. `init -backend=false` downloads the
 # providers and touches no state, which is what makes these checks offline.

@@ -1,3 +1,3 @@
 module github.com/calvinchengx/data-agent-service/publisher
 
-go 1.26.7
+go 1.27.2
