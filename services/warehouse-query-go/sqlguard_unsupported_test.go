@@ -93,9 +93,13 @@ func TestTheLabelCarriesNoCallerData(t *testing.T) {
 			continue
 		}
 		label := strings.ToLower(unsupportedConstruct(err))
+		msg := strings.ToLower(err.Error())
 		for _, secret := range secrets {
 			if strings.Contains(label, strings.ToLower(secret)) {
 				t.Errorf("%q: the label %q leaked %q", sql, label, secret)
+			}
+			if strings.Contains(msg, strings.ToLower(secret)) {
+				t.Errorf("%q: Error() leaked %q: %v", sql, secret, err)
 			}
 		}
 	}
@@ -117,8 +121,8 @@ func TestTheLabelIsProducedForEveryDialect(t *testing.T) {
 
 // A CREATE now PARSES, where it used to be refused for being unreadable. The
 // read-only verdict must not have moved with it: the guard reports on the
-// ROOT CLASS, which is the same answer by another route, and IsWrite is the
-// belt to that brace.
+// root class, and IsWrite is the belt for a write that still looks like a
+// query.
 func TestAParsedWriteIsStillRefused(t *testing.T) {
 	for _, tc := range []struct{ sql, want string }{
 		{"CREATE TABLE dbo.t (a INT)", "only SELECT is allowed; this endpoint is read-only (got CREATE)"},

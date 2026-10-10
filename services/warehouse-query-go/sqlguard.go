@@ -175,6 +175,9 @@ func Guard(sql string, p Policy) (*Verdict, error) {
 	}
 	rewritten, err := sqlglot.Generate(tree, p.Dialect)
 	if err != nil {
+		// GenerateError.Error() names a node class. errors.Is(err, ErrGenerate)
+		// holds for a tree this dialect cannot write; a missing dialect is a
+		// different error. Either way %v is safe to show the caller.
 		return nil, denied("could not rewrite the statement for %s: %v", p.Dialect, err)
 	}
 	if err := verifyCeilingSurvived(rewritten, rowLimit, p); err != nil {
@@ -203,8 +206,7 @@ func parseRefusal(err error, p Policy) error {
 	}
 	// The construct rides along on the refusal so the caller can record it.
 	// Its LABEL, not its message: the label is a bounded vocabulary that
-	// counts, where the message carries the offending token and would make
-	// every refusal its own category.
+	// counts. Error() is the sentinel plus that label, so %v is safe to log.
 	refusal := &DeniedError{msg: fmt.Sprintf("could not parse as %s: %v", p.Dialect, err)}
 	var unsupported *sqlglot.UnsupportedError
 	if errors.As(err, &unsupported) {
@@ -243,14 +245,17 @@ func refuseForbiddenNodes(tree *sqlglot.Expression) error {
 			err = denied("%s is not allowed; this endpoint is read-only", strings.ToUpper(n.Class))
 			return false
 		}
-		// SELECT … INTO is a query that writes, and only the tree says so.
-		if n.Class == "Select" && n.Args["into"] != nil {
-			err = denied("SELECT … INTO writes a table; this endpoint is read-only")
-			return false
-		}
 		return true
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	// SELECT … INTO is still a Select. The library's IsWrite walks that slot
+	// (and Show.into_outfile) so this guard does not have to special-case it.
+	if sqlglot.IsWrite(tree) {
+		return denied("SELECT … INTO writes a table; this endpoint is read-only")
+	}
+	return nil
 }
 
 func refuseDeniedCalls(tree *sqlglot.Expression, p Policy) error {

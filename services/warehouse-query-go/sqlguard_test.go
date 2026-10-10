@@ -16,6 +16,8 @@ func TestAllowed(t *testing.T) {
 		"SELECT s.amount_usd FROM dbo.fct_sales s JOIN dbo.dim_product p ON p.product_id = s.product_id",
 		"SELECT * FROM contoso_warehouse.dbo.dim_country",
 		"SELECT a.country FROM dbo.dim_country a UNION SELECT b.country FROM dbo.dim_customer b",
+		"SELECT * FROM dbo.fct_sales WITH (NOLOCK) OPTION (RECOMPILE)",
+		"SELECT JSON_QUERY(a, 'lax $.b') FROM dbo.fct_sales",
 	} {
 		if v, err := Guard(sql, policy); err != nil {
 			t.Errorf("refused a permitted statement %q: %v", sql, err)
@@ -27,20 +29,21 @@ func TestAllowed(t *testing.T) {
 
 func TestRefused(t *testing.T) {
 	cases := map[string]string{
-		"DROP TABLE dbo.fct_sales":                  "read-only",
-		"SELECT 1; DROP TABLE dbo.fct_sales":        "one statement",
-		"DELETE FROM dbo.fct_sales":                 "read-only",
-		"UPDATE dbo.fct_sales SET amount_usd = 0":   "read-only",
-		"INSERT INTO dbo.fct_sales VALUES (1)":      "read-only",
-		"SELECT * INTO dbo.copy FROM dbo.fct_sales": "read-only",
-		"TRUNCATE TABLE dbo.fct_sales":              "read-only",
-		"EXEC xp_cmdshell 'dir'":                    "read-only",
-		"SELECT * FROM OPENROWSET('a','b','c')":     "not allowed",
-		"SELECT * FROM other.fct_sales":             "not queryable",
-		"SELECT * FROM otherdb.dbo.fct_sales":       "cross-database",
-		"SELECT * FROM fct_sales":                   "schema-qualified",
-		"SELECT 1":                                  "reads no table",
-		"":                                          "empty",
+		"DROP TABLE dbo.fct_sales":                                 "read-only",
+		"SELECT 1; DROP TABLE dbo.fct_sales":                       "one statement",
+		"DELETE FROM dbo.fct_sales":                                "read-only",
+		"UPDATE dbo.fct_sales SET amount_usd = 0":                  "read-only",
+		"INSERT INTO dbo.fct_sales VALUES (1)":                     "read-only",
+		"SELECT * INTO dbo.copy FROM dbo.fct_sales":                "read-only",
+		"SELECT 1 UNION SELECT * INTO dbo.copy FROM dbo.fct_sales": "read-only",
+		"TRUNCATE TABLE dbo.fct_sales":                             "read-only",
+		"EXEC xp_cmdshell 'dir'":                                   "read-only",
+		"SELECT * FROM OPENROWSET('a','b','c')":                    "not allowed",
+		"SELECT * FROM other.fct_sales":                            "not queryable",
+		"SELECT * FROM otherdb.dbo.fct_sales":                      "cross-database",
+		"SELECT * FROM fct_sales":                                  "schema-qualified",
+		"SELECT 1":                                                 "reads no table",
+		"":                                                         "empty",
 	}
 	for sql, want := range cases {
 		_, err := Guard(sql, policy)
