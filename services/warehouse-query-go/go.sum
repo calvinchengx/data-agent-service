@@ -16,6 +16,8 @@ github.com/calvinchengx/go-pduckdb v0.2.1-calvinchengx.1 h1:IU/ylmg+bQ70U1/ihk14
 github.com/calvinchengx/go-pduckdb v0.2.1-calvinchengx.1/go.mod h1:OYLhAuThEBloUXSSiUNFdY7/pI8iFumorlDXaV+Dxoo=
 github.com/calvinchengx/sqlglot-go v0.4.0 h1:47hFFo0/xtmFOXgDrWWy2KUWDYRczKND5FDNwad9rgg=
 github.com/calvinchengx/sqlglot-go v0.4.0/go.mod h1:pFjQ1WEhw4ZzjMYfRMsV2wOBhXrWrA8KeE7lZJGv7cg=
+github.com/calvinchengx/sqlglot-go v0.5.0 h1:TXQrpqogeyWJIydM/wyhH5fbqrbj2CWwkcrHnK+V6K0=
+github.com/calvinchengx/sqlglot-go v0.5.0/go.mod h1:pFjQ1WEhw4ZzjMYfRMsV2wOBhXrWrA8KeE7lZJGv7cg=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/ebitengine/purego v0.10.1 h1:dewVBCBT2GaMu1SrNTYxQhgQBethzfhiwvZiLGP/qyY=
 github.com/ebitengine/purego v0.10.1/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=

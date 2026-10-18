@@ -127,6 +127,14 @@ func Guard(sql string, p Policy) (*Verdict, error) {
 		return nil, parseRefusal(err, p)
 	}
 
+	// 1. one statement only. A batch arrives as a Block -- the port reads the
+	// second statement rather than erroring on it, so the rule is enforced
+	// here. A guard that let a Block through would hand the executor the whole
+	// batch.
+	if tree.Class == "Block" {
+		return nil, denied("exactly one statement is allowed")
+	}
+
 	// 2. the root must be a SELECT, or a CTE or set operation over SELECTs.
 	root := tree
 	if root.Class == "Subquery" {
