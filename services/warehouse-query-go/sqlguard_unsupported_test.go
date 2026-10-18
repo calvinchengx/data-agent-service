@@ -25,7 +25,9 @@ func TestAConstructTheGuardCannotReadIsNamed(t *testing.T) {
 	// NAMED refusal belongs here: a construct refused with an empty name is
 	// refused for what it is (see the test below), not for a gap in the port.
 	for _, tc := range []struct{ sql, want string }{
-		{"SELECT a FROM dbo.t CONNECT BY PRIOR a = b", "trailing tokens at CONNECT BY"},
+		// A PIVOT's IN list may name its values with a query; the port reads
+		// the values but not the subquery, and says where it stopped.
+		{"SELECT * FROM t PIVOT (SUM(a) FOR b IN (SELECT c FROM u))", "expression at SELECT"},
 		{"SELECT a[0][0].b.c[1].d FROM dbo.t", "trailing tokens"},
 		{"SELECT a FROM dbo.t MATCH_RECOGNIZE (ORDER BY a)", "identifier at ORDER BY"},
 	} {
