@@ -14,22 +14,36 @@ live in `sqlglot-go` itself — its `README.md` and `testdata/coverage.json`,
 which CI regenerates and diffs. The phase logs below quote the corpus (2,171,
 then 4,506 statements) that was current when each phase ran; they are history.
 
-## Status — 2026-10-11
+## Status — 2026-10-18
 
-- **Corpus**: **8,360 statements** across **23 dialects** (22 named + neutral),
+- **Corpus**: **10,871 statements** across **29 dialects** (28 named + neutral),
   all parsed to the *same tree* as the pinned reference (`ceb5111421e9`,
   sqlglot v30.17.0-64): `unparsed 0`, `mismatched 0`.
 - **Tokenizer**: complete — every statement lexes identically (type, text,
   position, offsets, comments); no gap tier.
-- **Generator**: all 8,360 written back **byte-identically**; none wrong, none
+- **Generator**: all 10,871 written back **byte-identically**; none wrong, none
   refused.
-- **Dialects landed (23)**: neutral, tsql, postgres, duckdb, databricks,
-  redshift, materialize, risingwave, fabric, presto, trino, dremio, mysql,
-  doris, starrocks, singlestore, hive, spark2, spark, sqlite, dax, oracle, snowflake.
-- **B5**: **11 named dialects remain** with no consumer; a transpiler's breadth
-  is not a product goal.
-- **B4 `simplify`**: 468 of the 486-pair reference contract folded exactly; the
+- **Dialects landed (28 + neutral)**: neutral, tsql, postgres, duckdb,
+  databricks, redshift, materialize, risingwave, fabric, presto, trino, dremio,
+  mysql, doris, starrocks, singlestore, hive, spark2, spark, sqlite, bigquery,
+  clickhouse, tableau, dune, druid, solr, dax, oracle, snowflake.
+- **B5**: **5 named dialects remain** with no consumer — `athena`, `drill`,
+  `exasol`, `prql`, `teradata`; a transpiler's breadth is not a product goal.
+  (`prql` is not SQL at all: it is a pipelined query language.)
+- **B4 `simplify`**: 491 of the 511-pair reference contract folded exactly; the
   remainder are partial folds (still semantically correct).
+- **Coverage floor**: every dialect is pinned at 100.0 in
+  `testdata/floor.json`, so a drop in any one of them fails the build.
+- **Regenerating needs Python 3.11 or newer**: the reference itself answers
+  differently below it, and `make doctor` refuses to pretend otherwise.
+- **Adopting a release is a check the harness cannot make.** Putting the guard
+  onto the current port — rather than the one it was written against — found
+  two things 10,871 statements of differential had not: a multi-statement
+  input now arrives as a `Block` rather than an error, so the one-statement
+  rule is enforced on the tree (the guard refuses it as "exactly one
+  statement"); and `CONNECT BY … PRIOR` was read only in Oracle, which the port
+  now reads in every dialect (sqlglot-go #43). The second was a real gap in the
+  port, and only a consumer could have found it.
 - **B1 `annotate_types` / B3 DDL-DML**: effectively done (the annotator's
   contract file now holds 155 cases; the gap report stands at 7 refusals).
 - **B6**: `jsonpath`, `anonymize`, `diff` done, 0 wrong; `lineage` ruled out
