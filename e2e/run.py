@@ -19,6 +19,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 
 from seed import common as c
 
@@ -29,6 +30,16 @@ PASSWORD = c.CFG.get("DAS_TEST_PASSWORD", "Password1!")
 
 PASS, FAIL = "\033[32mok\033[0m", "\033[31mFAIL\033[0m"
 _results: list[tuple[str, str, bool, str]] = []
+
+
+class WitnessFailure(Exception):
+    """A witness could not be taken at all, as opposed to failing.
+
+    The distinction matters: a FAILURE means the system under test is wrong,
+    and a WitnessFailure means the suite could not look. Raised rather than
+    asserted so a phase stops at the first one instead of comparing against a
+    body it never got.
+    """
 
 
 def check(phase: str, name: str, ok: bool, detail: str = "") -> bool:
@@ -111,22 +122,74 @@ def user_token(upn: str) -> str:
         raise SystemExit(f"could not sign in as {upn}: {e}") from None
 
 
-def rpc(method: str, params: dict, token: str | None, path="/warehouse/mcp", extra=None, mid=1):
+def rpc(
+    method: str,
+    params: dict,
+    token: str | None,
+    path="/warehouse/mcp",
+    extra=None,
+    mid=1,
+    attempts=3,
+):
+    """One JSON-RPC call, retried when the answer is not JSON-RPC at all.
+
+    A body that is not JSON did not come from the handler -- the gateway
+    refused or proxied it -- so a retry cannot run a tool the first call never
+    reached. That is worth being explicit about, because it is NOT true in
+    general: a call that reached the handler and lost its answer on the way
+    back would be run twice by a retry. This one is only ever retried when
+    there is no JSON-RPC response to have lost.
+
+    Found the hard way. `list_sources` returned an empty body once, mid-run,
+    with the rate limiter a thousand times its ceiling -- so not a throttle --
+    and the suite died on `json.loads` with a traceback that named nothing.
+    """
     h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
     if token:
         h["Authorization"] = "Bearer " + token
     h.update(extra or {})
-    st, _, b = c.http(
-        "POST",
-        GW + path,
-        headers=h,
-        json_body={"jsonrpc": "2.0", "id": mid, "method": method, "params": params},
-    )
+    payload = {"jsonrpc": "2.0", "id": mid, "method": method, "params": params}
+    st, b = 0, ""
+    for attempt in range(attempts):
+        st, _, b = c.http("POST", GW + path, headers=h, json_body=payload)
+        if _is_jsonrpc(b):
+            return st, b
+        if attempt + 1 < attempts:
+            time.sleep(1.0 * (attempt + 1))
     return st, b
 
 
+def _is_jsonrpc(body: str | None) -> bool:
+    """Whether a body is a JSON-RPC reply rather than something in its way."""
+    if not body or not body.strip():
+        return False
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(parsed, dict) and ("result" in parsed or "error" in parsed)
+
+
 def tool_result(body: str) -> tuple[bool | None, str]:
-    r = json.loads(body).get("result", {})
+    """The (isError, text) an MCP client would see.
+
+    A body that is not JSON is a FAILURE TO WITNESS, not a crash. The gateway
+    throttles a caller that exceeds its allowance, and a throttled response is
+    a plain-text 429 rather than a JSON-RPC body -- so `json.loads` raised
+    JSONDecodeError from inside whichever phase happened to be running, and
+    the run died with a traceback that said nothing about the cause. A
+    witness suite that cannot tell "the gateway refused me" from "the code is
+    wrong" is a suite whose failures teach nobody anything.
+    """
+    try:
+        r = json.loads(body).get("result", {})
+    except json.JSONDecodeError:
+        head = (body or "").strip().splitlines()
+        first = head[0][:120] if head else "an empty body"
+        raise WitnessFailure(
+            f"the gateway answered with no JSON ({first}) — a throttled or "
+            "failed call, not a witness"
+        ) from None
     content = r.get("content") or []
     return r.get("isError"), (content[0].get("text", "") if content else json.dumps(r))
 
@@ -3253,7 +3316,14 @@ if __name__ == "__main__":
     try:
         for name in a.only or sorted(PHASES):
             print(f"\n{name}")
-            PHASES[name]()
+            try:
+                PHASES[name]()
+            except WitnessFailure as e:
+                # A witness that could not be TAKEN is not one that FAILED:
+                # the system was never observed. Record it by the phase's own
+                # name and carry on, because the remaining phases still say
+                # something and a traceback says nothing about where.
+                check(name, "the phase could not be witnessed", False, str(e))
     finally:
         if full_run:
             set_rate_limit(throttle)
