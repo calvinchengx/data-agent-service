@@ -22,6 +22,8 @@ github.com/calvinchengx/sqlglot-go v0.5.1 h1:yVnqc7Dfyq7RyuWfgtjoALecW99rNPv7luU
 github.com/calvinchengx/sqlglot-go v0.5.1/go.mod h1:pFjQ1WEhw4ZzjMYfRMsV2wOBhXrWrA8KeE7lZJGv7cg=
 github.com/calvinchengx/sqlglot-go v0.6.0 h1:1sIFPtsBJpng3WRFctEOHp3e0K/D1taCb1s2dauodCQ=
 github.com/calvinchengx/sqlglot-go v0.6.0/go.mod h1:pFjQ1WEhw4ZzjMYfRMsV2wOBhXrWrA8KeE7lZJGv7cg=
+github.com/calvinchengx/sqlglot-go v0.7.0 h1:eOUwylUR0LAQVAKJq2Y4yvz70Ujk0W/kvrnSOdTrfYI=
+github.com/calvinchengx/sqlglot-go v0.7.0/go.mod h1:pFjQ1WEhw4ZzjMYfRMsV2wOBhXrWrA8KeE7lZJGv7cg=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/ebitengine/purego v0.10.1 h1:dewVBCBT2GaMu1SrNTYxQhgQBethzfhiwvZiLGP/qyY=
 github.com/ebitengine/purego v0.10.1/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
