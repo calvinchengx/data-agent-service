@@ -14,22 +14,28 @@ live in `sqlglot-go` itself — its `README.md` and `testdata/coverage.json`,
 which CI regenerates and diffs. The phase logs below quote the corpus (2,171,
 then 4,506 statements) that was current when each phase ran; they are history.
 
-## Status — 2026-10-18
+## Status — 2026-10-24
 
-- **Corpus**: **10,871 statements** across **29 dialects** (28 named + neutral),
+**Every dialect the reference has.** The last four landed after this log's
+previous status: teradata, exasol, athena and prql.
+
+- **Corpus**: **11,335 statements** across **34 entries** (33 named + neutral),
   all parsed to the *same tree* as the pinned reference (`ceb5111421e9`,
   sqlglot v30.17.0-64): `unparsed 0`, `mismatched 0`.
 - **Tokenizer**: complete — every statement lexes identically (type, text,
   position, offsets, comments); no gap tier.
-- **Generator**: all 10,871 written back **byte-identically**; none wrong, none
+- **Generator**: all 11,335 written back **byte-identically**; none wrong, none
   refused.
-- **Dialects landed (28 + neutral)**: neutral, tsql, postgres, duckdb,
+- **Dialects landed (33 + neutral)**: neutral, tsql, postgres, duckdb,
   databricks, redshift, materialize, risingwave, fabric, presto, trino, dremio,
   mysql, doris, starrocks, singlestore, hive, spark2, spark, sqlite, bigquery,
-  clickhouse, tableau, dune, druid, solr, dax, oracle, snowflake.
-- **B5**: **5 named dialects remain** with no consumer — `athena`, `drill`,
-  `exasol`, `prql`, `teradata`; a transpiler's breadth is not a product goal.
-  (`prql` is not SQL at all: it is a pipelined query language.)
+  clickhouse, tableau, dune, druid, solr, dax, oracle, snowflake, drill,
+  teradata, exasol, athena, prql.
+- **B5**: **nothing remains.** `teradata` and `exasol` landed as ordinary
+  dialects; `athena` needed a router (its tokenizer decides Hive or Trino per
+  statement); `prql` is not SQL at all — a pipeline language — and its parser
+  tables are the port's one hand-derived exception, because the probe derives
+  tables by asking SQL questions it cannot answer.
 - **B4 `simplify`**: 491 of the 511-pair reference contract folded exactly; the
   remainder are partial folds (still semantically correct).
 - **Coverage floor**: every dialect is pinned at 100.0 in
