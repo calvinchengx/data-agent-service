@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+from typing import Any
 
 import pytest
 
@@ -336,7 +337,10 @@ def test_a_stored_credential_is_resolved_and_used_as_the_bearer():
 # same four outcomes for a warehouse, a database and an API.
 @pytest.mark.parametrize("kind", ["fabric", "postgres", "databricks", "rest"])
 def test_the_token_decision_does_not_depend_on_the_engine(kind):
-    extra = {"surface": "http", "spec": "x"} if kind == "rest" else {}
+    # Annotated because **extra is UNPACKED into Source, and a dict inferred
+    # as dict[str, str] cannot soundly fill fields that are not strings. `ty`
+    # caught it at 0.0.87; the values were always right, the type was not.
+    extra: dict[str, Any] = {"surface": "http", "spec": "x"} if kind == "rest" else {}
     stored = sources_mod.Source(
         name="s", kind=kind, authz_tier="service", credential="keyvault:c", **extra
     )
