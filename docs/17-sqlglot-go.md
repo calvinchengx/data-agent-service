@@ -14,18 +14,33 @@ live in `sqlglot-go` itself — its `README.md` and `testdata/coverage.json`,
 which CI regenerates and diffs. The phase logs below quote the corpus (2,171,
 then 4,506 statements) that was current when each phase ran; they are history.
 
-## Status — 2026-10-24
+## Status — 2026-10-26
 
-**Every dialect the reference has.** The last four landed after this log's
-previous status: teradata, exasol, athena and prql.
+**The reference moved, and the port moved with it.** This status replaces the
+one dated 2026-10-24, which measured the port against `ceb5111421e9`
+(sqlglot v30.17.0-64). The pinned reference is now **`78b24a744adb`**
+(sqlglot v30.24.0-53), and the port is released as **v0.8.0** — the version
+this service consumes.
 
-- **Corpus**: **11,335 statements** across **34 entries** (33 named + neutral),
-  all parsed to the *same tree* as the pinned reference (`ceb5111421e9`,
-  sqlglot v30.17.0-64): `unparsed 0`, `mismatched 0`.
+- **Corpus**: **12,036 statements** across **34 entries** (33 named + neutral),
+  all parsed to the *same tree* as the reference: `unparsed 0`,
+  `mismatched 0`, `refused 0`.
 - **Tokenizer**: complete — every statement lexes identically (type, text,
   position, offsets, comments); no gap tier.
-- **Generator**: all 11,335 written back **byte-identically**; none wrong, none
-  refused.
+- **Generator**: all 12,036 written back **byte-identically**; none wrong, none
+  refused. Every dialect is at 100.0 in `testdata/floor.json`, so a drop in
+  any one of them fails the build.
+- **The re-pin was not a version bump.** The reference had replaced
+  `escape_follow_chars` with an explicit escape model, so the port needed
+  per-dialect string, byte-string and identifier escapes, `NUMERIC_ESCAPES`
+  (base, digits, maximum), `DROP_UNKNOWN_ESCAPES`, the bytes flags,
+  `LONE_SURROGATE_REPLACEMENT` and the write-side escape tables — and the
+  generator decisions that came with them: **QUALIFY rewritten** where a
+  dialect has none (`transforms.eliminate_qualify`), **FILTER folded into the
+  aggregate** where a dialect has none (`no_filter_sql`), and **original call
+  names kept** exactly where the dialect keeps them. Snowflake's and Oracle's
+  tokenizer configurations are generated now rather than copied from the
+  neutral config.
 - **Dialects landed (33 + neutral)**: neutral, tsql, postgres, duckdb,
   databricks, redshift, materialize, risingwave, fabric, presto, trino, dremio,
   mysql, doris, starrocks, singlestore, hive, spark2, spark, sqlite, bigquery,
@@ -36,10 +51,11 @@ previous status: teradata, exasol, athena and prql.
   statement); `prql` is not SQL at all — a pipeline language — and its parser
   tables are the port's one hand-derived exception, because the probe derives
   tables by asking SQL questions it cannot answer.
-- **B4 `simplify`**: 491 of the 511-pair reference contract folded exactly; the
+- **B4 `simplify`**: 543 of the 616-pair reference contract folded exactly; the
   remainder are partial folds (still semantically correct).
-- **Coverage floor**: every dialect is pinned at 100.0 in
-  `testdata/floor.json`, so a drop in any one of them fails the build.
+- **Coverage floor**: 95% over `go test ./...` under `-coverpkg`, held there by
+  round-trip tables for the re-pin's own tails and unit tests for the
+  tokenizer's numeric escapes and line bookkeeping.
 - **Regenerating needs Python 3.11 or newer**: the reference itself answers
   differently below it, and `make doctor` refuses to pretend otherwise.
 - **Adopting a release is a check the harness cannot make.** Putting the guard
@@ -49,17 +65,25 @@ previous status: teradata, exasol, athena and prql.
   rule is enforced on the tree (the guard refuses it as "exactly one
   statement"); and `CONNECT BY … PRIOR` was read only in Oracle, which the port
   now reads in every dialect (sqlglot-go #43). The second was a real gap in the
-  port, and only a consumer could have found it.
-- **B1 `annotate_types` / B3 DDL-DML**: effectively done (the annotator's
-  contract file now holds 155 cases; the gap report stands at 7 refusals).
-- **B6**: `jsonpath`, `anonymize`, `diff` done, 0 wrong; `lineage` ruled out
-  (needs the unbuilt qualify/scope); `executor`/`planner` deprioritized.
+  port, and only a consumer could have found it. The move to v0.8.0 is the
+  same check again, and the guard's own tests pass unchanged on it.
+- **B1 `annotate_types` / B3 DDL-DML**: effectively done (377 of the
+  reference's 453 annotator cases exact, **0 wrong**; the rest are "no answer"
+  where a column's type needs a schema this port has none of).
+- **B6**: `jsonpath` (526/526), `anonymize` (12,036/12,036) and `diff`
+  (616/616) done, 0 wrong; `lineage` ruled out (needs the unbuilt
+  qualify/scope); `executor`/`planner` deprioritized.
 - **Execution oracle**: DuckDB + Postgres; floors 385 / 83 comparable; 15 known
   reference-reproduced divergences (19 entries in `docs/upstream-issues.md`).
 - **Consumer corpus**: every category complete —
   `must_name_the_statement` **13/13**, `must_parse` **105/105**,
   `must_parse_to_refuse` **29/29**. That is the switchover condition, and the
   executor has switched over.
+
+Two gaps the corpus does not reach are recorded rather than hidden: Oracle
+`TO_CHAR` cannot be generated, and a `CAST(x AS FORMAT '…')` writes without the
+`UNKNOWN` type the reference spells. Neither appears in the corpus, so neither
+is a differential failure; both are the next things to close.
 
 The port lives in its own repository; the executor is its first consumer.
 
