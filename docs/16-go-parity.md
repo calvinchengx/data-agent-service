@@ -108,10 +108,12 @@ capped `UNION` was written as `… LIMIT 500`, which T-SQL does not accept and
 which sqlglot wraps in a `SELECT TOP 500 * FROM (…)`, and the schema allow-list
 was rendered differently in refusal messages.
 
-**Remaining:** the statement list itself still lives in
-`tests/test_sqlguard.py` and is read out of it by the generator. Moving the
-list into the JSON, so one file feeds `tests/test_sqlguard.py`,
-`sqlguard_test.go` and `services/conformance/run.py`, is the other half.
+**And the other half is done.** The statement list no longer lives in
+`tests/test_sqlguard.py`: the JSON is the only copy, and three suites read it —
+`tests/test_sqlguard.py`, the Go guard's `guard_parity_test.go`, and
+`services/conformance/run.py` over HTTP. What the Python test still writes by
+hand is the behaviour a corpus cannot express, like which of two row ceilings
+wins, or how an ambiguous column name fails closed.
 
 Move the corpus to **one data file** — `services/contract/guard_corpus.json` —
 with each case naming the dialect, the statement, and whether it must be
