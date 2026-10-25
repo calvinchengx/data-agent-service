@@ -189,10 +189,11 @@ generator refuses rather than emit something close.
 **Tier 1 is complete in the port, and the executor has switched over.**
 `services/warehouse-query-go/sqlguard.go` walks a tree instead of scanning
 tokens (650 lines → 446), and both guards are held to one recorded verdict —
-see Phase B in `docs/16-go-parity.md`. What remains of the parity plan is Phase
-C (differential fuzzing), Phase D (the Go DuckDB, HTTP and Databricks
-adapters), and Phase E (running the contract against both executors on every
-build), none of which is port work.
+see Phase B in `docs/16-go-parity.md`. Every phase of the parity plan is now
+done: A (the guard fails closed by construction), B (one shared corpus, three
+suites), C (the fuzzer for what nobody wrote down), D1-D3 (the Go DuckDB, HTTP
+and Databricks adapters, the last still short of its witness) and E (the
+contract run against both executors on every build). None of it is port work.
 
 ### Tier 1.5 — properties over the grammar already ported
 
