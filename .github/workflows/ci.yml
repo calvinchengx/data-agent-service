@@ -29,7 +29,7 @@ jobs:
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The classifier diffs against a base commit, which a shallow clone
           # does not have.
@@ -69,10 +69,10 @@ jobs:
       # Tags, because check_version reads the newest one and REFUSES to pass a
       # checkout that has none -- a shallow clone quietly skipping the check is
       # the failure it exists to prevent.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           enable-cache: true
       - name: install dependencies
@@ -156,8 +156,8 @@ jobs:
       run:
         working-directory: services/warehouse-query-go
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         id: setup
         with:
           go-version-file: services/warehouse-query-go/go.mod
@@ -181,7 +181,7 @@ jobs:
           go tool cover -func=cover.out | tail -1
           pct=$(go tool cover -func=cover.out | tail -1 | awk '{gsub(/%/,"",$NF); print $NF}')
           awk -v p="$pct" 'BEGIN { if (p+0 < 90) { printf "go coverage %s%% is below the 90%% floor\n", p; exit 1 } }'
-      - uses: golangci/golangci-lint-action@v9
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         with:
           version: v2.14.0
@@ -225,12 +225,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: publisher-go/go.mod
           cache-dependency-path: publisher-go/go.mod
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       # The recorded artefacts are only worth anything if they still describe
       # the Python generator, so regenerate and diff first -- a change to
       # model.py or report.py that moves a byte fails here rather than
@@ -275,8 +275,8 @@ jobs:
       run:
         working-directory: services/warehouse-query-go
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: services/warehouse-query-go/go.mod
           cache-dependency-path: services/warehouse-query-go/go.sum
@@ -302,7 +302,7 @@ jobs:
           fi
           grep -c '^--- PASS' /tmp/duckdb.log
       - run: go test -tags duckdb ./...
-      - uses: golangci/golangci-lint-action@v9
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
           working-directory: services/warehouse-query-go
@@ -315,12 +315,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # One definition covers the resources AND the app registration, which
       # ARM cannot express. All three steps are offline -- `init
       # -backend=false` only fetches providers, and nothing here contacts Azure
       # or touches state.
-      - uses: hashicorp/setup-terraform@v4
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.14.0
           terraform_wrapper: false
@@ -340,7 +340,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: free disk for the images
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
@@ -377,7 +377,7 @@ jobs:
       - name: the manifest this run would have written
         if: failure()
         run: make witnesses-manifest || true
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: witnesses-manifest
