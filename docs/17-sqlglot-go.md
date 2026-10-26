@@ -19,8 +19,11 @@ then 4,506 statements) that was current when each phase ran; they are history.
 **The reference moved, and the port moved with it.** This status replaces the
 one dated 2026-10-24, which measured the port against `ceb5111421e9`
 (sqlglot v30.17.0-64). The pinned reference is now **`78b24a744adb`**
-(sqlglot v30.24.0-53), and the port is released as **v0.8.0** — the version
-this service consumes.
+(sqlglot v30.24.0-53), and the port is released as **v0.8.1** — the version
+this service consumes. v0.8.1 closes two writer gaps the corpus cannot see:
+Oracle's `TO_CHAR` could not be generated at all, so the guard refused any
+Oracle statement that used it, and a `CAST(x AS FORMAT '…')` wrote without the
+`UNKNOWN` type the reference spells.
 
 - **Corpus**: **12,036 statements** across **34 entries** (33 named + neutral),
   all parsed to the *same tree* as the reference: `unparsed 0`,
@@ -80,10 +83,10 @@ this service consumes.
   `must_parse_to_refuse` **29/29**. That is the switchover condition, and the
   executor has switched over.
 
-Two gaps the corpus does not reach are recorded rather than hidden: Oracle
-`TO_CHAR` cannot be generated, and a `CAST(x AS FORMAT '…')` writes without the
-`UNKNOWN` type the reference spells. Neither appears in the corpus, so neither
-is a differential failure; both are the next things to close.
+The two gaps the corpus does not reach — Oracle `TO_CHAR`, and the `UNKNOWN`
+type on a `CAST(x AS FORMAT '…')` — are closed in v0.8.1. Neither ever
+appeared in the corpus, so neither was a differential failure, which is
+exactly why they survived: a saturated corpus cannot find them.
 
 The port lives in its own repository; the executor is its first consumer.
 
