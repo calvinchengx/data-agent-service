@@ -19,11 +19,17 @@ then 4,506 statements) that was current when each phase ran; they are history.
 **The reference moved, and the port moved with it.** This status replaces the
 one dated 2026-10-24, which measured the port against `ceb5111421e9`
 (sqlglot v30.17.0-64). The pinned reference is now **`78b24a744adb`**
-(sqlglot v30.24.0-53), and the port is released as **v0.8.1** — the version
-this service consumes. v0.8.1 closes two writer gaps the corpus cannot see:
-Oracle's `TO_CHAR` could not be generated at all, so the guard refused any
+(sqlglot v30.24.0-53), and the port is released as **v0.8.2** — the version
+this service consumes. v0.8.1 closed two writer gaps the corpus cannot see
+(Oracle's `TO_CHAR` could not be generated at all, so the guard refused any
 Oracle statement that used it, and a `CAST(x AS FORMAT '…')` wrote without the
-`UNKNOWN` type the reference spells.
+`UNKNOWN` type the reference spells). v0.8.2 brings the optimizer to the whole
+of sqlglot's own contract — all 616 pairs fold exactly, up from 543 — which
+first meant removing four folds that went further than the reference and were
+wrong: a contradiction over a column is NULL rather than FALSE, an outer join
+does not become a cross join when its `ON` is always true, a `CASE`'s later
+always-true branch does not discard the live ones before it, and a calendar
+interval only moves across a comparison where the move is exact.
 
 - **Corpus**: **12,036 statements** across **34 entries** (33 named + neutral),
   all parsed to the *same tree* as the reference: `unparsed 0`,
@@ -54,8 +60,12 @@ Oracle statement that used it, and a `CAST(x AS FORMAT '…')` wrote without the
   statement); `prql` is not SQL at all — a pipeline language — and its parser
   tables are the port's one hand-derived exception, because the probe derives
   tables by asking SQL questions it cannot answer.
-- **B4 `simplify`**: 543 of the 616-pair reference contract folded exactly; the
-  remainder are partial folds (still semantically correct).
+- **B4 `simplify`**: **all 616 pairs of the reference contract fold exactly**,
+  and the port's output is the reference's string for string. Reaching that
+  meant taking four folds OUT that had gone further than the reference and
+  were wrong — the contract could not see them, because it counts exact
+  matches and the execution oracle never sees a bare predicate over an
+  undefined column.
 - **Coverage floor**: 95% over `go test ./...` under `-coverpkg`, held there by
   round-trip tables for the re-pin's own tails and unit tests for the
   tokenizer's numeric escapes and line bookkeeping.
