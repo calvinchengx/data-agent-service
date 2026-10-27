@@ -18,8 +18,8 @@ then 4,506 statements) that was current when each phase ran; they are history.
 
 **The reference moved, and the port moved with it.** This status replaces the
 one dated 2026-10-24, which measured the port against `ceb5111421e9`
-(sqlglot v30.17.0-64). The pinned reference is now **`78b24a744adb`**
-(sqlglot v30.24.0-53), and the port is released as **v0.8.2** — the version
+(sqlglot v30.17.0-64). The pinned reference is now **`feb0e08ab`**
+(sqlglot v30.25.0-6), and the port is released as **v0.9.0** — the version
 this service consumes. v0.8.1 closed two writer gaps the corpus cannot see
 (Oracle's `TO_CHAR` could not be generated at all, so the guard refused any
 Oracle statement that used it, and a `CAST(x AS FORMAT '…')` wrote without the
@@ -31,12 +31,18 @@ does not become a cross join when its `ON` is always true, a `CASE`'s later
 always-true branch does not discard the live ones before it, and a calendar
 interval only moves across a comparison where the move is exact.
 
-- **Corpus**: **12,036 statements** across **34 entries** (33 named + neutral),
+- **v0.9.0 moved the pin on again**, from `78b24a744` to `feb0e08ab`
+  (sqlglot v30.25.0-6), and took the dialect changes with it: PostgreSQL's key
+  constraints carry the index vocabulary they always read, DuckDB keeps a
+  quoted variable's quotes, `MAKE_INTERVAL` exists only in PostgreSQL and the
+  others build an INTERVAL out of it, and text that goes inside quotes is
+  escaped rather than pasted.
+- **Corpus**: **12,085 statements** across **34 entries** (33 named + neutral),
   all parsed to the *same tree* as the reference: `unparsed 0`,
   `mismatched 0`, `refused 0`.
 - **Tokenizer**: complete — every statement lexes identically (type, text,
   position, offsets, comments); no gap tier.
-- **Generator**: all 12,036 written back **byte-identically**; none wrong, none
+- **Generator**: all 12,085 written back **byte-identically**; none wrong, none
   refused. Every dialect is at 100.0 in `testdata/floor.json`, so a drop in
   any one of them fails the build.
 - **The re-pin was not a version bump.** The reference had replaced
@@ -83,7 +89,7 @@ interval only moves across a comparison where the move is exact.
 - **B1 `annotate_types` / B3 DDL-DML**: effectively done (377 of the
   reference's 453 annotator cases exact, **0 wrong**; the rest are "no answer"
   where a column's type needs a schema this port has none of).
-- **B6**: `jsonpath` (526/526), `anonymize` (12,036/12,036) and `diff`
+- **B6**: `jsonpath` (526/526), `anonymize` (12,085/12,085) and `diff`
   (616/616) done, 0 wrong; `lineage` ruled out (needs the unbuilt
   qualify/scope); `executor`/`planner` deprioritized.
 - **Execution oracle**: DuckDB + Postgres; floors 385 / 83 comparable; 15 known
